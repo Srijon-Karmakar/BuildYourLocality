@@ -11,3 +11,22 @@ export const viewState = {
   pitch: 0.85,
   dist: 70,
 };
+
+/**
+ * Input from on-screen controls (touch joystick and buttons), merged with the keyboard by
+ * the player controller. Plain mutable object so per-frame reads don't cause React renders.
+ */
+export const virtualInput = {
+  /** Joystick axes, -1..1: moveX strafes right, moveY moves forward. */
+  moveX: 0,
+  moveY: 0,
+  jump: false,
+  down: false,
+};
+
+/**
+ * On-screen camera buttons held in build mode, using KeyboardEvent.code-style names so the
+ * builder camera treats them like keys (KeyQ/KeyE turn) plus Zoom/Tilt actions.
+ */
+export const virtualKeys = new Set<string>();
+

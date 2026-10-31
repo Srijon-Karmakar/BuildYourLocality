@@ -4,7 +4,7 @@ import type { RefObject } from 'react';
 import * as THREE from 'three';
 import { useEffect } from 'react';
 import { useGameStore } from '../../state/useGameStore';
-import { viewState } from '../viewState';
+import { viewState, virtualInput } from '../viewState';
 import { useKeyboardControls } from './useKeyboardControls';
 
 const RADIUS = 0.4;
@@ -67,6 +67,12 @@ export function PlayerController({ start = [0, 2, 0], bodyRef }: PlayerControlle
     if (k.back) wishDir.sub(forward);
     if (k.right) wishDir.add(right);
     if (k.left) wishDir.sub(right);
+    // On-screen joystick (touch): small deflections are ignored so the thumb can rest on it.
+    if (Math.hypot(virtualInput.moveX, virtualInput.moveY) > 0.2) {
+      wishDir.addScaledVector(forward, virtualInput.moveY).addScaledVector(right, virtualInput.moveX);
+    }
+    const jump = k.jump || virtualInput.jump;
+    const descend = k.down || virtualInput.down;
     const flying = useGameStore.getState().flying;
     if (wishDir.lengthSq() > 0) wishDir.normalize().multiplyScalar(flying ? FLY_SPEED : WALK_SPEED);
     body.setGravityScale(flying ? 0 : 1, true);
@@ -84,13 +90,13 @@ export function PlayerController({ start = [0, 2, 0], bodyRef }: PlayerControlle
 
     if (flying) {
       // Vertical velocity comes straight from Space/Shift; releasing both hovers in place.
-      const vy = (k.jump ? FLY_SPEED : 0) - (k.down ? FLY_SPEED : 0);
+      const vy = (jump ? FLY_SPEED : 0) - (descend ? FLY_SPEED : 0);
       body.setLinvel({ x: wishDir.x, y: vy, z: wishDir.z }, true);
       camera.position.set(translation.x, translation.y + EYE_OFFSET, translation.z);
       return;
     }
 
-    const nextY = k.jump && grounded ? JUMP_SPEED : linvel.y;
+    const nextY = jump && grounded ? JUMP_SPEED : linvel.y;
     body.setLinvel({ x: wishDir.x, y: nextY, z: wishDir.z }, true);
 
     camera.position.set(translation.x, translation.y + EYE_OFFSET, translation.z);

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { PAINTERS, fbm, hash2, lerp, mix, tileNoise, wrap } from '../engine/voxel/textures';
 import type { GraphicsSettings } from '../state/useGameStore';
 import type { FacadeId, RoofId, WindowStyle } from './catalog';
+import { getLedMaterial } from './ledTextures';
 
 type Quality = GraphicsSettings['textureQuality'];
 type RGB = [number, number, number];
@@ -128,6 +129,10 @@ interface FacadePaint {
   /** Glass walls are all window, so they skip the punched-window pass. */
   curtain?: boolean;
   roughness: number;
+  /** 0-1; mirror and metal cladding are mostly metallic. */
+  metalness?: number;
+  /** Reflects the sky environment strongly (mirror, glass, ceramic, metal). */
+  reflective?: boolean;
 }
 
 /** Brick bond painter: running bond, per-brick tone, recessed mortar. */
@@ -222,6 +227,87 @@ const FACADE_PAINT: Record<FacadeId, FacadePaint> = {
     },
     windowFrame: '#20262c',
     roughness: 0.34,
+    metalness: 0.75,
+    reflective: true,
+  },
+  mirror: {
+    wall: (x, y) => {
+      // Full mirror curtain wall: a faint sky-to-ground gradient per pane and hairline joints.
+      const joint = x % 80 < 1.2 || y % 64 < 1.2;
+      const t = (y % 64) / 64;
+      const pane = mix([214, 226, 238], [150, 172, 196], t);
+      const n = 0.96 + 0.06 * tileNoise(x / FW, y / FH, 4, 4, 51);
+      if (joint) return { rgb: [40, 46, 54], height: 0.8, rough: 0.4 };
+      return { rgb: [pane[0] * n, pane[1] * n, pane[2] * n], height: 0.4, rough: 0.02 };
+    },
+    windowFrame: '#20262c',
+    curtain: true,
+    roughness: 0.02,
+    metalness: 0.95,
+    reflective: true,
+  },
+  ceramic: {
+    wall: (x, y) => {
+      const joint = x % 80 < 1.5 || y % 64 < 1.5;
+      const n = fbm(x / FW, y / FH, 5, 3, 61);
+      const v = 0.96 + n * 0.06;
+      if (joint) return { rgb: [150, 154, 158], height: 0.1, rough: 0.7 };
+      return { rgb: [232 * v, 234 * v, 235 * v], height: 0.7, rough: 0.28 };
+    },
+    windowFrame: '#252a30',
+    roughness: 0.3,
+    reflective: true,
+  },
+  corten: {
+    wall: (x, y) => {
+      const seam = x % 40 < 1.4;
+      const patina = fbm(x / FW, y / FH, 6, 4, 71);
+      const streak = tileNoise(x / FW, y / FH, 40, 3, 72);
+      const v = 0.75 + patina * 0.5;
+      if (seam) return { rgb: [60, 34, 22], height: 0.1 };
+      return { rgb: [140 * v * (0.9 + streak * 0.2), 76 * v, 42 * v], height: 0.5 + patina * 0.3 };
+    },
+    windowFrame: '#1e2226',
+    roughness: 0.82,
+  },
+  slats: {
+    wall: (x, y) => {
+      const slat = Math.floor(x / 8);
+      const gap = x % 8 < 2;
+      const tone = 0.8 + 0.35 * hash2(slat, 0, 81);
+      const grain = tileNoise(x / FW, y / FH, 6, 60, 82);
+      const v = tone * (0.9 + grain * 0.2);
+      if (gap) return { rgb: [34, 26, 20], height: 0.05 };
+      return { rgb: [190 * v, 136 * v, 82 * v], height: 0.75 + grain * 0.1 };
+    },
+    windowFrame: '#1f1a16',
+    roughness: 0.68,
+  },
+  stone: {
+    wall: (x, y) => {
+      const row = Math.floor(y / 32);
+      const off = (row % 2) * 40;
+      const bx = (x + off) % 80;
+      const joint = y % 32 < 1.4 || bx < 1.4;
+      const tone = 0.88 + 0.22 * hash2(row, Math.floor(((x + off) % FW) / 80), 91);
+      const vein = Math.abs(2 * fbm(x / FW, y / FH, 5, 4, 92) - 1);
+      const v = tone * (0.85 + 0.3 * vein);
+      if (joint) return { rgb: [70, 72, 76], height: 0.1 };
+      return { rgb: [138 * v, 141 * v, 146 * v], height: 0.6 + vein * 0.2, rough: 0.55 };
+    },
+    windowFrame: '#23282e',
+    roughness: 0.6,
+  },
+  // Rendered with the animated LED material instead (see getFacadeMaterial); this is
+  // only the unlit panel pattern.
+  led: {
+    wall: (x, y) => {
+      const grid = x % 20 < 1 || y % 16 < 1;
+      return { rgb: grid ? [10, 12, 18] : [28, 32, 44], height: grid ? 0.2 : 0.7 };
+    },
+    windowFrame: '#0b0d12',
+    curtain: true,
+    roughness: 0.4,
   },
 };
 
@@ -274,6 +360,25 @@ function windowRects(style: WindowStyle, frame: string): Rect[] {
 }
 
 const facadeCache = new Map<string, THREE.MeshStandardMaterial>();
+
+/** Sky reflection map shared by glossy materials; set once the renderer exists. */
+let reflectionEnv: THREE.Texture | null = null;
+const reflectiveMaterials = new Set<THREE.MeshStandardMaterial>();
+
+/** Called by the scene when the sky environment is ready (and cleared on teardown). */
+export function setReflectionEnvironment(texture: THREE.Texture | null) {
+  reflectionEnv = texture;
+  for (const m of reflectiveMaterials) {
+    m.envMap = texture;
+    m.needsUpdate = true;
+  }
+}
+
+function registerReflective(material: THREE.MeshStandardMaterial, intensity: number) {
+  material.envMap = reflectionEnv;
+  material.envMapIntensity = intensity;
+  reflectiveMaterials.add(material);
+}
 const facadeTextureCache = new Map<
   string,
   { map: THREE.CanvasTexture; normalMap: THREE.CanvasTexture; roughnessMap: THREE.CanvasTexture }
@@ -292,6 +397,13 @@ export function getFacadeMaterial(
   const matKey = `${id}|${windows}|${tint}|${quality}`;
   const cached = facadeCache.get(matKey);
   if (cached) return cached;
+
+  if (id === 'led') {
+    // Media wall: the tint picks the LED colour (white = cyan).
+    const led = getLedMaterial('wave', tint === '#ffffff' ? '#35e0ff' : tint, 1.5);
+    facadeCache.set(matKey, led);
+    return led;
+  }
 
   const paint = FACADE_PAINT[id];
   const style: WindowStyle = paint.curtain ? 'none' : windows;
@@ -361,9 +473,10 @@ export function getFacadeMaterial(
     ...textures,
     color: tint,
     roughness: 1, // the roughness map carries the real values
-    metalness: id === 'metal' ? 0.75 : id === 'glass' ? 0.25 : 0,
-    envMapIntensity: id === 'glass' || id === 'metal' ? 1.4 : 0.6,
+    metalness: paint.metalness ?? (id === 'glass' ? 0.25 : 0),
+    envMapIntensity: 0.6,
   });
+  if (paint.reflective || id === 'glass') registerReflective(material, id === 'mirror' ? 1.5 : id === 'glass' ? 1.2 : 0.9);
   facadeCache.set(matKey, material);
   return material;
 }
@@ -376,6 +489,9 @@ const ROOF_BASE: Record<RoofId, RGB> = {
   terracotta: [180, 85, 58],
   green: [79, 122, 74],
   gravel: [138, 138, 133],
+  membrane: [214, 217, 217],
+  solar: [30, 56, 94],
+  sedum: [111, 143, 78],
 };
 
 const roofCache = new Map<string, THREE.MeshStandardMaterial>();
@@ -413,6 +529,22 @@ export function getRoofMaterial(id: RoofId, quality: Quality): THREE.MeshStandar
         const seam = x % 16 < 1.6;
         tone = seam ? 0.7 : 0.95 + 0.1 * tileNoise(u, v, 4, 8, 3);
         height = seam ? 0.95 : 0.4;
+      } else if (id === 'membrane') {
+        const seam = x % 32 < 0.8;
+        tone = (seam ? 0.82 : 0.96) + 0.06 * tileNoise(u, v, 8, 8, 5);
+        height = seam ? 0.8 : 0.5;
+      } else if (id === 'solar') {
+        // Monocrystalline cells: dark-blue grid with bright busbars.
+        const cellX = x % 16;
+        const cellY = y % 16;
+        const gap = cellX < 0.8 || cellY < 0.8;
+        const bus = Math.abs(cellX - 8) < 0.4 || Math.abs(cellY - 5) < 0.3 || Math.abs(cellY - 11) < 0.3;
+        tone = gap ? 0.3 : bus ? 1.9 : 0.85 + 0.25 * tileNoise(u, v, 4, 4, 3);
+        height = gap ? 0.1 : 0.6;
+      } else if (id === 'sedum') {
+        const clump = fbm(u, v, 8, 3, 15);
+        tone = 0.65 + clump * 0.7;
+        height = clump;
       } else {
         tone = 0.75 + 0.5 * tileNoise(u, v, 24, 24, 8) * (0.6 + 0.4 * tileNoise(u, v, 6, 6, 9));
         height = tileNoise(u, v, 24, 24, 8);
@@ -428,11 +560,11 @@ export function getRoofMaterial(id: RoofId, quality: Quality): THREE.MeshStandar
   const material = new THREE.MeshStandardMaterial({
     map: toTexture(color, true),
     normalMap: toTexture(heightsToNormals(heights, N, N, 2.2 * S * 0.6), false),
-    roughness: id === 'green' ? 0.4 : 0.88,
-    metalness: id === 'green' ? 0.55 : 0,
-    envMapIntensity: id === 'green' ? 1.2 : 0.5,
+    roughness: id === 'green' ? 0.4 : id === 'solar' ? 0.12 : id === 'membrane' ? 0.7 : 0.88,
+    metalness: id === 'green' ? 0.55 : id === 'solar' ? 0.5 : 0,
     side: THREE.DoubleSide,
   });
+  if (id === 'green' || id === 'solar') registerReflective(material, id === 'solar' ? 1.4 : 1.1);
   roofCache.set(key, material);
   return material;
 }

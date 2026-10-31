@@ -51,7 +51,24 @@ const HISTORY_LIMIT = 100;
 
 /** Fields of a piece that the inspector may change. */
 export type PiecePatch = Partial<
-  Pick<Piece, 'facade' | 'roof' | 'floors' | 'roofStyle' | 'tint' | 'windows' | 'blocks' | 'door' | 'trim'>
+  Pick<
+    Piece,
+    | 'facade'
+    | 'roof'
+    | 'floors'
+    | 'roofStyle'
+    | 'tint'
+    | 'windows'
+    | 'blocks'
+    | 'door'
+    | 'trim'
+    | 'led'
+    | 'roofExtras'
+    | 'balconies'
+    | 'sign'
+    | 'accent'
+    | 'scale'
+  >
 >;
 
 interface CityState extends Snapshot {
@@ -183,7 +200,7 @@ export const useCityStore = create<CityState>((set, get) => {
 
     updatePiece: (id, patch) => {
       const piece = get().pieces[id];
-      if (!piece || !PIECES[piece.type].paintable) return;
+      if (!piece || !PIECES[piece.type].customisable) return;
       const next = { ...piece, ...patch };
       if (patch.floors !== undefined) {
         next.floors = Math.min(MAX_FLOORS, Math.max(MIN_FLOORS, Math.round(patch.floors)));

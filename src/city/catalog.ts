@@ -3,27 +3,36 @@ export const CELL = 6;
 export const FLOOR_H = 2.4;
 
 export const FACADES = [
-  { id: 'brick', label: 'Brick', swatch: '#a4492f' },
-  { id: 'concrete', label: 'Concrete', swatch: '#9a9a96' },
-  { id: 'glass', label: 'Glass', swatch: '#3d6e8f' },
-  { id: 'wood', label: 'Wood', swatch: '#9a6b3f' },
-  { id: 'plaster', label: 'Plaster', swatch: '#ece4d2' },
-  { id: 'sandstone', label: 'Sandstone', swatch: '#cfae7f' },
+  { id: 'mirror', label: 'Mirror glass', swatch: '#8fb4d2' },
+  { id: 'glass', label: 'Glass curtain wall', swatch: '#3d6e8f' },
+  { id: 'led', label: 'LED media wall', swatch: '#1a1f2e' },
+  { id: 'ceramic', label: 'Ceramic panels', swatch: '#e9ebec' },
+  { id: 'stone', label: 'Stone cladding', swatch: '#8b8e92' },
+  { id: 'corten', label: 'Weathering steel', swatch: '#8a4b2a' },
+  { id: 'slats', label: 'Timber slats', swatch: '#b98550' },
   { id: 'metal', label: 'Metal cladding', swatch: '#8a96a3' },
+  { id: 'concrete', label: 'Concrete', swatch: '#9a9a96' },
+  { id: 'plaster', label: 'Plaster', swatch: '#ece4d2' },
   { id: 'darkbrick', label: 'Dark brick', swatch: '#463e3c' },
+  { id: 'brick', label: 'Brick', swatch: '#a4492f' },
+  { id: 'wood', label: 'Wood siding', swatch: '#9a6b3f' },
+  { id: 'sandstone', label: 'Sandstone', swatch: '#cfae7f' },
 ] as const;
 export type FacadeId = (typeof FACADES)[number]['id'];
 
 /** Multiplied over the facade texture to recolour it; white leaves it untouched. */
 export const TINTS = [
-  { id: '#ffffff', label: 'Natural' },
+  { id: '#ffffff', label: 'Natural / silver' },
+  { id: '#7fb7d9', label: 'Blue mirror' },
+  { id: '#58b09c', label: 'Teal' },
+  { id: '#d4a373', label: 'Bronze' },
+  { id: '#8d9aa6', label: 'Slate grey' },
+  { id: '#3c4650', label: 'Charcoal' },
   { id: '#f4d9a8', label: 'Warm sand' },
   { id: '#e8b4a0', label: 'Blush' },
-  { id: '#a9c7e0', label: 'Sky blue' },
   { id: '#b9d6b0', label: 'Sage' },
   { id: '#f0e08a', label: 'Butter' },
   { id: '#c9b8e0', label: 'Lavender' },
-  { id: '#8d9aa6', label: 'Slate grey' },
 ] as const;
 
 export type WindowStyle = 'punched' | 'ribbon' | 'tall' | 'none';
@@ -35,9 +44,12 @@ export const WINDOW_STYLES: { id: WindowStyle; label: string }[] = [
 ];
 
 export const MIN_FLOORS = 1;
-export const MAX_FLOORS = 24;
+export const MAX_FLOORS = 40;
 
 export const ROOFS = [
+  { id: 'membrane', label: 'White membrane', swatch: '#d9dcdc' },
+  { id: 'solar', label: 'Solar panels', swatch: '#1f3a5f' },
+  { id: 'sedum', label: 'Green roof', swatch: '#6f8f4e' },
   { id: 'slate', label: 'Slate', swatch: '#4a5568' },
   { id: 'terracotta', label: 'Terracotta', swatch: '#b4553a' },
   { id: 'green', label: 'Green metal', swatch: '#4f7a4a' },
@@ -47,16 +59,31 @@ export type RoofId = (typeof ROOFS)[number]['id'];
 
 export type PieceType =
   | 'road'
+  // buildings
   | 'house'
+  | 'villa'
   | 'shop'
+  | 'cafe'
   | 'apartment'
+  | 'warehouse'
   | 'office'
+  | 'hotel'
+  | 'mall'
   | 'tower'
+  | 'skyscraper'
+  // nature
   | 'tree'
   | 'pine'
+  | 'hedge'
+  | 'park'
+  | 'fountain'
+  // street furniture
   | 'lamp'
   | 'bench'
-  | 'park'
+  | 'busstop'
+  | 'billboard'
+  | 'kiosk'
+  | 'trafficlight'
   | 'plaza';
 
 /** Size of one layout unit (a block's width/depth/position step), in world units. */
@@ -71,52 +98,7 @@ export function gableHeightForSpan(span: number): number {
   return Math.min(4, Math.max(1.6, span * 0.3));
 }
 
-export type Category = 'roads' | 'buildings' | 'nature';
-
-export interface PieceDef {
-  label: string;
-  category: Category;
-  /** Grid cells covered, [width (x), depth (z)], before rotation. */
-  footprint: [number, number];
-  /** Storeys; 0 for roads and props. */
-  floors: number;
-  roof: 'flat' | 'gable' | 'none';
-  /** Facade and roof materials can be chosen / painted. */
-  paintable: boolean;
-  /** Solid collider [w, h, d] (roam mode) for props; buildings derive theirs from their blocks. */
-  collider?: [number, number, number];
-}
-
-export const PIECES: Record<PieceType, PieceDef> = {
-  road: { label: 'Road', category: 'roads', footprint: [1, 1], floors: 0, roof: 'none', paintable: false },
-
-  house: { label: 'House', category: 'buildings', footprint: [1, 1], floors: 2, roof: 'gable', paintable: true },
-  shop: { label: 'Shop', category: 'buildings', footprint: [1, 1], floors: 1, roof: 'flat', paintable: true },
-  apartment: { label: 'Apartments', category: 'buildings', footprint: [2, 1], floors: 5, roof: 'flat', paintable: true },
-  office: { label: 'Office', category: 'buildings', footprint: [2, 2], floors: 8, roof: 'flat', paintable: true },
-  tower: { label: 'Tower', category: 'buildings', footprint: [2, 2], floors: 14, roof: 'flat', paintable: true },
-
-  tree: { label: 'Tree', category: 'nature', footprint: [1, 1], floors: 0, roof: 'none', paintable: false, collider: [0.8, 3, 0.8] },
-  pine: { label: 'Pine', category: 'nature', footprint: [1, 1], floors: 0, roof: 'none', paintable: false, collider: [0.8, 3, 0.8] },
-  lamp: { label: 'Streetlight', category: 'nature', footprint: [1, 1], floors: 0, roof: 'none', paintable: false, collider: [0.4, 5, 0.4] },
-  bench: { label: 'Bench', category: 'nature', footprint: [1, 1], floors: 0, roof: 'none', paintable: false, collider: [2, 0.9, 0.8] },
-  park: { label: 'Park', category: 'nature', footprint: [1, 1], floors: 0, roof: 'none', paintable: false },
-  plaza: { label: 'Plaza', category: 'nature', footprint: [1, 1], floors: 0, roof: 'none', paintable: false },
-};
-
-export const CATEGORIES: { id: Category; label: string }[] = [
-  { id: 'roads', label: 'Roads' },
-  { id: 'buildings', label: 'Buildings' },
-  { id: 'nature', label: 'Nature & props' },
-];
-
-export const PIECE_TYPES = Object.keys(PIECES) as PieceType[];
-
-/** Footprint after `rot` quarter-turns (odd rotations swap width and depth). */
-export function rotatedFootprint(def: PieceDef, rot: number, lot?: [number, number]): [number, number] {
-  const [w, d] = lot ?? def.footprint;
-  return rot % 2 === 0 ? [w, d] : [d, w];
-}
+export type Category = 'roads' | 'buildings' | 'nature' | 'street';
 
 // --- Building customisation ------------------------------------------------------
 
@@ -166,7 +148,54 @@ export interface DoorSpec {
   color: string;
 }
 
-/** Everything a player can change about a building; unset fields use the preset. */
+export type LedMode = 'wave' | 'ticker' | 'bars' | 'checker' | 'pulse' | 'solid';
+export const LED_MODES: { id: LedMode; label: string }[] = [
+  { id: 'wave', label: 'Colour wave' },
+  { id: 'ticker', label: 'Scrolling text' },
+  { id: 'bars', label: 'Equaliser' },
+  { id: 'checker', label: 'Pixels' },
+  { id: 'pulse', label: 'Pulse' },
+  { id: 'solid', label: 'Solid' },
+];
+
+/** A big LED screen mounted on one wall of a building. */
+export interface LedSpec {
+  mode: LedMode;
+  color: string;
+  /** Block index and wall it is mounted on. */
+  block: number;
+  side: DoorSide;
+  /** First storey the screen covers (0 = ground floor) and how many storeys tall it is. */
+  bottom: number;
+  height: number;
+  /** Width in metres; 0 means the whole wall. */
+  width: number;
+  /** Metres along the wall from its centre. */
+  offset: number;
+}
+
+export type RoofExtra = 'plant' | 'antenna' | 'solar' | 'garden' | 'helipad';
+export const ROOF_EXTRAS: { id: RoofExtra; label: string }[] = [
+  { id: 'plant', label: 'AC units' },
+  { id: 'antenna', label: 'Antenna' },
+  { id: 'solar', label: 'Solar array' },
+  { id: 'garden', label: 'Roof garden' },
+  { id: 'helipad', label: 'Helipad' },
+];
+
+export type BalconyMode = 'none' | 'front' | 'all';
+export const BALCONY_MODES: { id: BalconyMode; label: string }[] = [
+  { id: 'none', label: 'None' },
+  { id: 'front', label: 'Front' },
+  { id: 'all', label: 'All sides' },
+];
+
+export interface SignSpec {
+  text: string;
+  color: string;
+}
+
+/** Everything a player can change about a piece; unset fields use the preset. */
 export interface StyleOverrides {
   /** Floors of the default single block (ignored once `blocks` is set). */
   floors?: number;
@@ -180,6 +209,13 @@ export interface StyleOverrides {
   door?: Partial<DoorSpec>;
   /** Colour of plinth, parapet and canopy trim. */
   trim?: string;
+  led?: LedSpec | null;
+  roofExtras?: RoofExtra[];
+  balconies?: BalconyMode;
+  sign?: SignSpec | null;
+  /** Props: main colour (foliage, paint, water, ...) and size multiplier. */
+  accent?: string;
+  scale?: number;
 }
 
 export interface BuildingStyle {
@@ -190,6 +226,111 @@ export interface BuildingStyle {
   windows: WindowStyle;
   door: DoorSpec;
   trim: string;
+  led: LedSpec | null;
+  roofExtras: RoofExtra[];
+  balconies: BalconyMode;
+  sign: SignSpec | null;
+}
+
+/** The look a preset starts with when the palette is set to "Preset look". */
+export interface PresetLook {
+  facade: FacadeId;
+  roof: RoofId;
+  style?: StyleOverrides;
+}
+
+export interface PieceDef {
+  label: string;
+  category: Category;
+  /** Grid cells covered, [width (x), depth (z)], before rotation. */
+  footprint: [number, number];
+  /** Storeys; 0 for roads and props. */
+  floors: number;
+  roof: 'flat' | 'gable' | 'none';
+  /** Full building editor (blocks, doors, facades, ...). */
+  paintable: boolean;
+  /** Can be opened in the inspector (buildings and props; not roads). */
+  customisable: boolean;
+  /** Solid collider [w, h, d] (roam mode) for props; buildings derive theirs from their blocks. */
+  collider?: [number, number, number];
+  look?: PresetLook;
+  /** Which door a fresh building gets. */
+  door?: DoorStyle;
+  canopy?: boolean;
+}
+
+const bld = (
+  label: string,
+  footprint: [number, number],
+  floors: number,
+  roof: 'flat' | 'gable',
+  look: PresetLook,
+  door: DoorStyle = 'glass',
+  canopy = true,
+): PieceDef => ({ label, category: 'buildings', footprint, floors, roof, paintable: true, customisable: true, look, door, canopy });
+
+const prop = (label: string, category: Category, collider?: [number, number, number]): PieceDef => ({
+  label,
+  category,
+  footprint: [1, 1],
+  floors: 0,
+  roof: 'none',
+  paintable: false,
+  customisable: true,
+  collider,
+});
+
+export const PIECES: Record<PieceType, PieceDef> = {
+  road: { label: 'Road', category: 'roads', footprint: [1, 1], floors: 0, roof: 'none', paintable: false, customisable: false },
+
+  house: bld('House', [1, 1], 2, 'gable', { facade: 'plaster', roof: 'slate' }, 'single', false),
+  villa: bld('Modern villa', [2, 1], 2, 'flat', { facade: 'ceramic', roof: 'membrane', style: { windows: 'tall', roofExtras: ['solar'], balconies: 'front', trim: '#2c3036' } }),
+  shop: bld('Shop', [1, 1], 1, 'flat', { facade: 'ceramic', roof: 'membrane', style: { windows: 'tall', sign: { text: 'SHOP', color: '#ffb02e' } } }),
+  cafe: bld('Café', [1, 1], 1, 'flat', { facade: 'slats', roof: 'sedum', style: { windows: 'tall', roofExtras: ['garden'], sign: { text: 'CAFÉ', color: '#ffffff' } } }),
+  apartment: bld('Apartments', [2, 1], 5, 'flat', { facade: 'stone', roof: 'membrane', style: { windows: 'punched', balconies: 'front', roofExtras: ['plant', 'solar'] } }),
+  warehouse: bld('Warehouse', [3, 2], 1, 'flat', { facade: 'metal', roof: 'membrane', style: { windows: 'none', roofExtras: ['plant', 'solar'] } }, 'garage', false),
+  office: bld('Office', [2, 2], 8, 'flat', { facade: 'glass', roof: 'membrane', style: { roofExtras: ['plant'] } }),
+  hotel: bld('Hotel', [2, 2], 10, 'flat', { facade: 'ceramic', roof: 'sedum', style: { windows: 'ribbon', balconies: 'all', roofExtras: ['garden', 'plant'], sign: { text: 'HOTEL', color: '#ff4d6d' } } }),
+  mall: bld('Shopping mall', [3, 2], 3, 'flat', {
+    facade: 'glass',
+    roof: 'membrane',
+    style: { roofExtras: ['plant', 'solar'], led: { mode: 'ticker', color: '#35e0ff', block: 0, side: 'front', bottom: 1, height: 1, width: 0, offset: 0 }, sign: { text: 'MALL', color: '#ffffff' } },
+  }),
+  tower: bld('Tower', [2, 2], 14, 'flat', { facade: 'metal', roof: 'membrane', style: { roofExtras: ['plant', 'antenna'] } }),
+  skyscraper: bld('Skyscraper', [2, 2], 28, 'flat', {
+    facade: 'mirror',
+    roof: 'membrane',
+    style: { roofExtras: ['helipad', 'antenna'], led: { mode: 'wave', color: '#ff3df0', block: 0, side: 'front', bottom: 20, height: 4, width: 0, offset: 0 } },
+  }),
+
+  tree: prop('Tree', 'nature', [0.8, 3, 0.8]),
+  pine: prop('Pine', 'nature', [0.8, 3, 0.8]),
+  hedge: prop('Hedge', 'nature', [5, 1.2, 1]),
+  park: prop('Park', 'nature'),
+  fountain: prop('Fountain', 'nature', [3.4, 1, 3.4]),
+
+  lamp: prop('Streetlight', 'street', [0.4, 5, 0.4]),
+  bench: prop('Bench', 'street', [2, 0.9, 0.8]),
+  busstop: prop('Bus stop', 'street', [3.4, 2.6, 1.4]),
+  billboard: prop('LED billboard', 'street', [1.2, 6, 0.8]),
+  kiosk: prop('Kiosk', 'street', [2.4, 2.6, 2.4]),
+  trafficlight: prop('Traffic light', 'street', [0.4, 5, 0.4]),
+  plaza: prop('Plaza', 'street'),
+};
+
+export const CATEGORIES: { id: Category; label: string }[] = [
+  { id: 'roads', label: 'Roads' },
+  { id: 'buildings', label: 'Buildings' },
+  { id: 'nature', label: 'Nature' },
+  { id: 'street', label: 'Street' },
+];
+
+export const PIECE_TYPES = Object.keys(PIECES) as PieceType[];
+
+/** Footprint after `rot` quarter-turns (odd rotations swap width and depth). */
+export function rotatedFootprint(def: PieceDef, rot: number, lot?: [number, number]): [number, number] {
+  const [w, d] = lot ?? def.footprint;
+  return rot % 2 === 0 ? [w, d] : [d, w];
 }
 
 export const DEFAULT_TRIM = '#b5b3ad';
@@ -205,17 +346,21 @@ export function defaultBlocks(def: PieceDef, o: StyleOverrides): Block[] {
   return [{ u: 0, v: 0, w: lw, d: ld, floors: o.floors ?? def.floors }];
 }
 
+/** Style overrides a freshly placed piece starts with (the preset's look, or just the palette's). */
+export function presetStyle(type: PieceType): StyleOverrides {
+  return PIECES[type].look?.style ?? {};
+}
+
 export function resolveStyle(type: PieceType, o: StyleOverrides): BuildingStyle {
   const def = PIECES[type];
   const lot = o.lot ?? def.footprint;
   const blocks = o.blocks ?? defaultBlocks(def, o);
-  const defaultDoor: DoorStyle = type === 'house' ? 'single' : 'glass';
   const door: DoorSpec = {
-    style: defaultDoor,
+    style: def.door ?? 'glass',
     block: 0,
     side: 'front',
     offset: 0,
-    canopy: type !== 'house',
+    canopy: def.canopy ?? true,
     color: DEFAULT_DOOR_COLOR,
     ...o.door,
   };
@@ -228,6 +373,23 @@ export function resolveStyle(type: PieceType, o: StyleOverrides): BuildingStyle 
     windows: o.windows ?? 'punched',
     door,
     trim: o.trim ?? DEFAULT_TRIM,
+    led: o.led ?? null,
+    roofExtras: o.roofExtras ?? (def.roof === 'flat' ? ['plant'] : []),
+    balconies: o.balconies ?? 'none',
+    sign: o.sign ?? null,
+  };
+}
+
+/** Resolves the palette's facade/roof ('preset' = the piece's own look) for a piece type. */
+export function resolveLook(
+  type: PieceType,
+  facade: FacadeId | 'preset',
+  roof: RoofId | 'preset',
+): { facade: FacadeId; roof: RoofId } {
+  const look = PIECES[type].look;
+  return {
+    facade: facade === 'preset' ? (look?.facade ?? 'plaster') : facade,
+    roof: roof === 'preset' ? (look?.roof ?? 'membrane') : roof,
   };
 }
 
@@ -270,6 +432,7 @@ export function roofHeightOf(box: BlockBox): number {
 export function collidersOf(
   type: PieceType,
   style: BuildingStyle,
+  scale = 1,
 ): { cx: number; cz: number; w: number; h: number; d: number }[] {
   const def = PIECES[type];
   if (def.paintable) {
@@ -279,7 +442,9 @@ export function collidersOf(
       return { cx: box.cx, cz: box.cz, w: box.w, d: box.d, h: box.h + roofH };
     });
   }
-  return def.collider ? [{ cx: 0, cz: 0, w: def.collider[0], h: def.collider[1], d: def.collider[2] }] : [];
+  return def.collider
+    ? [{ cx: 0, cz: 0, w: def.collider[0] * scale, h: def.collider[1] * scale, d: def.collider[2] * scale }]
+    : [];
 }
 
 /** Clamps blocks so they fit a lot of the given size, keeping each at least 1 unit. */

@@ -6,15 +6,18 @@ import {
   PIECES,
   blockBox,
   pieceFootprint,
+  presetStyle,
+  resolveLook,
   resolveStyle,
   roofHeightOf,
   rotatedFootprint,
   type PieceType,
 } from '../../city/catalog';
 import { PieceModel, PieceView, RoadModel } from '../../city/models';
-import { useBuilderStore, type BuilderTool } from '../../state/useBuilderStore';
+import { isDragTool, useBuilderStore, type BuilderTool } from '../../state/useBuilderStore';
 import { roadMaskAt, useCityStore, type Piece } from '../../state/useCityStore';
 import { useGameStore } from '../../state/useGameStore';
+import { useTouchStore } from '../../state/useTouchStore';
 
 const GRID_CELLS = 24; // even, so grid lines fall on cell borders when centred on a cell corner
 const MAX_PICK_DISTANCE = 600;
@@ -30,8 +33,6 @@ interface Hover {
 
 const isPlaceTool = (tool: BuilderTool): tool is PieceType =>
   tool !== 'bulldoze' && tool !== 'paint' && tool !== 'select' && tool !== 'move';
-/** Tools that keep applying while the mouse button is held and dragged across cells. */
-const isDragTool = (tool: BuilderTool) => tool === 'road' || tool === 'bulldoze' || tool === 'paint';
 
 /** Turns a model translucent and tints it green (can place) or red (blocked). */
 function ghostify(root: THREE.Object3D, valid: boolean) {
@@ -115,11 +116,53 @@ export function PiecesLayer() {
   );
 }
 
+/** World-space point on the ground under a screen position, or null if the ray misses it. */
+function groundPoint(raycaster: THREE.Raycaster, camera: THREE.Camera, ndc: THREE.Vector2): { x: number; z: number } | null {
+  raycaster.setFromCamera(ndc, camera);
+  const { origin, direction } = raycaster.ray;
+  if (direction.y > -1e-4) return null;
+  const t = -origin.y / direction.y;
+  if (t > MAX_PICK_DISTANCE) return null;
+  return { x: origin.x + direction.x * t, z: origin.z + direction.z * t };
+}
+
+/** Cells under a ground point for whatever the current tool would act on. */
+function hoverFromPoint(x: number, z: number): Hover {
+  const b = useBuilderStore.getState();
+  const city = useCityStore.getState();
+  let w = 1;
+  let d = 1;
+  if (isPlaceTool(b.tool)) {
+    [w, d] = rotatedFootprint(PIECES[b.tool], b.rotation);
+  } else if (b.tool === 'move' && b.movingId && city.pieces[b.movingId]) {
+    const moving = city.pieces[b.movingId];
+    [w, d] = rotatedFootprint(PIECES[moving.type], b.rotation, moving.lot);
+  }
+  return {
+    hx: Math.floor(x / CELL),
+    hz: Math.floor(z / CELL),
+    gx: Math.round(x / CELL - w / 2),
+    gz: Math.round(z / CELL - d / 2),
+  };
+}
+
+const sameHover = (a: Hover | null, b: Hover | null) =>
+  !!a && !!b && a.hx === b.hx && a.hz === b.hz && a.gx === b.gx && a.gz === b.gz;
+
+/** A finger that moves less than this (px) and lifts quickly counts as a tap, not a drag. */
+const TAP_SLOP = 12;
+const TAP_MAX_MS = 500;
+
 /**
  * Build-mode interaction on the city grid: the cursor is projected onto the ground plane
- * and snapped to cells. Left-click places the selected piece (roads, delete and paint
- * also work while dragging); R rotates; Delete / X remove; Ctrl+Z undoes. The Edit tool
- * selects a building for the inspector, whose Move button carries it to a new spot.
+ * and snapped to cells.
+ *
+ * Mouse: left-click places the selected piece (roads, delete and paint also work while
+ * dragging); R rotates; Delete / X remove; Ctrl+Z undoes.
+ * Touch: draw-style tools (road, delete, paint) act while you drag one finger. Everything
+ * else is two-step: tap to put a ghost on the map, then confirm with the on-screen button
+ * or by tapping the ghost's spot again. Dragging pans the camera instead of placing.
+ * The Edit tool selects a building on tap; its Move button carries it to a new spot.
  */
 export function CityBuilder() {
   const mode = useGameStore((s) => s.mode);
@@ -133,11 +176,16 @@ export function CityBuilder() {
   const pieces = useCityStore((s) => s.pieces);
   const occupancy = useCityStore((s) => s.occupancy);
   const dom = useThree((s) => s.gl.domElement);
+  const getThree = useThree((s) => s.get);
 
   const [hover, setHover] = useState<Hover | null>(null);
+  /** Touch: ground point of the tapped spot waiting for confirmation. */
+  const [pendingPoint, setPendingPoint] = useState<{ x: number; z: number } | null>(null);
   const hoverRef = useRef<Hover | null>(null);
+  const pendingRef = useRef<{ x: number; z: number } | null>(null);
   const pointerInside = useRef(false);
   const painting = useRef(false);
+  const touchMode = useRef(false);
   const ghostRef = useRef<THREE.Group>(null);
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
   const grid = useMemo(() => {
@@ -154,7 +202,7 @@ export function CityBuilder() {
     const b = useBuilderStore.getState();
     const cellId = city.occupancy[`${h.hx},${h.hz}`];
     if (b.tool === 'select') {
-      b.select(cellId && PIECES[city.pieces[cellId].type].paintable ? cellId : null);
+      b.select(cellId && PIECES[city.pieces[cellId].type].customisable ? cellId : null);
     } else if (b.tool === 'move') {
       if (b.movingId && city.movePiece(b.movingId, h.gx, h.gz, b.rotation)) {
         b.select(b.movingId);
@@ -164,10 +212,27 @@ export function CityBuilder() {
       if (cellId && cellId === b.selectedId) b.select(null);
       city.removeAt(h.hx, h.hz);
     } else if (b.tool === 'paint') {
-      city.paintAt(h.hx, h.hz, b.facade, b.roof);
+      const target = cellId ? city.pieces[cellId] : undefined;
+      if (target) {
+        const look = resolveLook(target.type, b.facade, b.roof);
+        city.paintAt(h.hx, h.hz, look.facade, look.roof);
+      }
     } else {
-      city.place({ type: b.tool, gx: h.gx, gz: h.gz, rot: b.tool === 'road' ? 0 : b.rotation, facade: b.facade, roof: b.roof });
+      const look = resolveLook(b.tool, b.facade, b.roof);
+      city.place({
+        type: b.tool,
+        gx: h.gx,
+        gz: h.gz,
+        rot: b.tool === 'road' ? 0 : b.rotation,
+        ...look,
+        ...presetStyle(b.tool),
+      });
     }
+  };
+
+  const setPending = (point: { x: number; z: number } | null) => {
+    pendingRef.current = point;
+    setPendingPoint(point);
   };
 
   useFrame(({ camera, pointer }) => {
@@ -179,54 +244,97 @@ export function CityBuilder() {
     };
     if (mode !== 'build' || !pointerInside.current) return clear();
 
-    raycaster.setFromCamera(pointer, camera);
-    const { origin, direction } = raycaster.ray;
-    if (direction.y > -1e-4) return clear();
-    const t = -origin.y / direction.y;
-    if (t > MAX_PICK_DISTANCE) return clear();
-    const x = origin.x + direction.x * t;
-    const z = origin.z + direction.z * t;
-
-    const b = useBuilderStore.getState();
-    const city = useCityStore.getState();
-    let w = 1;
-    let d = 1;
-    if (isPlaceTool(b.tool)) {
-      [w, d] = rotatedFootprint(PIECES[b.tool], b.rotation);
-    } else if (b.tool === 'move' && b.movingId && city.pieces[b.movingId]) {
-      const moving = city.pieces[b.movingId];
-      [w, d] = rotatedFootprint(PIECES[moving.type], b.rotation, moving.lot);
-    }
-    const next: Hover = {
-      hx: Math.floor(x / CELL),
-      hz: Math.floor(z / CELL),
-      gx: Math.round(x / CELL - w / 2),
-      gz: Math.round(z / CELL - d / 2),
-    };
-    const prev = hoverRef.current;
-    if (prev && prev.hx === next.hx && prev.hz === next.hz && prev.gx === next.gx && prev.gz === next.gz) return;
+    const point = groundPoint(raycaster, camera, pointer);
+    if (!point) return clear();
+    const next = hoverFromPoint(point.x, point.z);
+    if (sameHover(hoverRef.current, next)) return;
     hoverRef.current = next;
     setHover(next);
-    if (painting.current && isDragTool(b.tool)) apply(next);
+    if (painting.current && isDragTool(useBuilderStore.getState().tool)) apply(next);
   });
 
   useEffect(() => {
     if (mode !== 'build') return;
+    const touches = new Set<number>();
+    let tap: { id: number; x: number; y: number; t: number; multi: boolean } | null = null;
+
+    const pointFromClient = (clientX: number, clientY: number) => {
+      const { camera } = getThree();
+      const rect = dom.getBoundingClientRect();
+      const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+      return groundPoint(raycaster, camera, ndc);
+    };
+
     const onMove = () => (pointerInside.current = true);
     const onLeave = () => {
       pointerInside.current = false;
       painting.current = false;
     };
     const onDown = (e: PointerEvent) => {
+      pointerInside.current = true;
+      if (e.pointerType === 'touch') {
+        touchMode.current = true;
+        touches.add(e.pointerId);
+        if (touches.size > 1) {
+          // A second finger means a camera gesture: abandon any stroke or tap in progress.
+          painting.current = false;
+          useCityStore.getState().endStroke();
+          if (tap) tap.multi = true;
+          return;
+        }
+        tap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), multi: false };
+        if (isDragTool(useBuilderStore.getState().tool)) {
+          // Draw-style tools act right away and while dragging, like the mouse.
+          const point = pointFromClient(e.clientX, e.clientY);
+          if (!point) return;
+          const h = hoverFromPoint(point.x, point.z);
+          hoverRef.current = h;
+          setHover(h);
+          painting.current = true;
+          useCityStore.getState().beginStroke();
+          apply(h);
+        }
+        return;
+      }
+      touchMode.current = false;
       if (e.button !== 0 || !hoverRef.current) return;
       painting.current = true;
       useCityStore.getState().beginStroke(); // one undo step per click or drag
       apply(hoverRef.current);
     };
-    const onUp = () => {
+    const onUp = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') {
+        touches.delete(e.pointerId);
+        // Treat a short, still, single-finger touch as a tap.
+        if (tap && tap.id === e.pointerId && !tap.multi && !painting.current) {
+          const moved = Math.hypot(e.clientX - tap.x, e.clientY - tap.y);
+          if (moved < TAP_SLOP && performance.now() - tap.t < TAP_MAX_MS) onTap(e.clientX, e.clientY);
+        }
+        if (tap?.id === e.pointerId) tap = null;
+      }
       painting.current = false;
       useCityStore.getState().endStroke();
     };
+
+    const onTap = (clientX: number, clientY: number) => {
+      const point = pointFromClient(clientX, clientY);
+      if (!point) return;
+      const b = useBuilderStore.getState();
+      const h = hoverFromPoint(point.x, point.z);
+      if (b.tool === 'select') {
+        apply(h);
+        return;
+      }
+      const pending = pendingRef.current && hoverFromPoint(pendingRef.current.x, pendingRef.current.z);
+      // Tapping the ghost's own spot again confirms; tapping elsewhere moves the ghost.
+      if (pending && pending.gx === h.gx && pending.gz === h.gz) {
+        apply(pending);
+        setPending(null);
+      } else {
+        setPending(point);
+      }
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
       const city = useCityStore.getState();
@@ -246,6 +354,7 @@ export function CityBuilder() {
       if (e.code === 'Escape') {
         if (b.movingId) b.cancelMove();
         else b.select(null);
+        setPending(null);
       }
       // Delete / Backspace remove the selected building, else whatever is under the cursor; X always the latter.
       const wantsDelete = e.code === 'Delete' || e.code === 'Backspace' || e.code === 'KeyX';
@@ -265,26 +374,57 @@ export function CityBuilder() {
     dom.addEventListener('pointerleave', onLeave);
     dom.addEventListener('pointerdown', onDown);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
     window.addEventListener('keydown', onKeyDown);
     return () => {
       dom.removeEventListener('pointermove', onMove);
       dom.removeEventListener('pointerleave', onLeave);
       dom.removeEventListener('pointerdown', onDown);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
       window.removeEventListener('keydown', onKeyDown);
       pointerInside.current = false;
       painting.current = false;
     };
-  }, [mode, dom]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, dom, getThree, raycaster]);
+
+  // A pending touch placement belongs to the tool it was made with.
+  useEffect(() => {
+    setPending(null);
+  }, [tool, movingId, mode]);
 
   const placeType = isPlaceTool(tool) ? tool : null;
   const moving = tool === 'move' && movingId ? pieces[movingId] : undefined;
+  const touchGhost = touchMode.current && (placeType || moving);
+  // On touch the ghost sits where the player tapped; with a mouse it follows the cursor.
+  const shown: Hover | null = touchGhost ? (pendingPoint ? hoverFromPoint(pendingPoint.x, pendingPoint.z) : null) : hover;
+
   let valid = false;
-  if (hover && placeType) {
-    valid = useCityStore.getState().canPlace(placeType, hover.gx, hover.gz, placeType === 'road' ? 0 : rotation);
-  } else if (hover && moving) {
-    valid = useCityStore.getState().canPlace(moving.type, hover.gx, hover.gz, rotation, moving.lot, moving.id);
+  if (shown && placeType) {
+    valid = useCityStore.getState().canPlace(placeType, shown.gx, shown.gz, placeType === 'road' ? 0 : rotation);
+  } else if (shown && moving) {
+    valid = useCityStore.getState().canPlace(moving.type, shown.gx, shown.gz, rotation, moving.lot, moving.id);
   }
+
+  // Let the on-screen confirm bar know whether something is waiting, and how to act on it.
+  const pendingActive = !!(touchGhost && pendingPoint);
+  useEffect(() => {
+    useTouchStore.getState().setPending(pendingActive, valid);
+  }, [pendingActive, valid]);
+  useEffect(() => {
+    useTouchStore.getState().setHandlers(
+      () => {
+        const p = pendingRef.current;
+        if (p) {
+          apply(hoverFromPoint(p.x, p.z));
+          setPending(null);
+        }
+      },
+      () => setPending(null),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Re-apply the ghost tint whenever the ghost model may have been rebuilt.
   useLayoutEffect(() => {
@@ -294,20 +434,22 @@ export function CityBuilder() {
   if (mode !== 'build') return null;
 
   let ghost = null;
-  if (hover && (placeType || moving)) {
+  if (shown && (placeType || moving)) {
     const type = (placeType ?? moving?.type) as PieceType;
     const rot = type === 'road' ? 0 : rotation;
     const [w, d] = rotatedFootprint(PIECES[type], rot, moving?.lot);
     ghost = (
-      <group ref={ghostRef} position={[(hover.gx + w / 2) * CELL, 0.02, (hover.gz + d / 2) * CELL]} rotation={[0, (rot * Math.PI) / 2, 0]}>
+      <group ref={ghostRef} position={[(shown.gx + w / 2) * CELL, 0.02, (shown.gz + d / 2) * CELL]} rotation={[0, (rot * Math.PI) / 2, 0]}>
         {type === 'road' ? (
-          <RoadModel mask={roadMaskAt(pieces, occupancy, hover.gx, hover.gz)} />
+          <RoadModel mask={roadMaskAt(pieces, occupancy, shown.gx, shown.gz)} />
         ) : (
           <PieceModel
             type={type}
-            facade={moving?.facade ?? facade}
-            roof={moving?.roof ?? roof}
-            style={resolveStyle(type, moving ?? {})}
+            facade={moving?.facade ?? resolveLook(type, facade, roof).facade}
+            roof={moving?.roof ?? resolveLook(type, facade, roof).roof}
+            style={resolveStyle(type, moving ?? presetStyle(type))}
+            accent={moving?.accent}
+            scale={moving?.scale}
             seed={0.5}
           />
         )}
@@ -315,15 +457,17 @@ export function CityBuilder() {
     );
   }
 
+  const gridAt = touchGhost ? shown : hover;
   const target = hover ? pieces[occupancy[hover.hx + ',' + hover.hz]] : undefined;
   const selected = selectedId ? pieces[selectedId] : undefined;
   const targetable =
-    target && (tool === 'bulldoze' || (PIECES[target.type].paintable && (tool === 'paint' || tool === 'select')));
+    target &&
+    ((tool === 'bulldoze') || (tool === 'paint' && PIECES[target.type].paintable) || (tool === 'select' && PIECES[target.type].customisable));
   const highlightColor = tool === 'bulldoze' ? '#ff3030' : '#3aa0ff';
 
   return (
     <>
-      {hover && <primitive object={grid} position={[hover.hx * CELL, 0.02, hover.hz * CELL]} />}
+      {gridAt && <primitive object={grid} position={[gridAt.hx * CELL, 0.02, gridAt.hz * CELL]} />}
       {ghost}
       {selected && <PieceHighlight piece={selected} color="#ffffff" opacity={0.16} />}
       {selected && !movingId && PIECES[selected.type].paintable && <BlockHighlight piece={selected} index={selectedBlock} />}

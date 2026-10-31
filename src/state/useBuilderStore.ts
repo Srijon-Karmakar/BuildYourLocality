@@ -9,8 +9,8 @@ interface BuilderState {
   /** Quarter-turns applied to the piece about to be placed. */
   rotation: number;
   /** Materials applied to newly placed buildings and by the paint tool. */
-  facade: FacadeId;
-  roof: RoofId;
+  facade: FacadeId | 'preset';
+  roof: RoofId | 'preset';
   /** Building currently open in the inspector. */
   selectedId: string | null;
   /** Block being edited in the inspector (index into the building's blocks). */
@@ -19,8 +19,8 @@ interface BuilderState {
   movingId: string | null;
   setTool: (tool: BuilderTool) => void;
   rotate: () => void;
-  setFacade: (facade: FacadeId) => void;
-  setRoof: (roof: RoofId) => void;
+  setFacade: (facade: FacadeId | 'preset') => void;
+  setRoof: (roof: RoofId | 'preset') => void;
   select: (id: string | null) => void;
   selectBlock: (index: number) => void;
   /** Starts carrying a building; `rotation` seeds the ghost with its current turn. */
@@ -31,8 +31,8 @@ interface BuilderState {
 export const useBuilderStore = create<BuilderState>((set) => ({
   tool: 'road',
   rotation: 0,
-  facade: 'brick',
-  roof: 'terracotta',
+  facade: 'preset',
+  roof: 'preset',
   selectedId: null,
   selectedBlock: 0,
   movingId: null,
@@ -45,3 +45,6 @@ export const useBuilderStore = create<BuilderState>((set) => ({
   startMove: (movingId, rotation) => set({ movingId, rotation, tool: 'move' }),
   cancelMove: () => set((state) => ({ movingId: null, tool: state.tool === 'move' ? 'select' : state.tool })),
 }));
+
+/** Tools that keep applying while the pointer is dragged across cells (draw-style tools). */
+export const isDragTool = (tool: BuilderTool): boolean => tool === 'road' || tool === 'bulldoze' || tool === 'paint';

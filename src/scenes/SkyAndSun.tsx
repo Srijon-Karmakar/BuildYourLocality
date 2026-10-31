@@ -1,7 +1,7 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { setReflectionEnvironment } from '../city/cityTextures';
 import { viewState } from '../engine/viewState';
 import { useGameStore } from '../state/useGameStore';
 
@@ -142,9 +142,37 @@ export function SkyAndSun() {
   );
 }
 
+/** Builds a small scene shaped like the daytime sky (ground, horizon, zenith, bright sun) for reflections. */
+function buildSkyEnvironment(): THREE.Scene {
+  const env = new THREE.Scene();
+  const geometry = new THREE.SphereGeometry(50, 48, 24);
+  const colors: number[] = [];
+  const position = geometry.getAttribute('position');
+  const ground = new THREE.Color('#8b8a7c');
+  const horizon = new THREE.Color(HORIZON_COLOR).multiplyScalar(1.15);
+  const zenith = new THREE.Color('#3f7fc4');
+  const c = new THREE.Color();
+  for (let i = 0; i < position.count; i++) {
+    const y = position.getY(i) / 50;
+    if (y < 0) c.copy(horizon).lerp(ground, Math.min(1, -y * 3));
+    else c.copy(horizon).lerp(zenith, Math.pow(y, 0.5));
+    colors.push(c.r, c.g, c.b);
+  }
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  env.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+
+  const sun = new THREE.Mesh(
+    new THREE.SphereGeometry(4, 16, 8),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff2d0').multiplyScalar(40), toneMapped: false }),
+  );
+  sun.position.copy(SUN_OFFSET).normalize().multiplyScalar(44);
+  env.add(sun);
+  return env;
+}
+
 /**
- * Image-based lighting from three's built-in RoomEnvironment (no download): gives glass,
- * metal and wet-looking surfaces something to reflect and softens the shadow side.
+ * Image-based lighting from a procedural daytime sky: gives mirror glass, metal and glossy
+ * panels a believable sky to reflect, and lights shaded sides softly. No texture download.
  */
 export function Environment() {
   const gl = useThree((s) => s.gl);
@@ -152,10 +180,12 @@ export function Environment() {
 
   useEffect(() => {
     const pmrem = new THREE.PMREMGenerator(gl);
-    const target = pmrem.fromScene(new RoomEnvironment(), 0.04);
+    const target = pmrem.fromScene(buildSkyEnvironment(), 0.02);
     scene.environment = target.texture;
-    scene.environmentIntensity = 0.45;
+    scene.environmentIntensity = 0.5;
+    setReflectionEnvironment(target.texture);
     return () => {
+      setReflectionEnvironment(null);
       scene.environment = null;
       target.dispose();
       pmrem.dispose();

@@ -1,4 +1,9 @@
 import {
+  BALCONY_MODES,
+  LED_MODES,
+  ROOF_EXTRAS,
+  type LedSpec,
+  type SignSpec,
   DOOR_SIDES,
   DOOR_STYLES,
   FACADES,
@@ -88,6 +93,29 @@ function sanitizeDoor(door: unknown): Partial<DoorSpec> | undefined {
   return out;
 }
 
+function sanitizeLed(led: unknown): LedSpec | undefined {
+  if (!led || typeof led !== 'object') return undefined;
+  const raw = led as Partial<LedSpec>;
+  if (!LED_MODES.some((m) => m.id === raw.mode) || !DOOR_SIDES.some((sd) => sd.id === raw.side)) return undefined;
+  return {
+    mode: raw.mode!,
+    side: raw.side!,
+    color: isHex(raw.color) ? raw.color : '#35e0ff',
+    block: clampInt(raw.block, 0, MAX_BLOCKS - 1, 0),
+    bottom: clampInt(raw.bottom, 0, MAX_FLOORS - 1, 0),
+    height: clampInt(raw.height, 1, MAX_FLOORS, 1),
+    width: typeof raw.width === 'number' && raw.width >= 0 ? Math.min(raw.width, 40) : 0,
+    offset: typeof raw.offset === 'number' && Number.isFinite(raw.offset) ? raw.offset : 0,
+  };
+}
+
+function sanitizeSign(sign: unknown): SignSpec | undefined {
+  if (!sign || typeof sign !== 'object') return undefined;
+  const raw = sign as Partial<SignSpec>;
+  if (typeof raw.text !== 'string') return undefined;
+  return { text: raw.text.slice(0, 14), color: isHex(raw.color) ? raw.color : '#ffffff' };
+}
+
 /** Falls back to defaults for any material / style id this version does not know. */
 function sanitize(p: Piece): Piece {
   const facade = FACADES.some((f) => f.id === p.facade) ? p.facade : 'brick';
@@ -103,6 +131,16 @@ function sanitize(p: Piece): Piece {
   if (blocks) next.blocks = blocks;
   const door = sanitizeDoor(p.door);
   if (door) next.door = door;
+  const led = sanitizeLed(p.led);
+  if (led) next.led = led;
+  if (Array.isArray(p.roofExtras)) {
+    next.roofExtras = p.roofExtras.filter((e) => ROOF_EXTRAS.some((x) => x.id === e));
+  }
+  if (BALCONY_MODES.some((m) => m.id === p.balconies)) next.balconies = p.balconies;
+  const sign = sanitizeSign(p.sign);
+  if (sign) next.sign = sign;
+  if (isHex(p.accent)) next.accent = p.accent;
+  if (typeof p.scale === 'number' && Number.isFinite(p.scale)) next.scale = Math.min(2, Math.max(0.5, p.scale));
   if (WINDOW_STYLES.some((w) => w.id === p.windows)) next.windows = p.windows;
   return next;
 }

@@ -7,6 +7,8 @@ import { BuilderCamera } from '../engine/builder/BuilderCamera';
 import { CityBuilder, PiecesLayer } from '../engine/builder/CityBuilder';
 import { Ground } from '../engine/builder/Ground';
 import { PlayerController } from '../engine/player/PlayerController';
+import { TouchLook } from '../engine/player/TouchLook';
+import { useIsTouch } from '../ui/useMediaQuery';
 import { viewState } from '../engine/viewState';
 import { useGameStore } from '../state/useGameStore';
 import { Environment, HORIZON_COLOR, SkyAndSun } from './SkyAndSun';
@@ -75,10 +77,11 @@ function FogController() {
 export function Scene() {
   const shadows = useGameStore((s) => s.graphics.shadows);
   const mode = useGameStore((s) => s.mode);
+  const touch = useIsTouch();
   const playerBodyRef = useRef<RapierRigidBody>(null);
 
   return (
-    <Canvas shadows={shadows} camera={{ fov: BUILD_FOV, near: 0.1, far: 1500, position: [40, 50, 40] }} dpr={[1, 1.5]}>
+    <Canvas shadows={shadows} camera={{ fov: BUILD_FOV, near: 0.1, far: 1500, position: [40, 50, 40] }} dpr={touch ? [1, 1.25] : [1, 1.5]}>
       <color attach="background" args={[HORIZON_COLOR]} />
       <FogController />
       <SkyAndSun />
@@ -93,7 +96,8 @@ export function Scene() {
       <CityBuilder />
       {/* Roam only, and scoped to the canvas — drei defaults to `document`, which would also
           trigger pointer-lock from clicks on the UI overlay. */}
-      {mode === 'roam' && <PointerLockControls selector="canvas" />}
+      {mode === 'roam' && !touch && <PointerLockControls selector="canvas" />}
+      {touch && <TouchLook />}
     </Canvas>
   );
 }

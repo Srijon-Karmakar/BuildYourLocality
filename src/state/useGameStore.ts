@@ -22,13 +22,16 @@ interface GameState {
   toggleFlying: () => void;
 }
 
+/** Phones and tablets start with lighter graphics so they run smoothly; the player can raise them. */
+const isCoarsePointer = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+
 export const useGameStore = create<GameState>((set) => ({
   mode: 'build',
   roamSubMode: 'peaceful',
   graphics: {
-    drawDistance: 8,
-    shadows: true,
-    textureQuality: 'medium',
+    drawDistance: isCoarsePointer ? 5 : 8,
+    shadows: !isCoarsePointer,
+    textureQuality: isCoarsePointer ? 'low' : 'medium',
   },
   flying: false,
   setMode: (mode) => set({ mode }),
