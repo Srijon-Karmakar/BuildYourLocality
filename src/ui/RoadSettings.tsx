@@ -11,7 +11,7 @@ import {
 import { Icon } from './icons';
 
 const chip = (active: boolean) =>
-  `min-h-10 rounded-lg px-3 py-2 text-xs transition disabled:opacity-30 sm:min-h-0 sm:rounded-md sm:px-2 sm:py-1 ${
+  `min-h-9 rounded-lg px-3 py-2 text-xs transition disabled:opacity-30 sm:min-h-0 sm:rounded-md sm:px-2 sm:py-1 ${
     active ? 'bg-white text-black' : 'bg-white/10 text-white/80 hover:bg-white/20'
   }`;
 
@@ -29,7 +29,7 @@ function Row({ title, children }: { title: string; children: React.ReactNode }) 
 
 function Toggle({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className={`flex min-h-10 items-center justify-between sm:min-h-0 ${disabled ? 'opacity-40' : ''}`}>
+    <label className={`flex min-h-9 items-center justify-between sm:min-h-0 ${disabled ? 'opacity-40' : ''}`}>
       <span className="text-white/80">{label}</span>
       <input type="checkbox" className="h-5 w-5" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
     </label>

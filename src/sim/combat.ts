@@ -1,6 +1,7 @@
 import { atmo } from '../scenes/atmosphere';
 import { cellKey } from '../state/useCityStore';
 import { useGameStore } from '../state/useGameStore';
+import { useWalletStore } from '../state/useWalletStore';
 import { findPath } from './pathfinding';
 import { playSfx } from './sfx';
 import { sim, type Ped } from './simulation';
@@ -339,6 +340,13 @@ class Combat {
     p.weapon = 'fists';
     p.owned = { fists: true, bat: true, pistol: this.subMode === 'survival', shotgun: false, taser: this.subMode === 'survival' };
     p.ammo = { bullets: this.subMode === 'survival' ? 16 : 0, shells: 0, charges: this.subMode === 'survival' ? 3 : 0 };
+    // Loadout bought with tokens (lib/rewards.ts).
+    const unlocks = useWalletStore.getState().unlocks;
+    if (unlocks.includes('shotgun')) {
+      p.owned.shotgun = true;
+      p.ammo.shells = 12;
+    }
+    if (unlocks.includes('wallet')) p.cash = Math.max(p.cash, 500);
     p.kills = 0;
     p.knockouts = 0;
     this.monsters = [];
@@ -406,6 +414,24 @@ class Combat {
     p.shelter = null;
     this.respawn = { ...this.home };
     this.begin();
+  }
+
+  /** After a knock-out in a survival run: get back up where you fell (bought with an ad or tokens). */
+  revive() {
+    const p = this.player;
+    if (!this.run.active || this.run.outcome !== 'lost') return;
+    p.alive = true;
+    p.hp = Math.round(p.maxHp * 0.7);
+    p.hurt = 0;
+    p.deathTimer = 0;
+    p.shelter = null;
+    this.run.outcome = 'none';
+    atmo.rateOverride = SURVIVAL_RATE;
+    // Whatever was standing over the player backs off.
+    for (const m of this.monsters) {
+      if (Math.hypot(m.x - this.px, m.z - this.pz) < 35) m.state = 'dying';
+    }
+    for (const ped of sim.peds) if (ped.role === 'thug') this.calm(ped);
   }
 
   /** After surviving: carry on exploring with the monsters gone. */

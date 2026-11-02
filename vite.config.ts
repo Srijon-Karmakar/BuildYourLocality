@@ -1,8 +1,18 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
+
+/** While developing, ask Google for test ads only so nobody clicks live ads on their own site. */
+const adTestMode = (): Plugin => ({
+  name: 'adsense-test-mode',
+  transformIndexHtml: {
+    order: 'post',
+    handler: (html, ctx) =>
+      ctx.server ? html.replace('<script async src="https://pagead2', '<script async data-adbreak-test="on" src="https://pagead2') : html,
+  },
+})
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), adTestMode()],
 })

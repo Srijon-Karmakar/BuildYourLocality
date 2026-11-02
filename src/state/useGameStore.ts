@@ -21,6 +21,10 @@ export interface GraphicsSettings {
   /** Lower the render resolution automatically when the frame rate drops, raise it again when there is room. */
   adaptive: boolean;
   showFps: boolean;
+  /** Night glow: lit windows, signs and lamps bloom softly. Costs some speed on weak GPUs. */
+  bloom: boolean;
+  /** Gentle camera sway while walking. */
+  headBob: boolean;
 }
 
 interface GameState {
@@ -63,14 +67,14 @@ function savedGraphics(): Partial<GraphicsSettings> {
 export const useGameStore = create<GameState>((set) => ({
   mode: 'build',
   roamSubMode: 'peaceful',
-  graphics: { ...PRESETS[startPreset], preset: startPreset, adaptive: true, showFps: false, ...savedGraphics() },
+  graphics: { ...PRESETS[startPreset], preset: startPreset, adaptive: true, showFps: false, bloom: true, headBob: true, ...savedGraphics() },
   flying: false,
   setMode: (mode) => set({ mode }),
   setRoamSubMode: (roamSubMode) => set({ roamSubMode }),
   setGraphics: (patch) =>
     set((state) => {
       // Toggling the resolution governor or the FPS meter does not make the preset "custom".
-      const changesLook = Object.keys(patch).some((k) => k !== 'adaptive' && k !== 'showFps' && k !== 'preset');
+      const changesLook = Object.keys(patch).some((k) => k !== 'adaptive' && k !== 'showFps' && k !== 'preset' && k !== 'bloom' && k !== 'headBob');
       return { graphics: { ...state.graphics, ...(changesLook ? { preset: 'custom' as const } : {}), ...patch } };
     }),
   setPreset: (preset) => set((state) => ({ graphics: { ...state.graphics, ...PRESETS[preset], preset } })),

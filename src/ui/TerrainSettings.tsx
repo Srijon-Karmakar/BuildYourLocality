@@ -4,7 +4,7 @@ import { BRUSHES, brushOf, useTerrainStore } from '../terrain/terrain';
 import { useBuilderStore } from '../state/useBuilderStore';
 
 const chip = (active: boolean) =>
-  `min-h-10 rounded-lg px-3 py-2 text-xs transition disabled:opacity-30 sm:min-h-0 sm:rounded-md sm:px-2 sm:py-1 ${
+  `min-h-9 rounded-lg px-3 py-2 text-xs transition disabled:opacity-30 sm:min-h-0 sm:rounded-md sm:px-2 sm:py-1 ${
     active ? 'bg-white text-black' : 'bg-white/10 text-white/80 hover:bg-white/20'
   }`;
 

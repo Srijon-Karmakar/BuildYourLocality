@@ -22,6 +22,7 @@ import { FACADES, ROOFS } from '../city/catalog';
 import { warmTextures } from '../city/cityTextures';
 import { atmo } from './atmosphere';
 import { NightLights } from './NightLights';
+import { NightBloom } from './NightBloom';
 import { Precipitation } from './Precipitation';
 import { Environment, HORIZON_COLOR, SkyAndSun } from './SkyAndSun';
 import { sim } from '../sim/simulation';
@@ -197,6 +198,7 @@ export function Scene() {
       <SimLayer />
       <Precipitation />
       <NightLights />
+      <NightBloom />
       <CityBuilder />
       {/* Roam only, and scoped to the canvas — drei defaults to `document`, which would also
           trigger pointer-lock from clicks on the UI overlay. */}

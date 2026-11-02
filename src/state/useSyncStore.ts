@@ -13,6 +13,8 @@ export type SyncStatus =
 export interface SyncConflict {
   localCount: number;
   cloudCount: number;
+  /** There is a free world slot, so the guest work can be kept as a second world. */
+  canAdd: boolean;
 }
 
 interface SyncState {

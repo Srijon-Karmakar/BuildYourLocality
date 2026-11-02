@@ -3,7 +3,7 @@ import { isSupabaseConfigured } from '../lib/supabaseClient';
 import { flushSync } from '../lib/sync';
 import { useAuthStore } from '../state/useAuthStore';
 
-const btn = 'min-h-11 rounded-lg px-3 py-1.5 text-white/80 hover:bg-white/10 disabled:opacity-40 sm:min-h-0';
+const btn = 'min-h-9 rounded-lg px-3 py-1.5 text-white/80 hover:bg-white/10 disabled:opacity-40 sm:min-h-0';
 
 /** Sign-in and sign-out (the city saves itself). `inline` stacks it for the phone menu sheet instead of using dropdowns. */
 export function AccountPanel({ inline = false }: { inline?: boolean }) {
@@ -36,7 +36,7 @@ export function AccountPanel({ inline = false }: { inline?: boolean }) {
 
   if (!isSupabaseConfigured) {
     return (
-      <div className="pointer-events-auto rounded-xl bg-black/50 px-3 py-2 text-sm text-white/60 backdrop-blur-sm">
+      <div className="pointer-events-auto rounded-xl bg-black/38 pointer-coarse:bg-black/62 px-3 py-2 text-sm text-white/60 backdrop-blur-[4px]">
         Accounts off — add Supabase keys to .env.local
       </div>
     );
@@ -44,7 +44,7 @@ export function AccountPanel({ inline = false }: { inline?: boolean }) {
 
   return (
     <div className="pointer-events-auto relative">
-      <div className="flex items-center gap-1 rounded-xl bg-black/50 px-2 py-1.5 text-sm backdrop-blur-sm">
+      <div className="flex items-center gap-1 rounded-xl bg-black/38 pointer-coarse:bg-black/62 px-2 py-1.5 text-sm backdrop-blur-[4px]">
         {session ? (
           <>
             <span className="max-w-40 truncate px-2 text-white/60">{session.user.email}</span>
@@ -60,7 +60,7 @@ export function AccountPanel({ inline = false }: { inline?: boolean }) {
       </div>
 
       {message && (
-        <div className={inline ? 'mt-2 w-full rounded-lg bg-white/10 px-3 py-2 text-xs text-white/80' : 'absolute right-0 top-12 w-64 rounded-lg bg-black/70 px-3 py-2 text-xs text-white/80'}>
+        <div className={inline ? 'mt-2 w-full rounded-lg bg-white/10 px-3 py-2 text-xs text-white/80' : 'absolute right-0 top-12 w-64 rounded-lg bg-black/52 pointer-coarse:bg-black/76 px-3 py-2 text-xs text-white/80'}>
           {message}
         </div>
       )}
@@ -68,7 +68,7 @@ export function AccountPanel({ inline = false }: { inline?: boolean }) {
       {open && !session && (
         <form
           onSubmit={(e) => void submit(e, 'in')}
-          className={inline ? 'mt-2 flex w-full flex-col gap-2 rounded-xl bg-white/10 p-4 text-sm text-white' : 'absolute right-0 top-12 z-10 flex w-64 flex-col gap-2 rounded-xl bg-black/80 p-4 text-sm text-white backdrop-blur-sm'}
+          className={inline ? 'mt-2 flex w-full flex-col gap-2 rounded-xl bg-white/10 p-4 text-sm text-white' : 'absolute right-0 top-12 z-10 flex w-64 flex-col gap-2 rounded-xl bg-black/62 pointer-coarse:bg-black/84 p-4 text-sm text-white backdrop-blur-[4px]'}
         >
           <input
             type="email"
@@ -76,7 +76,7 @@ export function AccountPanel({ inline = false }: { inline?: boolean }) {
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="min-h-11 rounded-lg bg-white/10 px-3 py-1.5 text-base outline-none placeholder:text-white/40 sm:min-h-0 sm:text-sm"
+            className="min-h-9 rounded-lg bg-white/10 px-3 py-1.5 text-base outline-none placeholder:text-white/40 sm:min-h-0 sm:text-sm"
           />
           <input
             type="password"
@@ -85,7 +85,7 @@ export function AccountPanel({ inline = false }: { inline?: boolean }) {
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="min-h-11 rounded-lg bg-white/10 px-3 py-1.5 text-base outline-none placeholder:text-white/40 sm:min-h-0 sm:text-sm"
+            className="min-h-9 rounded-lg bg-white/10 px-3 py-1.5 text-base outline-none placeholder:text-white/40 sm:min-h-0 sm:text-sm"
           />
           <div className="flex gap-2">
             <button type="submit" disabled={busy} className="flex-1 rounded-lg bg-white px-3 py-1.5 text-black disabled:opacity-40">

@@ -19,8 +19,8 @@ function SkyChip({ compact }: { compact: boolean }) {
     <button
       onClick={() => toggle('sky')}
       aria-label="Time and weather"
-      className={`pointer-events-auto flex h-11 items-center gap-1.5 whitespace-nowrap rounded-2xl px-3 tabular-nums text-white backdrop-blur-md transition sm:h-10 sm:rounded-xl ${
-        open ? 'bg-white/25' : 'bg-black/55 active:bg-white/20 sm:hover:bg-black/65'
+      className={`pointer-events-auto flex h-9 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 tabular-nums sm:px-3.5 text-white backdrop-blur-[6px] transition sm:h-10 ${
+        open ? 'bg-white/25' : 'bg-black/40 pointer-coarse:bg-black/64 active:bg-white/20 sm:hover:bg-black/48'
       }`}
     >
       <Icon name={icon} className="text-base" />
@@ -40,22 +40,22 @@ export function TopBar() {
   const toggle = useMenuStore((s) => s.toggle);
 
   const inset = {
-    paddingTop: 'calc(var(--safe-top) + 0.5rem)',
+    paddingTop: 'calc(var(--safe-top) + 0.375rem)',
     paddingLeft: 'calc(var(--safe-left) + 0.5rem)',
     paddingRight: 'calc(var(--safe-right) + 0.5rem)',
   };
 
   return (
     <>
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 sm:px-4" style={inset}>
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-1.5 sm:gap-2 sm:px-4" style={inset}>
         {compact ? <ModeToggle /> : <ModeBar />}
-        <div className="flex items-start gap-2">
+        <div className="flex items-start gap-1.5 sm:gap-2">
           <SyncBadge compact={compact} />
           <SkyChip compact={compact} />
           <button
             onClick={() => toggle()}
             aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-            className="pointer-events-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-black/55 text-xl text-white backdrop-blur-md active:bg-white/20 sm:h-10 sm:w-10 sm:rounded-xl sm:hover:bg-black/65"
+            className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-black/40 pointer-coarse:bg-black/64 text-lg text-white backdrop-blur-[6px] active:bg-white/20 sm:text-xl sm:h-10 sm:w-10 sm:hover:bg-black/48"
           >
             <Icon name={menuOpen ? 'close' : 'menu'} />
           </button>

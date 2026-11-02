@@ -15,6 +15,7 @@ import { BRUSHES, type BrushId } from '../terrain/terrain';
 import { RoadSettings } from './RoadSettings';
 import { TerrainSettings } from './TerrainSettings';
 import { Icon } from './icons';
+import { SidePanel } from './SidePanel';
 import { useIsCompact, useIsTouch } from './useMediaQuery';
 
 const TOOLS_TAB = 'tools' as const;
@@ -54,7 +55,7 @@ for (const type of PIECE_TYPES) ITEMS[PIECES[type].category].push({ id: type, la
 const swatchClass = (active: boolean) =>
   `h-9 w-9 rounded-full border-2 transition sm:h-7 sm:w-7 ${active ? 'scale-110 border-white' : 'border-white/20 hover:border-white/60'}`;
 
-const glass = 'bg-black/55 backdrop-blur-md';
+const glass = 'bg-black/40 pointer-coarse:bg-black/64 backdrop-blur-[6px]';
 
 const HINT_KEY = 'apnagali.hint.seen';
 
@@ -83,7 +84,7 @@ function ControlsHint({ touch }: { touch: boolean }) {
 
   if (!visible) return null;
   return (
-    <div className="pointer-events-none rounded-md bg-black/40 px-2 py-0.5 text-[11px] text-white/70 sm:text-xs">
+    <div className="pointer-events-none rounded-md bg-black/40 pointer-coarse:bg-black/64 px-2 py-0.5 text-[11px] text-white/70 sm:text-xs">
       {touch
         ? 'Tap to place · Drag to pan · Pinch to zoom · Twist to rotate'
         : 'Click: place · R: rotate · Del/X: delete · Ctrl+Z: undo · WASD: pan · Q/E: turn · Right-drag: orbit · Wheel: zoom · Tab: walk'}
@@ -172,40 +173,45 @@ export function BuildPalette() {
     </div>
   );
 
-  const iconBtn = 'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg transition disabled:opacity-30 sm:h-8 sm:w-8 sm:text-base';
+  const iconBtn = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-base transition disabled:opacity-30 sm:h-8 sm:w-8 sm:text-base';
 
   return (
     <>
       {/* Desktop: a fixed side panel. Phone: a sheet opened from the dock's palette button. */}
       {showMaterials && !compact && !selectedId && (
-        <div className={`pointer-events-auto absolute left-4 top-1/2 max-h-[80vh] ${roadTool || terrainTool ? "w-64" : ""} -translate-y-1/2 overflow-y-auto rounded-xl p-3 ${glass}`}>
+        <SidePanel
+          id="materials"
+          side="left"
+          title={roadTool ? 'Road options' : terrainTool ? 'Terrain' : 'Materials'}
+          className={`pointer-events-auto absolute left-4 top-1/2 flex max-h-[80vh] flex-col gap-2 ${roadTool || terrainTool ? 'w-64' : ''} -translate-y-1/2 overflow-y-auto rounded-2xl p-3 ${glass}`}
+        >
           {materials}
-        </div>
+        </SidePanel>
       )}
       {showMaterials && compact && materialsOpen && (
         <div
-          className={`pointer-events-auto absolute inset-x-2 max-h-[45dvh] overflow-y-auto rounded-2xl p-4 ${glass}`}
-          style={{ bottom: 'calc(var(--safe-bottom) + 10.5rem)' }}
+          className={`pointer-events-auto absolute inset-x-2 max-h-[42dvh] overflow-y-auto rounded-2xl p-3 ${glass}`}
+          style={{ bottom: 'calc(var(--safe-bottom) + 8.25rem)' }}
         >
           {materials}
         </div>
       )}
 
       <div
-        className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col items-center gap-1.5 px-2 pt-2 sm:px-4 sm:pb-4"
+        className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col items-center gap-1 px-2 pt-2 sm:gap-1.5 sm:px-4 sm:pb-4"
         style={{ paddingBottom: 'calc(var(--safe-bottom) + 0.5rem)' }}
       >
         {/* Item row: scrolls sideways on a phone, wraps on a desktop. */}
-        <div className={`no-scrollbar pointer-events-auto flex w-full max-w-full gap-1.5 overflow-x-auto rounded-2xl p-1.5 sm:w-auto sm:max-w-[92vw] sm:flex-wrap sm:justify-center sm:overflow-visible ${glass}`}>
+        <div className={`no-scrollbar pointer-events-auto flex w-fit max-w-full gap-1 overflow-x-auto rounded-2xl p-1 sm:p-1.5 sm:w-auto sm:max-w-[92vw] sm:flex-wrap sm:justify-center sm:overflow-visible ${glass}`}>
           {ITEMS[tab].map((item, i) => (
             <button
               key={item.brush ?? item.id}
               onClick={() => activate(item)}
-              className={`flex min-h-14 min-w-[4.25rem] shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl px-2 text-[11px] leading-tight transition sm:min-h-0 sm:min-w-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-sm ${
+              className={`flex min-h-10 min-w-[3.6rem] shrink-0 flex-col items-center justify-center gap-0 rounded-xl px-1.5 text-[11px] leading-tight transition sm:min-h-0 sm:min-w-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-sm ${
                 isActive(item) ? 'bg-white text-black' : 'text-white/80 active:bg-white/20 sm:hover:bg-white/10'
               }`}
             >
-              <span className="text-xl sm:text-base"><Icon name={item.icon ?? ICON_BY_TOOL[item.id] ?? item.id} /></span>
+              <span className="text-lg sm:text-base"><Icon name={item.icon ?? ICON_BY_TOOL[item.id] ?? item.id} /></span>
               <span className="whitespace-nowrap">
                 <span className="mr-1 hidden text-xs opacity-60 sm:inline">{i + 1}</span>
                 {item.label}
@@ -224,10 +230,10 @@ export function BuildPalette() {
                   setConfirmClear(true);
                 }
               }}
-              className={`flex min-h-14 min-w-[4.25rem] shrink-0 flex-col items-center justify-center rounded-xl px-2 text-[11px] transition disabled:opacity-30 sm:min-h-0 sm:flex-row sm:px-3 sm:py-1.5 sm:text-sm ${confirmClear ? 'bg-red-600 text-white' : 'text-red-300 active:bg-red-500/20 sm:hover:bg-red-500/20'}`}
+              className={`flex min-h-10 min-w-[3.6rem] shrink-0 flex-col items-center justify-center rounded-xl px-1.5 text-[11px] transition disabled:opacity-30 sm:min-h-0 sm:flex-row sm:px-3 sm:py-1.5 sm:text-sm ${confirmClear ? 'bg-red-600 text-white' : 'text-red-300 active:bg-red-500/20 sm:hover:bg-red-500/20'}`}
               title="Delete everything (undoable)"
             >
-              <span className="text-xl sm:mr-1.5 sm:text-base"><Icon name="clearall" /></span>
+              <span className="text-lg sm:mr-1.5 sm:text-base"><Icon name="clearall" /></span>
               {confirmClear ? 'Sure?' : 'Clear all'}
             </button>
           )}
@@ -238,7 +244,7 @@ export function BuildPalette() {
             <button
               key={t.id}
               onClick={() => selectTab(t.id)}
-              className={`min-h-11 shrink-0 rounded-xl px-3.5 transition sm:min-h-0 sm:px-3 sm:py-1 ${
+              className={`min-h-8 shrink-0 rounded-xl px-3 transition sm:min-h-0 sm:px-3 sm:py-1 ${
                 tab === t.id ? 'bg-white/90 text-black' : 'text-white/70 active:bg-white/15 sm:hover:bg-white/10'
               }`}
             >

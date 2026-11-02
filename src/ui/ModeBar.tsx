@@ -6,7 +6,7 @@ import { useGameStore, type RoamSubMode } from '../state/useGameStore';
 const ROAM_SUBMODES: RoamSubMode[] = ['peaceful', 'normal', 'survival'];
 
 const seg = (active: boolean) =>
-  `min-h-11 whitespace-nowrap rounded-xl px-3 capitalize transition sm:min-h-0 sm:rounded-lg sm:px-3 sm:py-1.5 ${
+  `min-h-9 whitespace-nowrap rounded-full px-2.5 capitalize transition sm:min-h-0 sm:px-3 sm:py-1.5 ${
     active ? 'bg-white text-black' : 'text-white/75 active:bg-white/20 sm:hover:bg-white/10'
   }`;
 
@@ -15,7 +15,7 @@ export function ModeToggle() {
   const mode = useGameStore((s) => s.mode);
   const setMode = useGameStore((s) => s.setMode);
   return (
-    <div className="pointer-events-auto flex gap-1 rounded-2xl bg-black/55 p-1 text-sm text-white backdrop-blur-md sm:rounded-xl">
+    <div className="pointer-events-auto flex gap-1 rounded-full bg-black/40 pointer-coarse:bg-black/64 p-1 text-sm text-white backdrop-blur-[6px]">
       {(['build', 'roam'] as const).map((m) => (
         <button key={m} onClick={() => setMode(m)} className={seg(mode === m)} title={m === 'build' ? 'Build (Tab)' : 'Walk (Tab)'}>
           <Icon name={m === 'build' ? 'build' : 'walk'} className="mr-1.5 inline" />
@@ -42,7 +42,7 @@ export function RoamOptions({ stacked = false }: { stacked?: boolean }) {
   const info = SUBMODE_INFO[roamSubMode];
 
   return (
-    <div className={`pointer-events-auto flex flex-col gap-2 text-sm text-white ${stacked ? '' : 'rounded-xl bg-black/55 p-1 backdrop-blur-md'}`}>
+    <div className={`pointer-events-auto flex flex-col gap-2 text-sm text-white ${stacked ? '' : 'rounded-full bg-black/40 pointer-coarse:bg-black/64 p-1 backdrop-blur-[6px]'}`}>
       <div className="flex flex-wrap items-center gap-1">
         {ROAM_SUBMODES.map((sub) => (
           <button key={sub} onClick={() => setRoamSubMode(sub)} className={seg(roamSubMode === sub)}>
@@ -53,7 +53,7 @@ export function RoamOptions({ stacked = false }: { stacked?: boolean }) {
         {roamSubMode === 'peaceful' && (
           <button
             onClick={toggleFlying}
-            className={`min-h-11 rounded-xl px-4 transition sm:min-h-0 sm:rounded-lg sm:px-3 sm:py-1.5 ${
+            className={`min-h-9 rounded-full px-4 transition sm:min-h-0 sm:px-3 sm:py-1.5 ${
               flying ? 'bg-sky-400 text-black' : 'text-white/75 active:bg-white/20 sm:hover:bg-white/10'
             }`}
             title="Toggle fly mode (F). Space up, Shift down."
@@ -66,7 +66,7 @@ export function RoamOptions({ stacked = false }: { stacked?: boolean }) {
             setSoundOn(!sound);
             setSound(!sound);
           }}
-          className="min-h-11 rounded-xl px-3 text-white/75 active:bg-white/20 sm:min-h-0 sm:rounded-lg sm:py-1.5 sm:hover:bg-white/10"
+          className="min-h-9 rounded-full px-3 text-white/75 active:bg-white/20 sm:min-h-0 sm:py-1.5 sm:hover:bg-white/10"
           aria-label={sound ? 'Mute sound' : 'Unmute sound'}
           title="Sound effects"
         >

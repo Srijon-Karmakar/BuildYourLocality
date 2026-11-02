@@ -6,9 +6,9 @@ import { Icon } from './icons';
 import { useGameStore } from '../state/useGameStore';
 import { useTouchStore } from '../state/useTouchStore';
 
-const pad = 'pointer-events-auto flex touch-none select-none items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md active:bg-white/30';
+const pad = 'pointer-events-auto flex touch-none select-none items-center justify-center rounded-full bg-black/45 pointer-coarse:bg-black/69 text-white backdrop-blur-[6px] active:bg-white/30';
 
-const STICK_RADIUS = 52;
+const STICK_RADIUS = 40;
 
 /** Floating thumb-stick that drives walking / flying. */
 function Joystick() {
@@ -37,7 +37,7 @@ function Joystick() {
 
   return (
     <div
-      className="pointer-events-auto relative h-36 w-36 touch-none select-none rounded-full bg-black/35 backdrop-blur-md"
+      className="pointer-events-auto relative h-28 w-28 touch-none select-none rounded-full bg-black/35 pointer-coarse:bg-black/59 backdrop-blur-[6px]"
       onPointerDown={(e) => {
         const rect = e.currentTarget.getBoundingClientRect();
         origin.current = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, id: e.pointerId };
@@ -49,7 +49,7 @@ function Joystick() {
       onPointerCancel={release}
     >
       <div
-        className="absolute left-1/2 top-1/2 h-14 w-14 rounded-full bg-white/70 shadow-lg"
+        className="absolute left-1/2 top-1/2 h-9 w-9 rounded-full bg-white/70 shadow-lg"
         style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }}
       />
     </div>
@@ -93,12 +93,12 @@ export function WalkControls() {
         <div className="flex items-end gap-3">
           <div className="grid grid-cols-2 gap-2">
             {sub === 'survival' && (
-              <button className={`${pad} h-12 w-12 text-xl`} onClick={() => combat.interact()} aria-label="Hide inside a building">
+              <button className={`${pad} h-10 w-10 text-xl`} onClick={() => combat.interact()} aria-label="Hide inside a building">
                 <Icon name="door" />
               </button>
             )}
             <button
-              className={`${pad} h-12 w-12 text-xl ${torch ? 'bg-amber-300/80 text-black' : ''}`}
+              className={`${pad} h-10 w-10 text-xl ${torch ? 'bg-amber-300/80 text-black' : ''}`}
               onClick={() => {
                 combat.player.flashlight = !combat.player.flashlight;
                 setTorch(combat.player.flashlight);
@@ -108,7 +108,7 @@ export function WalkControls() {
               <Icon name="flashlight" />
             </button>
             <button
-              className={`${pad} h-12 w-12 text-xl ${crouched ? 'bg-emerald-400/80 text-black' : ''}`}
+              className={`${pad} h-10 w-10 text-xl ${crouched ? 'bg-emerald-400/80 text-black' : ''}`}
               onClick={() => {
                 virtualInput.crouch = !virtualInput.crouch;
                 setCrouched(virtualInput.crouch);
@@ -117,15 +117,15 @@ export function WalkControls() {
             >
               <Icon name="person" />
             </button>
-            <HoldButton label="Run" className="h-12 w-12 text-xl" onHold={(down) => (virtualInput.sprint = down)}>
+            <HoldButton label="Run" className="h-10 w-10 text-xl" onHold={(down) => (virtualInput.sprint = down)}>
               <Icon name="run" />
             </HoldButton>
           </div>
           <div className="flex flex-col items-center gap-3">
-            <HoldButton label="Jump" className="h-12 w-12 text-xl" onHold={(down) => (virtualInput.jump = down)}>
+            <HoldButton label="Jump" className="h-10 w-10 text-xl" onHold={(down) => (virtualInput.jump = down)}>
               <Icon name="up" />
             </HoldButton>
-            <HoldButton label="Attack" className="h-[4.5rem] w-[4.5rem] bg-red-600/60 text-3xl" onHold={(down) => (virtualInput.attack = down)}>
+            <HoldButton label="Attack" className="h-16 w-16 bg-red-600/60 text-3xl" onHold={(down) => (virtualInput.attack = down)}>
               <Icon name="swords" />
             </HoldButton>
           </div>
@@ -134,7 +134,7 @@ export function WalkControls() {
         <div className="flex items-end gap-3">
           <div className="flex flex-col items-center gap-2">
             <button
-              className={`${pad} h-12 w-12 text-xl ${torch ? 'bg-amber-300/80 text-black' : ''}`}
+              className={`${pad} h-10 w-10 text-xl ${torch ? 'bg-amber-300/80 text-black' : ''}`}
               onClick={() => {
                 combat.player.flashlight = !combat.player.flashlight;
                 setTorch(combat.player.flashlight);
@@ -143,20 +143,20 @@ export function WalkControls() {
             >
               <Icon name="flashlight" />
             </button>
-            <button className={`${pad} h-12 w-12 text-sm ${flying ? 'bg-sky-400/80 text-black' : ''}`} onClick={toggleFlying} aria-label="Toggle flying">
+            <button className={`${pad} h-10 w-10 text-sm ${flying ? 'bg-sky-400/80 text-black' : ''}`} onClick={toggleFlying} aria-label="Toggle flying">
               Fly
             </button>
             {flying ? (
-              <HoldButton label="Descend" className="h-12 w-12 text-xl" onHold={(down) => (virtualInput.down = down)}>
+              <HoldButton label="Descend" className="h-10 w-10 text-xl" onHold={(down) => (virtualInput.down = down)}>
                 <Icon name="down" />
               </HoldButton>
             ) : (
-              <HoldButton label="Run" className="h-12 w-12 text-xl" onHold={(down) => (virtualInput.sprint = down)}>
+              <HoldButton label="Run" className="h-10 w-10 text-xl" onHold={(down) => (virtualInput.sprint = down)}>
                 <Icon name="run" />
               </HoldButton>
             )}
           </div>
-          <HoldButton label={flying ? 'Ascend' : 'Jump'} className="h-[4.5rem] w-[4.5rem] text-2xl" onHold={(down) => (virtualInput.jump = down)}>
+          <HoldButton label={flying ? 'Ascend' : 'Jump'} className="h-16 w-16 text-2xl" onHold={(down) => (virtualInput.jump = down)}>
             <Icon name="up" />
           </HoldButton>
         </div>
@@ -177,22 +177,22 @@ export function CameraPad() {
       className="pointer-events-none absolute flex flex-col gap-2"
       style={{ right: 'calc(var(--safe-right) + 0.5rem)', top: '50%', transform: 'translateY(-50%)' }}
     >
-      <HoldButton label="Zoom in" className="h-11 w-11 text-xl" onHold={cameraKey('ZoomIn')}>
+      <HoldButton label="Zoom in" className="h-9 w-9 text-xl" onHold={cameraKey('ZoomIn')}>
         <Icon name="plus" />
       </HoldButton>
-      <HoldButton label="Zoom out" className="h-11 w-11 text-xl" onHold={cameraKey('ZoomOut')}>
+      <HoldButton label="Zoom out" className="h-9 w-9 text-xl" onHold={cameraKey('ZoomOut')}>
         <Icon name="minus" />
       </HoldButton>
-      <HoldButton label="Turn left" className="h-11 w-11 text-lg" onHold={cameraKey('KeyQ')}>
+      <HoldButton label="Turn left" className="h-9 w-9 text-lg" onHold={cameraKey('KeyQ')}>
         <Icon name="rotateBack" />
       </HoldButton>
-      <HoldButton label="Turn right" className="h-11 w-11 text-lg" onHold={cameraKey('KeyE')}>
+      <HoldButton label="Turn right" className="h-9 w-9 text-lg" onHold={cameraKey('KeyE')}>
         <Icon name="rotate" />
       </HoldButton>
-      <HoldButton label="Tilt up" className="h-11 w-11 text-base" onHold={cameraKey('TiltUp')}>
+      <HoldButton label="Tilt up" className="h-9 w-9 text-base" onHold={cameraKey('TiltUp')}>
         <Icon name="up" />
       </HoldButton>
-      <HoldButton label="Tilt down" className="h-11 w-11 text-base" onHold={cameraKey('TiltDown')}>
+      <HoldButton label="Tilt down" className="h-9 w-9 text-base" onHold={cameraKey('TiltDown')}>
         <Icon name="down" />
       </HoldButton>
     </div>
@@ -213,19 +213,19 @@ export function ConfirmBar() {
 
   return (
     <div
-      className="pointer-events-auto absolute left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/70 p-1.5 text-white shadow-lg backdrop-blur-md"
+      className="pointer-events-auto absolute left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/52 pointer-coarse:bg-black/76 p-1.5 text-white shadow-lg backdrop-blur-[6px]"
       style={{ top: 'calc(var(--safe-top) + 4.25rem)' }}
     >
-      <button className="h-12 w-12 rounded-full bg-white/15 text-lg active:bg-white/30" onClick={cancel} aria-label="Cancel">
+      <button className="h-10 w-10 rounded-full bg-white/15 text-lg active:bg-white/30" onClick={cancel} aria-label="Cancel">
         <Icon name="close" />
       </button>
       {!isRoad && (
-        <button className="h-12 w-12 rounded-full bg-white/15 text-lg active:bg-white/30" onClick={rotate} aria-label="Rotate">
+        <button className="h-10 w-10 rounded-full bg-white/15 text-lg active:bg-white/30" onClick={rotate} aria-label="Rotate">
           <Icon name="rotate" />
         </button>
       )}
       <button
-        className={`h-12 rounded-full px-6 text-base font-semibold transition ${valid ? 'bg-emerald-500 text-black active:bg-emerald-400' : 'bg-white/10 text-white/40'}`}
+        className={`h-10 rounded-full px-6 text-base font-semibold transition ${valid ? 'bg-emerald-500 text-black active:bg-emerald-400' : 'bg-white/10 text-white/40'}`}
         disabled={!valid}
         onClick={confirm}
       >

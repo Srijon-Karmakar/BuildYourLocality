@@ -1,7 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { atmo, formatHour } from '../scenes/atmosphere';
 import { combat, SURVIVAL_HOURS, WEAPONS, WEAPON_ORDER, type Stealth, type Toast, type WeaponId } from '../sim/combat';
+import { REVIVE_COST } from '../lib/rewards';
+import { reviveWithAd, reviveWithTokens } from '../lib/wallet';
 import { useGameStore } from '../state/useGameStore';
+import { useWalletStore } from '../state/useWalletStore';
 import { Icon } from './icons';
 import { useIsCompact, useIsTouch } from './useMediaQuery';
 
@@ -81,7 +84,7 @@ function useSnapshot(): Snapshot {
   return snap;
 }
 
-const card = 'rounded-2xl bg-black/55 text-white backdrop-blur-md';
+const card = 'rounded-2xl bg-black/40 pointer-coarse:bg-black/64 text-white backdrop-blur-[6px]';
 
 const STEALTH_VIEW: Record<Stealth, { icon: string; label: string; tone: string }> = {
   hidden: { icon: 'eyeOff', label: 'Hidden', tone: 'bg-emerald-500/80 text-black' },
@@ -102,9 +105,9 @@ function StatusStrip({ s, survival }: { s: Snapshot; survival: boolean }) {
   return (
     <div
       className="pointer-events-none absolute inset-x-0 flex flex-col items-start gap-1.5 px-2 sm:px-4"
-      style={{ top: 'calc(var(--safe-top) + 3.75rem)', paddingLeft: 'calc(var(--safe-left) + 0.5rem)', paddingRight: 'calc(var(--safe-right) + 0.5rem)' }}
+      style={{ top: "calc(var(--safe-top) + 3.25rem)", paddingLeft: 'calc(var(--safe-left) + 0.5rem)', paddingRight: 'calc(var(--safe-right) + 0.5rem)' }}
     >
-      <div className={`flex w-full max-w-xs items-center gap-2 px-3 py-2 ${card}`}>
+      <div className={`flex w-full max-w-[15rem] items-center gap-2 px-3 py-1.5 sm:max-w-xs sm:py-2 ${card}`}>
         <Icon name="heart" className="text-rose-400" />
         <Bar value={s.hp / s.maxHp} tone={s.hp / s.maxHp > 0.35 ? 'bg-rose-500' : 'bg-red-600 animate-pulse'} />
         <span className="w-8 text-right text-xs tabular-nums">{Math.ceil(s.hp)}</span>
@@ -117,7 +120,7 @@ function StatusStrip({ s, survival }: { s: Snapshot; survival: boolean }) {
         </div>
       )}
       {survival && (
-        <div className={`flex w-full max-w-xs items-center gap-2 px-3 py-2 ${card}`}>
+        <div className={`flex w-full max-w-[15rem] items-center gap-2 px-3 py-1.5 sm:max-w-xs sm:py-2 ${card}`}>
           <Icon name={s.isDay ? 'sun' : 'moon'} className={s.isDay ? 'text-amber-300' : 'text-indigo-300'} />
           <span className="text-xs font-semibold tabular-nums">Day {s.day}</span>
           <Bar value={s.progress} tone="bg-indigo-400" />
@@ -136,11 +139,11 @@ function StatusStrip({ s, survival }: { s: Snapshot; survival: boolean }) {
 }
 
 function Toasts({ toasts }: { toasts: Toast[] }) {
-  const tone = { info: 'bg-black/65 text-white', good: 'bg-emerald-600/85 text-white', bad: 'bg-red-600/85 text-white', warn: 'bg-amber-500/90 text-black' };
+  const tone = { info: 'bg-black/48 pointer-coarse:bg-black/72 text-white', good: 'bg-emerald-600/85 text-white', bad: 'bg-red-600/85 text-white', warn: 'bg-amber-500/90 text-black' };
   return (
     <div className="pointer-events-none absolute inset-x-0 flex flex-col items-center gap-1.5 px-4" style={{ top: 'calc(var(--safe-top) + 4rem)' }}>
       {toasts.map((t) => (
-        <div key={t.id} className={`max-w-sm rounded-xl px-3 py-1.5 text-center text-sm shadow-lg backdrop-blur-md ${tone[t.tone]}`}>
+        <div key={t.id} className={`max-w-sm rounded-xl px-3 py-1.5 text-center text-sm shadow-lg backdrop-blur-[6px] ${tone[t.tone]}`}>
           {t.text}
         </div>
       ))}
@@ -156,11 +159,11 @@ function WeaponBar({ s, compact }: { s: Snapshot; compact: boolean }) {
     return (
       <button
         onClick={() => combat.cycleWeapon(1)}
-        className={`pointer-events-auto absolute flex items-center gap-1.5 px-3 py-2 text-sm active:bg-white/20 ${card}`}
-        style={{ left: 'calc(var(--safe-left) + 9rem)', bottom: 'calc(var(--safe-bottom) + 1.25rem)' }}
+        className={`pointer-events-auto absolute flex items-center gap-1.5 px-2.5 py-1.5 text-sm active:bg-white/20 ${card}`}
+        style={{ left: "calc(var(--safe-left) + 0.75rem)", bottom: "calc(var(--safe-bottom) + 8.25rem)" }}
         aria-label="Next weapon"
       >
-        <Icon name={current.icon} className="text-xl" />
+        <Icon name={current.icon} className="text-lg" />
         <span className="tabular-nums">{ammo === null ? '∞' : ammo}</span>
       </button>
     );
@@ -177,7 +180,7 @@ function WeaponBar({ s, compact }: { s: Snapshot; compact: boolean }) {
             disabled={!owned}
             onClick={() => combat.selectWeapon(id)}
             title={`${w.label} (${i + 1})`}
-            className={`flex h-14 w-14 flex-col items-center justify-center rounded-xl text-xl transition ${
+            className={`flex h-11 w-11 flex-col items-center justify-center rounded-xl text-xl transition ${
               s.weapon === id ? 'bg-white text-black' : owned ? 'bg-white/10 hover:bg-white/20' : 'bg-white/5 opacity-30'
             }`}
           >
@@ -193,12 +196,41 @@ function WeaponBar({ s, compact }: { s: Snapshot; compact: boolean }) {
   );
 }
 
-function Overlay({ children, tone = 'bg-black/70' }: { children: ReactNode; tone?: string }) {
-  return <div className={`pointer-events-auto absolute inset-0 z-20 flex items-center justify-center p-6 ${tone} backdrop-blur-sm`}>{children}</div>;
+/** Get back up where you fell: watch an ad, or spend tokens. */
+function ReviveOptions() {
+  const tokens = useWalletStore((s) => s.tokens);
+  const watching = useWalletStore((s) => s.watching);
+  const [message, setMessage] = useState<string | null>(null);
+  return (
+    <div className="flex w-full flex-col items-center gap-2">
+      <button
+        disabled={watching}
+        className={primary + ' flex w-full items-center justify-center gap-2 disabled:opacity-50'}
+        onClick={async () => setMessage(await reviveWithAd())}
+      >
+        <Icon name="watchad" />
+        {watching ? 'Ad playing…' : 'Watch an ad to get back up'}
+      </button>
+      <button
+        disabled={tokens < REVIVE_COST}
+        className={secondary + ' flex w-full items-center justify-center gap-2 disabled:opacity-40'}
+        onClick={() => setMessage(reviveWithTokens())}
+      >
+        <Icon name="coins" />
+        Get back up for {REVIVE_COST} tokens
+        <span className="text-white/50">({tokens})</span>
+      </button>
+      {message && <p className="text-xs text-amber-300">{message}</p>}
+    </div>
+  );
 }
 
-const primary = 'min-h-12 rounded-xl bg-white px-6 py-2 text-base font-semibold text-black active:bg-white/80';
-const secondary = 'min-h-12 rounded-xl bg-white/15 px-5 py-2 text-base text-white active:bg-white/25';
+function Overlay({ children, tone = 'bg-black/52 pointer-coarse:bg-black/76' }: { children: ReactNode; tone?: string }) {
+  return <div className={`pointer-events-auto absolute inset-0 z-20 flex items-center justify-center p-6 ${tone} backdrop-blur-[4px]`}>{children}</div>;
+}
+
+const primary = 'min-h-10 rounded-xl bg-white px-6 py-2 text-base font-semibold text-black active:bg-white/80';
+const secondary = 'min-h-10 rounded-xl bg-white/15 px-5 py-2 text-base text-white active:bg-white/25';
 
 function Tip({ icon, children }: { icon: string; children: ReactNode }) {
   return (
@@ -249,7 +281,7 @@ export function CombatHud() {
       )}
 
       {s.shelter && (
-        <Overlay tone="bg-black/85">
+        <Overlay tone="bg-black/68">
           <div className="flex w-full max-w-xs flex-col items-center gap-4 text-center text-white">
             <Icon name="door" size={48} />
             <div className="text-xl font-semibold">Hiding inside</div>
@@ -334,8 +366,9 @@ export function CombatHud() {
             <p className="text-sm text-white/70">
               You lasted until day {s.day}, {formatHour(atmo.hour)}, and took down {s.kills} creature{s.kills === 1 ? '' : 's'}.
             </p>
-            <button className={primary} onClick={() => combat.retry()}>
-              Try again
+            <ReviveOptions />
+            <button className={secondary} onClick={() => combat.retry()}>
+              Try again from the start
             </button>
           </div>
         </Overlay>
@@ -362,7 +395,7 @@ export function CombatHud() {
       )}
 
       {!survival && !s.alive && (
-        <Overlay tone="bg-black/60">
+        <Overlay tone="bg-black/45 pointer-coarse:bg-black/69">
           <div className="flex flex-col items-center text-center text-white">
             <Icon name="stars" size={48} />
             <h2 className="mt-2 text-xl font-bold">Knocked out</h2>

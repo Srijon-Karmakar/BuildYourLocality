@@ -177,7 +177,7 @@ export function enableNightWindows(material: THREE.MeshStandardMaterial) {
           float lit = step(h, uNight * 0.8);
           float cool = step(0.82, fract(h * 9.7));
           vec3 warm = mix(vec3(1.0, 0.8, 0.5), vec3(0.75, 0.88, 1.0), cool);
-          totalEmissiveRadiance *= emissiveColor.rgb * warm * lit * 1.7;
+          totalEmissiveRadiance *= emissiveColor.rgb * warm * lit * 2.2;
         #endif
         `,
       );

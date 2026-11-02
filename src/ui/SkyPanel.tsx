@@ -28,7 +28,7 @@ const SPEEDS: { id: TimeSpeed; label: string }[] = [
 ];
 
 const chip = (active: boolean) =>
-  `flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-xs transition sm:min-h-0 sm:py-1.5 ${
+  `flex min-h-9 flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-xs transition sm:min-h-0 sm:py-1.5 ${
     active ? 'bg-white text-black' : 'bg-white/10 text-white/80 active:bg-white/25 sm:hover:bg-white/15'
   }`;
 
@@ -42,7 +42,7 @@ export function SkyPanel() {
   const hour = useClock();
 
   return (
-    <div className="flex flex-col gap-4 text-sm text-white">
+    <div className="flex flex-col gap-3 text-xs text-white sm:gap-4 sm:text-sm">
       <div>
         <div className="mb-1 flex items-baseline justify-between">
           <span className="text-white/60">Time of day</span>

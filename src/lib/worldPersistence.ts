@@ -29,21 +29,70 @@ import { type Piece } from '../state/useCityStore';
 import { COVERS, MAX_HEIGHT, MIN_HEIGHT, type TerrainCell } from '../terrain/terrain';
 import { supabase } from './supabaseClient';
 
-/**
- * Writes the city to the signed-in user's single world row. Pieces go in the existing
- * `objects` jsonb column; `chunks` (the old voxel format) is left empty.
- */
-export async function pushPieces(userId: string, pieces: Piece[], terrain: Record<string, TerrainCell> = {}): Promise<string | null> {
+/** A saved world as listed in the world picker (the city itself is fetched on demand). */
+export interface WorldRow {
+  id: string;
+  name: string;
+  updatedAt: number;
+}
+
+/** Postgres "unique violation" / our limit trigger: the database has not been migrated for several worlds yet. */
+const friendly = (error: { message: string; code?: string }): string =>
+  error.code === '23514'
+    ? 'World limit reached: unlock another world slot first.'
+    : error.code === '23505'
+    ? 'Your database still allows one world per account: run the latest supabase/schema.sql.'
+    : error.message;
+
+/** Creates or updates one of the signed-in user's worlds. Pieces go in the `objects` jsonb column. */
+export async function pushWorld(
+  userId: string,
+  id: string,
+  name: string,
+  pieces: Piece[],
+  terrain: Record<string, TerrainCell> = {},
+): Promise<string | null> {
   const { error } = await supabase.from('worlds').upsert(
-    {
-      owner_id: userId,
-      chunks: { terrain },
-      objects: pieces,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'owner_id' },
+    { id, owner_id: userId, name, chunks: { terrain }, objects: pieces, updated_at: new Date().toISOString() },
+    { onConflict: 'id' },
   );
+  return error ? friendly(error) : null;
+}
+
+/** Lists the user's worlds, newest first, without their contents. */
+export async function listWorlds(userId: string): Promise<{ worlds: WorldRow[]; error: string | null }> {
+  const { data, error } = await supabase
+    .from('worlds')
+    .select('id, name, updated_at')
+    .eq('owner_id', userId)
+    .order('updated_at', { ascending: false });
+  if (error) return { worlds: [], error: error.message };
+  return {
+    worlds: (data ?? []).map((r) => ({ id: String(r.id), name: String(r.name ?? 'My World'), updatedAt: Date.parse(String(r.updated_at)) || 0 })),
+    error: null,
+  };
+}
+
+export async function renameWorldRow(userId: string, id: string, name: string): Promise<string | null> {
+  const { error } = await supabase.from('worlds').update({ name }).eq('id', id).eq('owner_id', userId);
   return error?.message ?? null;
+}
+
+export async function deleteWorldRow(userId: string, id: string): Promise<string | null> {
+  const { error } = await supabase.from('worlds').delete().eq('id', id).eq('owner_id', userId);
+  return error?.message ?? null;
+}
+
+/** Extra world slots the account has unlocked (null when it could not be read). */
+export async function fetchExtraSlots(userId: string): Promise<number | null> {
+  const { data, error } = await supabase.from('player_limits').select('extra_worlds').eq('user_id', userId).maybeSingle();
+  if (error) return null;
+  return data ? Math.max(0, Number(data.extra_worlds) || 0) : 0;
+}
+
+export async function saveExtraSlots(userId: string, extra: number): Promise<string | null> {
+  const { error } = await supabase.from('player_limits').upsert({ user_id: userId, extra_worlds: extra }, { onConflict: 'user_id' });
+  return error ? friendly(error) : null;
 }
 
 const isPiece = (value: unknown): value is Piece => {
@@ -198,7 +247,6 @@ export function parsePieces(objects: unknown): Piece[] {
   return saved.filter(isPiece).map(sanitize);
 }
 
-/** Fetches the user's saved city: `null` when they have none yet, or an error message. */
 /** Validates saved terrain edits (heights clamped, unknown covers dropped). */
 export function parseTerrain(chunks: unknown): Record<string, TerrainCell> {
   const raw = (chunks as { terrain?: unknown } | null)?.terrain;
@@ -214,10 +262,32 @@ export function parseTerrain(chunks: unknown): Record<string, TerrainCell> {
   return out;
 }
 
-export async function fetchPieces(
+/** Fetches one saved world's contents (null pieces when the world no longer exists), or an error message. */
+export async function fetchWorld(
   userId: string,
+  id: string,
 ): Promise<{ pieces: Piece[] | null; terrain: Record<string, TerrainCell>; error: string | null }> {
-  const { data, error } = await supabase.from('worlds').select('objects, chunks').eq('owner_id', userId).maybeSingle();
+  const { data, error } = await supabase.from('worlds').select('objects, chunks').eq('owner_id', userId).eq('id', id).maybeSingle();
   if (error) return { pieces: null, terrain: {}, error: error.message };
   return { pieces: data ? parsePieces(data.objects) : null, terrain: data ? parseTerrain(data.chunks) : {}, error: null };
+}
+
+export interface WalletRow {
+  tokens: number;
+  unlocks: string[];
+}
+
+/** The player's tokens and unlocks, or null when they could not be read. */
+export async function fetchWallet(userId: string): Promise<WalletRow | null> {
+  const { data, error } = await supabase.from('player_limits').select('tokens, unlocks').eq('user_id', userId).maybeSingle();
+  if (error) return null;
+  return {
+    tokens: Math.max(0, Math.floor(Number(data?.tokens) || 0)),
+    unlocks: Array.isArray(data?.unlocks) ? data.unlocks.filter((u: unknown): u is string => typeof u === 'string') : [],
+  };
+}
+
+export async function saveWallet(userId: string, wallet: WalletRow): Promise<string | null> {
+  const { error } = await supabase.from('player_limits').upsert({ user_id: userId, tokens: wallet.tokens, unlocks: wallet.unlocks }, { onConflict: 'user_id' });
+  return error?.message ?? null;
 }

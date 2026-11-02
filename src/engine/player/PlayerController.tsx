@@ -17,6 +17,10 @@ const RUN_FACTOR = 1.75;
 const JUMP_SPEED = 7;
 const FLY_SPEED = 14;
 const GROUND_CHECK_DISTANCE = HALF_HEIGHT + RADIUS + 0.15;
+/** Walking sway: radians of step phase per metre travelled, and how far the eye moves. */
+const STRIDE = 1.9;
+const BOB_UP = 0.055;
+const BOB_SIDE = 0.04;
 
 interface PlayerControllerProps {
   start?: [number, number, number];
@@ -52,6 +56,7 @@ export function PlayerController({ start = [0, 2, 0], bodyRef }: PlayerControlle
   const forward = new THREE.Vector3();
   const right = new THREE.Vector3();
   const wishDir = new THREE.Vector3();
+  const bob = { phase: 0, amp: 0 };
 
   useFrame((_, dt) => {
     const body = bodyRef.current;
@@ -157,7 +162,20 @@ export function PlayerController({ start = [0, 2, 0], bodyRef }: PlayerControlle
     // Eye height drops when crouching or knocked out; getting hit shakes the view.
     const down = fighter.crouchAmount * 0.6 + (combat.active && !fighter.alive ? 0.9 : 0);
     const shake = combat.active ? fighter.hurt * 0.07 : 0;
-    camera.position.set(translation.x + (Math.random() - 0.5) * shake, translation.y + EYE_OFFSET - down + (Math.random() - 0.5) * shake, translation.z + (Math.random() - 0.5) * shake);
+    // Walking sway: the eye dips with every step and drifts side to side, stronger when running.
+    // It follows the speed you actually move at, so pushing against a wall or standing still calms it.
+    const speed = Math.hypot(linvel.x, linvel.z);
+    const swaying = grounded && !frozen && useGameStore.getState().graphics.headBob;
+    bob.amp += ((swaying ? Math.min(1.4, speed / WALK_SPEED) : 0) - bob.amp) * Math.min(1, dt * 8);
+    bob.phase += dt * speed * STRIDE;
+    const calm = bob.amp * (1 - 0.5 * fighter.crouchAmount);
+    const bobY = Math.sin(bob.phase * 2) * BOB_UP * calm;
+    const bobSide = Math.sin(bob.phase) * BOB_SIDE * calm;
+    camera.position.set(
+      translation.x + (Math.random() - 0.5) * shake + right.x * bobSide,
+      translation.y + EYE_OFFSET - down + bobY + (Math.random() - 0.5) * shake,
+      translation.z + (Math.random() - 0.5) * shake + right.z * bobSide,
+    );
   });
 
   return (

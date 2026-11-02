@@ -1,14 +1,16 @@
 import { useEffect } from 'react';
 import { startSync } from './lib/sync';
+import { startWallet } from './lib/wallet';
+import { initAds } from './lib/rewardedAd';
 import { useAuthStore } from './state/useAuthStore';
 import { useGameStore } from './state/useGameStore';
 import { Scene } from './scenes/Scene';
 import { BuildingInspector } from './ui/BuildingInspector';
 import { BuildPalette } from './ui/BuildPalette';
 import { CombatHud } from './ui/CombatHud';
-import { OrientationGuard } from './ui/OrientationGuard';
 import { Crosshair } from './ui/Crosshair';
 import { SyncConflictDialog } from './ui/SyncConflictDialog';
+import { SampleAdOverlay } from './ui/SampleAdOverlay';
 import { TopBar } from './ui/TopBar';
 import { CameraPad, ConfirmBar, WalkControls } from './ui/TouchControls';
 import { useIsTouch } from './ui/useMediaQuery';
@@ -21,8 +23,11 @@ function App() {
   useEffect(() => {
     const stopAuth = useAuthStore.getState().init();
     const stopSync = startSync();
+    const stopWallet = startWallet();
+    initAds();
     return () => {
       stopSync();
+      stopWallet();
       stopAuth();
     };
   }, []);
@@ -43,7 +48,7 @@ function App() {
       )}
       {touch && mode === 'roam' && <WalkControls />}
       <SyncConflictDialog />
-      <OrientationGuard />
+      <SampleAdOverlay />
     </div>
   );
 }

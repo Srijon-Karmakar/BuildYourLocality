@@ -18,7 +18,7 @@ import {
 import { Icon } from './icons';
 
 const chip = (active: boolean) =>
-  `min-h-10 rounded-lg px-3 py-2 text-center transition disabled:opacity-30 sm:min-h-0 sm:rounded-md sm:px-2 sm:py-1 ${active ? 'bg-white text-black' : 'bg-white/10 text-white/80 hover:bg-white/20 active:bg-white/25'}`;
+  `min-h-9 rounded-lg px-3 py-2 text-center transition disabled:opacity-30 sm:min-h-0 sm:rounded-md sm:px-2 sm:py-1 ${active ? 'bg-white text-black' : 'bg-white/10 text-white/80 hover:bg-white/20 active:bg-white/25'}`;
 
 const TEXT_MODES: LedMode[] = ['text', 'ticker', 'slides'];
 const SCROLL_MODES: LedMode[] = ['text', 'ticker', 'draw'];
@@ -84,7 +84,7 @@ function Slider({ label, value, min, max, step, format, onChange }: { label: str
     <label className="flex items-center gap-2">
       <span className="w-20 shrink-0 text-white/70">{label}</span>
       <input type="range" min={min} max={max} step={step} value={draft} onChange={(e) => setDraft(Number(e.target.value))} className="min-w-0 flex-1" />
-      <span className="w-12 text-right tabular-nums text-white/70">{format(draft)}</span>
+      <span className="w-10 text-right tabular-nums text-white/70">{format(draft)}</span>
     </label>
   );
 }
@@ -93,7 +93,7 @@ function Colour({ label, value, onChange }: { label: string; value: string; onCh
   const [draft, setDraft] = useDraft(value, onChange);
   return (
     <label className="flex flex-col items-center gap-1">
-      <input type="color" value={draft} onChange={(e) => setDraft(quantize(e.target.value))} className="h-11 w-full min-w-12 cursor-pointer rounded border border-white/20 bg-transparent sm:h-8" />
+      <input type="color" value={draft} onChange={(e) => setDraft(quantize(e.target.value))} className="h-9 w-full min-w-10 cursor-pointer rounded border border-white/20 bg-transparent sm:h-8" />
       <span className="text-white/60">{label}</span>
     </label>
   );
@@ -336,7 +336,7 @@ export function LedEditor({ spec, onChange }: { spec: LedSpec; onChange: (change
         </Group>
       )}
 
-      <button className="flex min-h-10 items-center justify-between text-white/70 sm:min-h-0" onClick={() => setAdvanced((v) => !v)}>
+      <button className="flex min-h-9 items-center justify-between text-white/70 sm:min-h-0" onClick={() => setAdvanced((v) => !v)}>
         Screen hardware
         <span className={`transition ${advanced ? 'rotate-180' : ''}`}>⌄</span>
       </button>
@@ -392,7 +392,7 @@ export function LedEditor({ spec, onChange }: { spec: LedSpec; onChange: (change
               </div>
             )}
           </Group>
-          <label className="flex min-h-10 items-center justify-between sm:min-h-0">
+          <label className="flex min-h-9 items-center justify-between sm:min-h-0">
             <span className="text-white/80">Glow at night</span>
             <input type="checkbox" className="h-5 w-5" checked={look.glow} onChange={(e) => onChange({ glow: e.target.checked })} />
           </label>
