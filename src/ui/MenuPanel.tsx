@@ -1,6 +1,5 @@
 import { useGameStore } from '../state/useGameStore';
 import { useMenuStore, type MenuTab } from '../state/useMenuStore';
-import { AccountPanel } from './AccountPanel';
 import { Icon } from './icons';
 import { RoamOptions } from './ModeBar';
 import { SettingsPanel } from './SettingsPanel';
@@ -13,7 +12,6 @@ const TABS: { id: MenuTab; label: string; icon: string }[] = [
   { id: 'worlds', label: 'Worlds', icon: 'worlds' },
   { id: 'rewards', label: 'Rewards', icon: 'coins' },
   { id: 'graphics', label: 'Graphics', icon: 'sliders' },
-  { id: 'account', label: 'Account', icon: 'user' },
 ];
 
 /**
@@ -59,7 +57,6 @@ export function MenuPanel() {
           {active === 'worlds' && <WorldsPanel />}
           {active === 'rewards' && <RewardsPanel />}
           {active === 'graphics' && <SettingsPanel />}
-          {active === 'account' && <AccountPanel inline />}
           {active === 'walk' && <RoamOptions stacked />}
         </div>
       </div>

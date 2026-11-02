@@ -1,6 +1,7 @@
 import { atmo, formatHour } from '../scenes/atmosphere';
 import { useMenuStore } from '../state/useMenuStore';
 import { useWeatherStore } from '../state/useWeatherStore';
+import { AvatarMenu } from './AvatarMenu';
 import { Icon } from './icons';
 import { MenuPanel } from './MenuPanel';
 import { ModeBar, ModeToggle } from './ModeBar';
@@ -52,6 +53,7 @@ export function TopBar() {
         <div className="flex items-start gap-1.5 sm:gap-2">
           <SyncBadge compact={compact} />
           <SkyChip compact={compact} />
+          <AvatarMenu />
           <button
             onClick={() => toggle()}
             aria-label={menuOpen ? 'Close menu' : 'Open menu'}

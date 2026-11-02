@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type MenuTab = 'sky' | 'worlds' | 'rewards' | 'graphics' | 'account' | 'walk';
+export type MenuTab = 'sky' | 'worlds' | 'rewards' | 'graphics' | 'walk';
 
 interface MenuState {
   open: boolean;

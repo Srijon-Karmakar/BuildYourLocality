@@ -17,9 +17,9 @@ export function ModeToggle() {
   return (
     <div className="pointer-events-auto flex gap-1 rounded-full bg-black/40 pointer-coarse:bg-black/64 p-1 text-sm text-white backdrop-blur-[6px]">
       {(['build', 'roam'] as const).map((m) => (
-        <button key={m} onClick={() => setMode(m)} className={seg(mode === m)} title={m === 'build' ? 'Build (Tab)' : 'Walk (Tab)'}>
-          <Icon name={m === 'build' ? 'build' : 'walk'} className="mr-1.5 inline" />
-          {m === 'build' ? 'Build' : 'Walk'}
+        <button key={m} onClick={() => setMode(m)} className={seg(mode === m)} title={m === 'build' ? 'Build (Tab)' : 'Walk (Tab)'} aria-label={m === 'build' ? 'Build' : 'Walk'}>
+          <Icon name={m === 'build' ? 'build' : 'walk'} className="inline min-[400px]:mr-1.5" />
+          <span className="hidden min-[400px]:inline">{m === 'build' ? 'Build' : 'Walk'}</span>
         </button>
       ))}
     </div>
