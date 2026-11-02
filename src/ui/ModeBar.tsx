@@ -6,7 +6,7 @@ import { useGameStore, type RoamSubMode } from '../state/useGameStore';
 const ROAM_SUBMODES: RoamSubMode[] = ['peaceful', 'normal', 'survival'];
 
 const seg = (active: boolean) =>
-  `min-h-9 whitespace-nowrap rounded-full px-2.5 capitalize transition sm:min-h-0 sm:px-3 sm:py-1.5 ${
+  `h-8 whitespace-nowrap rounded-full px-2.5 capitalize transition sm:h-auto sm:px-3 sm:py-1.5 ${
     active ? 'bg-white text-black' : 'text-white/75 active:bg-white/20 sm:hover:bg-white/10'
   }`;
 
@@ -15,7 +15,7 @@ export function ModeToggle() {
   const mode = useGameStore((s) => s.mode);
   const setMode = useGameStore((s) => s.setMode);
   return (
-    <div className="pointer-events-auto flex gap-1 rounded-full bg-black/40 pointer-coarse:bg-black/64 p-1 text-sm text-white backdrop-blur-[6px]">
+    <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-black/40 pointer-coarse:bg-black/64 p-0.5 text-sm sm:p-1 text-white backdrop-blur-[6px]">
       {(['build', 'roam'] as const).map((m) => (
         <button key={m} onClick={() => setMode(m)} className={seg(mode === m)} title={m === 'build' ? 'Build (Tab)' : 'Walk (Tab)'} aria-label={m === 'build' ? 'Build' : 'Walk'}>
           <Icon name={m === 'build' ? 'build' : 'walk'} className="inline min-[400px]:mr-1.5" />

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SoundSettings } from './SoundSettings';
 import { construction, useConstructionStore } from '../sim/construction';
 import { useBuildRulesStore, type ConstructionMode } from '../state/useBuildRulesStore';
 import { useGameStore, type QualityPreset } from '../state/useGameStore';
@@ -72,6 +73,9 @@ export function SettingsPanel() {
       />
       <Toggle label="Night glow" hint="Windows, signs and lamps bloom after dark" checked={graphics.bloom} onChange={(bloom) => setGraphics({ bloom })} />
       <Toggle label="Walking sway" hint="Camera bob while you walk" checked={graphics.headBob} onChange={(headBob) => setGraphics({ headBob })} />
+      <div className="border-t border-white/10 pt-3">
+        <SoundSettings />
+      </div>
       <Toggle label="Show FPS" checked={graphics.showFps} onChange={(showFps) => setGraphics({ showFps })} />
 
       <button onClick={() => setAdvanced((v) => !v)} className="flex min-h-9 items-center justify-between text-white/70 sm:min-h-0">

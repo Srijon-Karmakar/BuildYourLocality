@@ -1,8 +1,10 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { virtualInput, virtualKeys } from '../engine/viewState';
+import { viewState, virtualInput, virtualKeys } from '../engine/viewState';
 import { useBuilderStore } from '../state/useBuilderStore';
 import { combat } from '../sim/combat';
 import { Icon } from './icons';
+import { useVehicleSnap } from './VehicleHud';
+import { vehicle } from '../sim/vehicle';
 import { useGameStore } from '../state/useGameStore';
 import { useTouchStore } from '../state/useTouchStore';
 
@@ -75,7 +77,7 @@ function HoldButton({ onHold, children, className = '', label }: { onHold: (down
 }
 
 /** Walk mode on a phone: joystick on the left, jump / fly buttons on the right. Looking is drag-anywhere. */
-export function WalkControls() {
+function OnFootControls({ nearCar }: { nearCar: boolean }) {
   const flying = useGameStore((s) => s.flying);
   const toggleFlying = useGameStore((s) => s.toggleFlying);
   const sub = useGameStore((s) => s.roamSubMode);
@@ -89,6 +91,16 @@ export function WalkControls() {
       style={{ paddingBottom: 'calc(var(--safe-bottom) + 1.25rem)', paddingLeft: 'calc(var(--safe-left) + 1.25rem)', paddingRight: 'calc(var(--safe-right) + 1.25rem)' }}
     >
       <Joystick />
+      {nearCar && (
+        <button
+          className={`${pad} absolute h-14 w-14 bg-emerald-500/70 text-2xl`}
+          style={{ right: 'calc(var(--safe-right) + 9.5rem)', bottom: 'calc(var(--safe-bottom) + 1.25rem)' }}
+          onClick={() => vehicle.tryEnter(viewState.x, viewState.z)}
+          aria-label="Drive"
+        >
+          <Icon name="car" />
+        </button>
+      )}
       {fighting ? (
         <div className="flex items-end gap-3">
           <div className="grid grid-cols-2 gap-2">
@@ -233,4 +245,39 @@ export function ConfirmBar() {
       </button>
     </div>
   );
+}
+
+/** Behind the wheel on a phone: the stick steers and gives gas or brake, buttons for handbrake, horn, view and getting out. */
+function DriveControls() {
+  const snap = useVehicleSnap();
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between px-5"
+      style={{ paddingBottom: 'calc(var(--safe-bottom) + 4rem)', paddingLeft: 'calc(var(--safe-left) + 1.25rem)', paddingRight: 'calc(var(--safe-right) + 1.25rem)' }}
+    >
+      <Joystick />
+      <div className="flex items-end gap-3">
+        <div className="flex flex-col items-center gap-2">
+          <button className={`${pad} h-10 w-10 text-xl`} onClick={() => vehicle.exit()} aria-label="Get out">
+            <Icon name="exitcar" />
+          </button>
+          <button className={`${pad} h-10 w-10 text-xl`} onClick={() => (vehicle.view = vehicle.view === 'chase' ? 'hood' : 'chase')} aria-label="Change view">
+            <Icon name="view" />
+          </button>
+          <HoldButton label="Horn" className="h-12 w-12 text-xl" onHold={(down) => (virtualInput.horn = down)}>
+            <Icon name="sound" />
+          </HoldButton>
+        </div>
+        <HoldButton label="Handbrake" className={`h-16 w-16 text-3xl ${snap.kmh > 30 ? 'bg-amber-500/60' : ''}`} onHold={(down) => (virtualInput.jump = down)}>
+          <Icon name="handbrake" />
+        </HoldButton>
+      </div>
+    </div>
+  );
+}
+
+/** Walk mode on a phone, or the wheel when driving. */
+export function WalkControls() {
+  const snap = useVehicleSnap();
+  return snap.active ? <DriveControls /> : <OnFootControls nearCar={!!snap.near} />;
 }

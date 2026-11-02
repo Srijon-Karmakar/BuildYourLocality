@@ -67,7 +67,7 @@ function savedGraphics(): Partial<GraphicsSettings> {
 export const useGameStore = create<GameState>((set) => ({
   mode: 'build',
   roamSubMode: 'peaceful',
-  graphics: { ...PRESETS[startPreset], preset: startPreset, adaptive: true, showFps: false, bloom: true, headBob: true, ...savedGraphics() },
+  graphics: { ...PRESETS[startPreset], preset: startPreset, adaptive: true, showFps: false, bloom: !isCoarsePointer, headBob: true, ...savedGraphics() },
   flying: false,
   setMode: (mode) => set({ mode }),
   setRoamSubMode: (roamSubMode) => set({ roamSubMode }),

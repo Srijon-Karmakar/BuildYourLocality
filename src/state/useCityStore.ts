@@ -7,7 +7,10 @@ import {
   MIN_LOT,
   PIECES,
   fitBlocks,
+  CELL,
   ROAD_LIKE,
+  isOverlay,
+  keepsClear,
   crossingArms,
   resolveRoad,
   roadLayout,
@@ -38,9 +41,81 @@ export interface Piece extends StyleOverrides {
   rot: number;
   facade: FacadeId;
   roof: RoofId;
+  /** Overlay pieces (trees) sharing a cell are nudged apart: metres east / south of the cell centre. */
+  offset?: [number, number];
 }
 
 export const cellKey = (gx: number, gz: number) => `${gx},${gz}`;
+
+/** Overlays and walls stand over or beside other things instead of taking their cell. */
+export const claimsCell = (type: PieceType) => !isOverlay(type) && type !== 'wall';
+
+const overlayCache = new WeakMap<Record<string, Piece>, Map<string, string[]>>();
+
+/** Overlay pieces (trees) by cell, oldest first. Recomputed only when the city changes. */
+function overlaysByCell(pieces: Record<string, Piece>): Map<string, string[]> {
+  let cached = overlayCache.get(pieces);
+  if (!cached) {
+    cached = new Map();
+    for (const piece of Object.values(pieces)) {
+      if (!isOverlay(piece.type)) continue;
+      const key = cellKey(piece.gx, piece.gz);
+      const list = cached.get(key);
+      if (list) list.push(piece.id);
+      else cached.set(key, [piece.id]);
+    }
+    overlayCache.set(pieces, cached);
+  }
+  return cached;
+}
+
+/** Overlay pieces (trees) whose centre lies within `radius` metres of a world point. */
+export function overlaysNear(pieces: Record<string, Piece>, x: number, z: number, radius: number): Piece[] {
+  const map = overlaysByCell(pieces);
+  const found: Piece[] = [];
+  const reach = Math.ceil(radius / CELL) + 1;
+  const cx = Math.floor(x / CELL);
+  const cz = Math.floor(z / CELL);
+  for (let gx = cx - reach; gx <= cx + reach; gx++) {
+    for (let gz = cz - reach; gz <= cz + reach; gz++) {
+      for (const id of map.get(cellKey(gx, gz)) ?? []) {
+        const p = pieces[id];
+        const px = (p.gx + 0.5) * CELL + (p.offset?.[0] ?? 0);
+        const pz = (p.gz + 0.5) * CELL + (p.offset?.[1] ?? 0);
+        if (Math.hypot(px - x, pz - z) <= radius) found.push(p);
+      }
+    }
+  }
+  return found;
+}
+
+/** The wall whose line runs closest to a ground point, if one is within `reach` metres. */
+export function wallNear(pieces: Record<string, Piece>, x: number, z: number, reach: number): Piece | undefined {
+  let best: Piece | undefined;
+  let bestD = reach;
+  const cx = Math.floor(x / CELL);
+  const cz = Math.floor(z / CELL);
+  for (const p of Object.values(pieces)) {
+    if (p.type !== 'wall' || Math.abs(p.gx - cx) > 1 || Math.abs(p.gz - cz) > 1) continue;
+    // Distance from the point to the wall's line segment.
+    const x0 = p.gx * CELL;
+    const z0 = p.gz * CELL;
+    const dx = p.rot === 0 ? Math.max(x0 - x, 0, x - (x0 + CELL)) : Math.abs(x - x0);
+    const dz = p.rot === 0 ? Math.abs(z - z0) : Math.max(z0 - z, 0, z - (z0 + CELL));
+    const d = Math.hypot(dx, dz);
+    if (d < bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+  return best;
+}
+
+/** What a click on this cell means: the most recently planted overlay, else the piece that claims the cell. */
+export function topIdAt(pieces: Record<string, Piece>, occupancy: Record<string, string>, gx: number, gz: number): string | undefined {
+  const overlays = overlaysByCell(pieces).get(cellKey(gx, gz));
+  return overlays?.[overlays.length - 1] ?? occupancy[cellKey(gx, gz)];
+}
 
 /** Every grid cell a piece of this type covers when anchored at (gx, gz). */
 export function footprintCells(
@@ -144,6 +219,11 @@ export type PiecePatch = Partial<
     | 'leds'
     | 'roofExtras'
     | 'balconies'
+    | 'cornice'
+    | 'corners'
+    | 'bands'
+    | 'tree'
+    | 'wall'
     | 'sign'
     | 'accent'
     | 'scale'
@@ -167,6 +247,10 @@ interface CityState extends Snapshot {
   place: (piece: Omit<Piece, 'id'>) => boolean;
   /** Removes whichever piece covers the cell. */
   removeAt: (gx: number, gz: number) => boolean;
+  /** Plants many trees as one undo step; each must pass the usual placement rules. Returns how many were planted. */
+  placeMany: (pieces: Omit<Piece, 'id'>[]) => number;
+  /** Removes many pieces as one undo step. Returns how many went. */
+  removeMany: (ids: string[]) => number;
   removeById: (id: string) => boolean;
   /** Moves/rotates an existing piece to a new anchor, keeping all its customisation. */
   movePiece: (id: string, gx: number, gz: number, rot: number) => boolean;
@@ -174,6 +258,8 @@ interface CityState extends Snapshot {
   setLot: (id: string, lot: [number, number]) => boolean;
   paintAt: (gx: number, gz: number, facade: FacadeId, roof: RoofId) => boolean;
   updatePiece: (id: string, patch: PiecePatch) => void;
+  /** Applies a change to many pieces as one undo step. `change` may return null to leave a piece alone. */
+  updateMany: (ids: string[], change: (piece: Piece) => PiecePatch | null) => number;
   /** Applies road settings to many road pieces as one undo step; pieces that can't widen are skipped. Returns how many changed. */
   updateRoads: (ids: string[], road: Partial<RoadSpec>) => number;
   /** Deletes every piece (undoable). */
@@ -185,6 +271,21 @@ interface CityState extends Snapshot {
   endStroke: () => void;
   undo: () => void;
   redo: () => void;
+}
+
+/** The piece with a patch applied (floors and blocks kept within limits), or null when nothing changes. */
+function applyPatch(piece: Piece, patch: PiecePatch): Piece | null {
+  const next = { ...piece, ...patch };
+  if (patch.floors !== undefined) {
+    next.floors = Math.min(MAX_FLOORS, Math.max(MIN_FLOORS, Math.round(patch.floors)));
+  }
+  if (patch.blocks) {
+    next.blocks = fitBlocks(patch.blocks, piece.lot ?? PIECES[piece.type].footprint)
+      .slice(0, MAX_BLOCKS)
+      .map((b) => ({ ...b, floors: Math.min(MAX_FLOORS, Math.max(MIN_FLOORS, Math.round(b.floors))) }));
+  }
+  if (Object.keys(patch).every((k) => JSON.stringify(piece[k as keyof PiecePatch]) === JSON.stringify(next[k as keyof PiecePatch]))) return null;
+  return next;
 }
 
 // Stroke state is bookkeeping, not UI state, so it lives outside the store.
@@ -209,7 +310,16 @@ export const useCityStore = create<CityState>((set, get) => {
     canPlace: (type, gx, gz, rot, lot, ignoreId, road) => {
       const { occupancy, pieces } = get();
       const cells = footprintCells(type, gx, gz, rot, lot);
-      if (!cells.every((key) => !occupancy[key] || occupancy[key] === ignoreId)) return false;
+      if (type === 'wall') {
+        // One wall to an edge (placing again restyles it), and never in water.
+        const edge = Object.values(pieces).some((p) => p.type === 'wall' && p.gx === gx && p.gz === gz && p.rot === rot && p.id !== ignoreId);
+        return !edge && buildable(gx, gz);
+      }
+      if (isOverlay(type)) {
+        // Trees can go over anything that is not a road, track or airfield.
+        const under = pieces[occupancy[cells[0]]];
+        if (under && under.id !== ignoreId && keepsClear(under.type)) return false;
+      } else if (!cells.every((key) => !occupancy[key] || occupancy[key] === ignoreId)) return false;
       // The ground must suit it: level for buildings, level or water (a bridge) for roads.
       const suits = ROAD_LIKE.includes(type) ? roadable : buildable;
       if (!cells.every((key) => suits(...(key.split(',').map(Number) as [number, number])))) return false;
@@ -228,8 +338,17 @@ export const useCityStore = create<CityState>((set, get) => {
       const history = record();
       set((state) => {
         const occupancy = { ...state.occupancy };
-        for (const key of footprintCells(piece.type, piece.gx, piece.gz, piece.rot, piece.lot)) occupancy[key] = id;
-        return { ...history, pieces: { ...state.pieces, [id]: { ...piece, id } }, occupancy };
+        const placed: Piece = { ...piece, id };
+        if (isOverlay(piece.type)) {
+          // Not claiming the cell; when it is already busy, step aside so the trees do not sit on top of each other.
+          const key = cellKey(piece.gx, piece.gz);
+          if (occupancy[key] || overlaysByCell(state.pieces).has(key)) {
+            placed.offset = [Math.round((Math.random() - 0.5) * 4.4 * 10) / 10, Math.round((Math.random() - 0.5) * 4.4 * 10) / 10];
+          }
+        } else {
+          if (claimsCell(piece.type)) for (const key of footprintCells(piece.type, piece.gx, piece.gz, piece.rot, piece.lot)) occupancy[key] = id;
+        }
+        return { ...history, pieces: { ...state.pieces, [id]: placed }, occupancy };
       });
       // Building clears any trees on the plot.
       useTerrainStore.getState().clearCover(footprintCells(piece.type, piece.gx, piece.gz, piece.rot, piece.lot));
@@ -246,14 +365,46 @@ export const useCityStore = create<CityState>((set, get) => {
         const pieces = { ...state.pieces };
         delete pieces[id];
         const occupancy = { ...state.occupancy };
-        for (const key of footprintCells(piece.type, piece.gx, piece.gz, piece.rot, piece.lot)) delete occupancy[key];
+        if (claimsCell(piece.type)) for (const key of footprintCells(piece.type, piece.gx, piece.gz, piece.rot, piece.lot)) delete occupancy[key];
         return { ...history, pieces, occupancy };
       });
       return true;
     },
 
+    placeMany: (list) => {
+      const accepted = list.filter((p) => get().canPlace(p.type, p.gx, p.gz, p.rot, p.lot, undefined, p.road));
+      if (accepted.length === 0) return 0;
+      const history = record();
+      set((state) => {
+        const pieces = { ...state.pieces };
+        for (const piece of accepted) {
+          const id = crypto.randomUUID();
+          pieces[id] = { ...piece, id };
+        }
+        return { ...history, pieces };
+      });
+      return accepted.length;
+    },
+
+    removeMany: (ids) => {
+      const present = ids.filter((id) => get().pieces[id]);
+      if (present.length === 0) return 0;
+      const history = record();
+      set((state) => {
+        const pieces = { ...state.pieces };
+        const occupancy = { ...state.occupancy };
+        for (const id of present) {
+          const piece = pieces[id];
+          delete pieces[id];
+          if (claimsCell(piece.type)) for (const key of footprintCells(piece.type, piece.gx, piece.gz, piece.rot, piece.lot)) delete occupancy[key];
+        }
+        return { ...history, pieces, occupancy };
+      });
+      return present.length;
+    },
+
     removeAt: (gx, gz) => {
-      const id = get().occupancy[cellKey(gx, gz)];
+      const id = topIdAt(get().pieces, get().occupancy, gx, gz);
       return id ? get().removeById(id) : false;
     },
 
@@ -264,8 +415,10 @@ export const useCityStore = create<CityState>((set, get) => {
       const history = record();
       set((state) => {
         const occupancy = { ...state.occupancy };
-        for (const key of footprintCells(piece.type, piece.gx, piece.gz, piece.rot, piece.lot)) delete occupancy[key];
-        for (const key of footprintCells(piece.type, gx, gz, rot, piece.lot)) occupancy[key] = id;
+        if (claimsCell(piece.type)) {
+          for (const key of footprintCells(piece.type, piece.gx, piece.gz, piece.rot, piece.lot)) delete occupancy[key];
+          for (const key of footprintCells(piece.type, gx, gz, rot, piece.lot)) occupancy[key] = id;
+        }
         return { ...history, pieces: { ...state.pieces, [id]: { ...piece, gx, gz, rot } }, occupancy };
       });
       return true;
@@ -326,18 +479,29 @@ export const useCityStore = create<CityState>((set, get) => {
     updatePiece: (id, patch) => {
       const piece = get().pieces[id];
       if (!piece || !PIECES[piece.type].customisable) return;
-      const next = { ...piece, ...patch };
-      if (patch.floors !== undefined) {
-        next.floors = Math.min(MAX_FLOORS, Math.max(MIN_FLOORS, Math.round(patch.floors)));
-      }
-      if (patch.blocks) {
-        next.blocks = fitBlocks(patch.blocks, piece.lot ?? PIECES[piece.type].footprint)
-          .slice(0, MAX_BLOCKS)
-          .map((b) => ({ ...b, floors: Math.min(MAX_FLOORS, Math.max(MIN_FLOORS, Math.round(b.floors))) }));
-      }
-      if (Object.keys(patch).every((k) => piece[k as keyof PiecePatch] === next[k as keyof PiecePatch])) return;
+      const next = applyPatch(piece, patch);
+      if (!next) return;
       const history = record();
       set((state) => ({ ...history, pieces: { ...state.pieces, [id]: next } }));
+    },
+
+    updateMany: (ids, change) => {
+      const updates: Piece[] = [];
+      for (const id of ids) {
+        const piece = get().pieces[id];
+        if (!piece || !PIECES[piece.type].customisable) continue;
+        const patch = change(piece);
+        const next = patch ? applyPatch(piece, patch) : null;
+        if (next) updates.push(next);
+      }
+      if (updates.length === 0) return 0;
+      const history = record();
+      set((state) => {
+        const pieces = { ...state.pieces };
+        for (const piece of updates) pieces[piece.id] = piece;
+        return { ...history, pieces };
+      });
+      return updates.length;
     },
 
     clear: () => {
@@ -351,6 +515,7 @@ export const useCityStore = create<CityState>((set, get) => {
       const occupancy: Record<string, string> = {};
       for (const piece of list) {
         pieces[piece.id] = piece;
+        if (!claimsCell(piece.type)) continue;
         for (const key of footprintCells(piece.type, piece.gx, piece.gz, piece.rot, piece.lot)) occupancy[key] = piece.id;
       }
       set({ pieces, occupancy, past: [], future: [] });

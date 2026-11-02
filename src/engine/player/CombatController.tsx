@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { combat, WEAPON_ORDER, type WeaponId } from '../../sim/combat';
 import { useGameStore } from '../../state/useGameStore';
-import { virtualInput } from '../viewState';
+import { viewState, virtualInput } from '../viewState';
+import { vehicle } from '../../sim/vehicle';
 
 const skin = new THREE.MeshStandardMaterial({ color: '#d9a577', roughness: 0.8 });
 const steel = new THREE.MeshStandardMaterial({ color: '#2b2f36', roughness: 0.35, metalness: 0.8 });
@@ -231,7 +232,10 @@ export function CombatController() {
       const digit = /^Digit([1-5])$/.exec(e.code);
       if (digit) combat.selectWeapon(WEAPON_ORDER[Number(digit[1]) - 1]);
       if (e.code === 'KeyC' || e.code === 'ControlLeft') crouchKey.current = true;
-      if (e.code === 'KeyE' && !e.repeat) combat.interact();
+      if (e.code === 'KeyE' && !e.repeat) {
+        if (vehicle.active) vehicle.exit();
+        else if (!combat.player.alive || !vehicle.tryEnter(viewState.x, viewState.z)) combat.interact();
+      }
       if (e.code === 'KeyL' && !e.repeat) combat.player.flashlight = !combat.player.flashlight;
       if (e.code === 'KeyQ' && !e.repeat) combat.cycleWeapon(1);
     };

@@ -1,4 +1,4 @@
-import { CELL, PIECES, blockBox, crossingArms, pieceFootprint, resolveRoad, resolveStyle, roadLayout, type PieceType, type RoadLayout } from '../city/catalog';
+import { CELL, PIECES, blockBox, crossingArms, pieceFootprint, resolveRoad, resolveStyle, roadLayout, TREE_TYPES, isTreeType, type PieceType, type RoadLayout } from '../city/catalog';
 import { maxDoorOffset, wallPlacement } from '../city/wall';
 import { cellKey, footprintCells, reservedCells, type Piece } from '../state/useCityStore';
 import { cellTerrain, hasTerrain, walkableTerrain } from '../terrain/terrain';
@@ -145,7 +145,7 @@ export interface SimWorld {
 }
 
 /** Props that physically fill their cell. Lamps, lights and benches' neighbours stay walkable. */
-const SOLID_PROPS = new Set<PieceType>(['tree', 'pine', 'hedge', 'fountain', 'kiosk', 'busstop', 'billboard', 'bench', 'taxistand']);
+const SOLID_PROPS = new Set<PieceType>([...TREE_TYPES, 'hedge', 'fountain', 'kiosk', 'busstop', 'billboard', 'bench', 'taxistand']);
 
 export const emptyWorld = (): SimWorld => ({
   roads: new Map(),
@@ -289,7 +289,7 @@ export function buildWorld(pieces: Piece[]): SimWorld {
       continue;
     }
     if (SOLID_PROPS.has(piece.type)) for (const c of cells) world.blocked.add(c);
-    if (piece.type === 'tree' || piece.type === 'pine' || piece.type === 'hedge' || piece.type === 'park') for (const c of cells) world.foliage.add(c);
+    if (isTreeType(piece.type) || piece.type === 'hedge' || piece.type === 'park') for (const c of cells) world.foliage.add(c);
     if (piece.type === 'lamp') world.lamps.push({ x: cellCentre(piece.gx), z: cellCentre(piece.gz) });
     if (piece.type === 'trafficlight') lights.push({ gx: piece.gx, gz: piece.gz });
     if (piece.type === 'park' || piece.type === 'plaza') {

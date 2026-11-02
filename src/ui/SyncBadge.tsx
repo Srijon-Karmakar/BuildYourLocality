@@ -10,7 +10,7 @@ export function SyncBadge({ compact = false }: { compact?: boolean }) {
   const retry = useSyncStore((s) => s.retry);
 
   const base = compact
-    ? 'pointer-events-auto flex h-9 w-9 items-center justify-center max-[350px]:hidden rounded-full bg-black/40 pointer-coarse:bg-black/64 text-base text-white/85 backdrop-blur-[6px]'
+    ? 'pointer-events-auto flex h-9 w-9 items-center justify-center sm:h-10 sm:w-10 max-[350px]:hidden rounded-full bg-black/40 pointer-coarse:bg-black/64 text-base text-white/85 backdrop-blur-[6px]'
     : 'pointer-events-auto flex h-10 items-center gap-1.5 rounded-full bg-black/40 pointer-coarse:bg-black/64 px-3.5 text-xs text-white/80 backdrop-blur-[6px]';
 
   const view: Record<typeof status, { icon: string; text: string; title: string }> = {

@@ -22,7 +22,11 @@ import { FACADES, ROOFS } from '../city/catalog';
 import { warmTextures } from '../city/cityTextures';
 import { atmo } from './atmosphere';
 import { NightLights } from './NightLights';
+import { VehicleController } from '../engine/player/VehicleController';
+import { vehicle } from '../sim/vehicle';
+import { AudioDirector } from '../audio/AudioDirector';
 import { NightBloom } from './NightBloom';
+import { ProgramWarmup } from './ProgramWarmup';
 import { Precipitation } from './Precipitation';
 import { Environment, HORIZON_COLOR, SkyAndSun } from './SkyAndSun';
 import { sim } from '../sim/simulation';
@@ -38,7 +42,7 @@ function DevHooks() {
   const three = useThree();
   useEffect(() => {
     if (!import.meta.env.DEV) return;
-    Object.assign(window, { __apna: { three, sim, combat, construction, city: useCityStore, game: useGameStore, builder: useBuilderStore, weather: useWeatherStore, terrain: useTerrainStore, viewState } });
+    Object.assign(window, { __apna: { vehicle, three, sim, combat, construction, city: useCityStore, game: useGameStore, builder: useBuilderStore, weather: useWeatherStore, terrain: useTerrainStore, viewState } });
   }, [three]);
   return null;
 }
@@ -167,8 +171,10 @@ export function Scene() {
   const touch = useIsTouch();
   const playerBodyRef = useRef<RapierRigidBody>(null);
   // Generate the texture library in the background so picking a material later is instant.
-  useEffect(() => warmTextures(quality, FACADES.map((f) => f.id), ROOFS.map((r) => r.id)), [quality]);
-  const dprRange: [number, number] = touch ? [0.7, 1.25] : [0.85, 1.5];
+  // (Not on phones: painting a texture stalls a slow CPU for a moment, so there it happens only when a texture is first needed.)
+  useEffect(() => (touch ? undefined : warmTextures(quality, FACADES.map((f) => f.id), ROOFS.map((r) => r.id))), [quality, touch]);
+  const preset = useGameStore((s) => s.graphics.preset);
+  const dprRange: [number, number] = touch ? (preset === 'low' ? [0.6, 1] : [0.7, 1.25]) : [0.85, 1.5];
 
   return (
     <Canvas
@@ -196,9 +202,12 @@ export function Scene() {
       <Water />
       <Vegetation />
       <SimLayer />
+      <VehicleController bodyRef={playerBodyRef} />
+      <AudioDirector />
       <Precipitation />
       <NightLights />
       <NightBloom />
+      {!touch && <ProgramWarmup />}
       <CityBuilder />
       {/* Roam only, and scoped to the canvas — drei defaults to `document`, which would also
           trigger pointer-lock from clicks on the UI overlay. */}

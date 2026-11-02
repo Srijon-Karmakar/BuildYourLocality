@@ -234,6 +234,11 @@ const MAX_LOOT = 9;
 const range = (a: number, b: number) => a + Math.random() * (b - a);
 const pick = <T>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)];
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+/** Which cry a creature makes. */
+function voiceOf(kind: MonsterKind): 'growl' | 'roar' | 'rex_roar' | 'raptor' {
+  return kind === 'dragon' ? 'roar' : kind === 'rex' ? 'rex_roar' : kind === 'raptor' ? 'raptor' : 'growl';
+}
+
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 
 class Combat {
@@ -288,6 +293,8 @@ class Combat {
   readonly run: RunState = { active: false, hours: 0, day: 1, outcome: 'none', elapsed: 0, intro: false };
   /** Set when the player should be put back somewhere (after being knocked out). */
   respawn: { x: number; z: number } | null = null;
+  /** The player is behind the wheel of a car (see sim/vehicle.ts): protected, noisy, and not fighting. */
+  driving = false;
   /** Where the player started this session, used as the respawn point. */
   home = { x: 0, z: 0 };
 
@@ -469,7 +476,7 @@ class Combat {
     p.burstTimer = Math.max(0, p.burstTimer - dt);
     if (p.burstTimer <= 0) p.noiseBurst = 0;
     const walking = moved > 0.6 && !p.shelter;
-    p.noise = Math.max(p.noiseBurst, walking ? (p.crouching ? 3.5 : p.sprinting ? 17 : 9) : 0);
+    p.noise = Math.max(p.noiseBurst, walking ? (p.crouching ? 3.5 : p.sprinting ? 17 : 9) : 0, this.driving ? 22 : 0);
 
     // Taser charges slowly refill.
     if (p.owned.taser && p.ammo.charges < 3) {
@@ -851,7 +858,7 @@ class Combat {
           m.pathAge = 9;
           if (!m.growled) {
             m.growled = true;
-            playSfx('growl', clamp01(1 - dist / 70));
+            playSfx(voiceOf(m.kind), 1, { x: m.x, y: m.y + 1.5, z: m.z });
           }
           playSfx('alert', clamp01(1 - dist / 40) * 0.8);
         }
@@ -1004,7 +1011,7 @@ class Combat {
         m.searching = false;
         if (!m.growled) {
           m.growled = true;
-          playSfx('growl', clamp01(1 - dist / 120));
+          playSfx(voiceOf(m.kind), 1, { x: m.x, y: m.y + 1.5, z: m.z });
         }
       }
       if (m.state === 'chase' && m.lost > st.lose && !sheltered) {
@@ -1099,8 +1106,8 @@ class Combat {
       const speed = 25;
       this.fireballs.push({ id: this.nextId++, x: mx, y: my, z: mz, vx: (dx / l) * speed, vy: (dy / l) * speed, vz: (dz / l) * speed, life: 2.6 });
     }
-    playSfx('shotgun', 0.5);
-    playSfx('growl', 0.8);
+    playSfx('fire', 1, { x: mx, y: my, z: mz });
+    playSfx('roar', 0.9, { x: mx, y: my, z: mz });
   }
 
   private updateFireballs(dt: number) {
@@ -1120,6 +1127,74 @@ class Combat {
   }
 
   // --- Shelter -------------------------------------------------------------------------------
+
+  /** A crash hurts the driver (less than being hit on foot: the car takes most of it). */
+  crashDamage(amount: number) {
+    this.damagePlayer(amount, this.px, this.pz);
+  }
+
+  /** How people react to being dragged out of their car. In a peaceful city they just grumble. */
+  carjackReaction(ped: Ped) {
+    ped.emote = 'angry';
+    ped.emoteTimer = 3;
+    if (!this.active) return;
+    this.toast('You hijacked a car!', 'warn');
+    if (ped.temper > 0.45 || Math.random() < 0.3) this.makeThug(ped, 85);
+    else this.flee(ped, 'scared');
+    // Anyone who saw it scatters.
+    for (const o of sim.peds) {
+      if (o === ped || o.state === 'inside' || o.state === 'down' || o.role !== 'civilian') continue;
+      if (Math.hypot(o.x - ped.x, o.z - ped.z) < 16) this.flee(o, 'scared');
+    }
+  }
+
+  /**
+   * Something is in the way of a moving car at (x, z): people are knocked down, monsters hurt.
+   * Returns how many things were struck.
+   */
+  vehicleHit(x: number, z: number, dx: number, dz: number, speed: number): number {
+    let hits = 0;
+    for (const ped of sim.peds) {
+      if (ped.state === 'inside' || ped.state === 'entering' || ped.state === 'down') continue;
+      if (Math.hypot(ped.x - x, ped.z - z) > 1.9) continue;
+      hits++;
+      if (this.active) {
+        this.hurtPed(ped, speed * 7, dx, dz, speed * 0.5, 3.5, true);
+      } else {
+        // In a peaceful city nobody is hurt, but they leap out of the way, shaken.
+        ped.knockX += dx * speed * 0.3;
+        ped.knockZ += dz * speed * 0.3;
+        this.flee(ped, 'scared');
+      }
+      playSfx('scream', 0.5, { x: ped.x, z: ped.z });
+    }
+    if (this.active) {
+      for (const m of this.monsters) {
+        if (m.state === 'dying' || m.y > 3.5 || m.stun > 0.3) continue;
+        if (Math.hypot(m.x - x, m.z - z) > MONSTER_STATS[m.kind].radius + 1.7) continue;
+        hits++;
+        const ms = MONSTER_STATS[m.kind];
+        m.hp -= speed * 9;
+        m.flash = 1;
+        m.stun = 0.8;
+        m.knockX += dx * speed * 0.4 * ms.knock;
+        m.knockZ += dz * speed * 0.4 * ms.knock;
+        if (m.state === 'wander' || m.state === 'investigate') {
+          m.state = 'chase';
+          m.alert = 1;
+          m.lost = 0;
+          m.target = { x: this.px, z: this.pz };
+        }
+        if (m.hp <= 0) {
+          m.state = 'dying';
+          m.timer = 1.1;
+          this.player.kills++;
+          this.toast(`${ms.label} flattened!`, 'good');
+        }
+      }
+    }
+    return hits;
+  }
 
   /** Press E / the Hide button: duck into the nearest building, or come back out. */
   interact() {
@@ -1281,7 +1356,7 @@ class Combat {
   /** Fires / swings the current weapon along the camera ray. Returns true if it went off. */
   attack(): boolean {
     const p = this.player;
-    if (!this.active || !p.alive || p.shelter || p.cooldown > 0 || this.run.intro || this.run.outcome !== 'none') return false;
+    if (!this.active || !p.alive || p.shelter || p.cooldown > 0 || this.run.intro || this.run.outcome !== 'none' || this.driving) return false;
     const w = WEAPONS[p.weapon];
     if (w.ammo && p.ammo[w.ammo] <= 0) {
       p.cooldown = 0.3;
@@ -1733,7 +1808,7 @@ class Combat {
             ped.swing = 1;
             const aimY = this.aim.y - 0.35;
             this.tracers.push({ x0: ped.x, y0: 1.35, z0: ped.z, x1: this.px + range(-0.6, 0.6), y1: aimY, z1: this.pz + range(-0.6, 0.6), life: 0.09, colour: 0xffe9a0 });
-            playSfx('shot', clamp01(1 - nearPlayer / 30) * 0.7);
+            playSfx('shot', 0.8, { x: ped.x, y: 1.4, z: ped.z });
             if (Math.random() < 0.34 * (1 - 0.3 * p.crouchAmount)) this.damagePlayer(range(7, 11), ped.x, ped.z);
           }
           return true;
@@ -1782,7 +1857,7 @@ class Combat {
         if (d < 16 && this.lineOfSight(m.x, m.z, ped.x, ped.z)) {
           this.threats.set(ped.id, { x: m.x, z: m.z });
           this.flee(ped, 'scared');
-          playSfx('scream', clamp01(1 - nearPlayer / 40) * 0.6);
+          playSfx('scream', 0.8, { x: ped.x, y: 1.5, z: ped.z });
           return true;
         }
       }
@@ -1874,6 +1949,8 @@ class Combat {
   damagePlayer(amount: number, fromX: number, fromZ: number) {
     const p = this.player;
     if (!p.alive || p.shelter || this.run.outcome === 'won') return;
+    // The car's body takes most of it.
+    if (this.driving) amount *= 0.4;
     p.hp -= amount;
     p.hurt = Math.min(1, p.hurt + 0.45 + amount / 70);
     const dx = this.px - fromX;

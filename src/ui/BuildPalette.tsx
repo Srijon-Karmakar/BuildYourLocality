@@ -3,6 +3,7 @@ import {
   CATEGORIES,
   FACADES,
   PIECES,
+  ROAD_PRESETS,
   PIECE_TYPES,
   ROOFS,
   type Category,
@@ -12,7 +13,10 @@ import { useBuilderStore, type BuilderTool } from '../state/useBuilderStore';
 import { useCityStore } from '../state/useCityStore';
 import { useGameStore } from '../state/useGameStore';
 import { BRUSHES, type BrushId } from '../terrain/terrain';
+import { WALL_STYLES, type WallStyleId } from '../city/walls';
+import { WallSettings } from './WallSettings';
 import { RoadSettings } from './RoadSettings';
+import { ForestSettings } from './ForestSettings';
 import { TerrainSettings } from './TerrainSettings';
 import { Icon } from './icons';
 import { SidePanel } from './SidePanel';
@@ -29,6 +33,8 @@ interface Item {
   icon?: string;
   /** Terrain items share the 'terrain' tool and differ by brush. */
   brush?: BrushId;
+  /** Wall items share the 'wall' tool and differ by material. */
+  wallStyle?: WallStyleId;
 }
 
 const ICON_BY_TOOL: Partial<Record<BuilderTool, string>> = {
@@ -40,6 +46,7 @@ const ITEMS: Record<Tab, Item[]> = {
   roads: [],
   buildings: [],
   nature: [],
+  walls: WALL_STYLES.map((s) => ({ id: 'wall' as const, label: s.label, icon: s.icon, wallStyle: s.id })),
   street: [],
   transit: [],
   airport: [],
@@ -51,6 +58,7 @@ const ITEMS: Record<Tab, Item[]> = {
   ],
 };
 for (const type of PIECE_TYPES) ITEMS[PIECES[type].category].push({ id: type, label: PIECES[type].label });
+ITEMS.nature.push({ id: 'forest', label: 'Forest brush', icon: 'woods' });
 
 const swatchClass = (active: boolean) =>
   `h-9 w-9 rounded-full border-2 transition sm:h-7 sm:w-7 ${active ? 'scale-110 border-white' : 'border-white/20 hover:border-white/60'}`;
@@ -95,12 +103,13 @@ function ControlsHint({ touch }: { touch: boolean }) {
 /** The tool dock: scrollable item row, category tabs, undo/redo, plus the material picker. */
 export function BuildPalette() {
   const mode = useGameStore((s) => s.mode);
-  const { tool, brush, facade, roof, selectedId, roadSpec, roadPreset, setTool, setBrush, setFacade, setRoof, setRoadSpec, applyRoadPreset } = useBuilderStore();
+  const { tool, brush, facade, roof, selectedId, multiSelect, setMultiSelect, roadSpec, roadPreset, setTool, setBrush, setFacade, setRoof, setRoadSpec, applyRoadPreset, wall, applyWallStyle } = useBuilderStore();
   const activate = (item: Item) => {
     setTool(item.id);
     if (item.brush) setBrush(item.brush);
+    if (item.wallStyle) applyWallStyle(item.wallStyle);
   };
-  const isActive = (item: Item) => tool === item.id && (!item.brush || brush === item.brush);
+  const isActive = (item: Item) => tool === item.id && (!item.brush || brush === item.brush) && (!item.wallStyle || wall.style === item.wallStyle);
   const [tab, setTab] = useState<Tab>('roads');
   const [materialsOpen, setMaterialsOpen] = useState(false);
   const undo = useCityStore((s) => s.undo);
@@ -122,6 +131,7 @@ export function BuildPalette() {
       if (item) {
         setTool(item.id);
         if (item.brush) setBrush(item.brush);
+        if (item.wallStyle) useBuilderStore.getState().applyWallStyle(item.wallStyle);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -138,11 +148,17 @@ export function BuildPalette() {
   };
   const roadTool = tool === 'road';
   const terrainTool = tool === 'terrain';
-  const showMaterials = roadTool || terrainTool || tool === 'paint' || (tool in PIECES && PIECES[tool as PieceType].paintable);
+  const forestTool = tool === 'forest';
+  const wallTool = tool === 'wall';
+  const showMaterials = roadTool || terrainTool || forestTool || wallTool || tool === 'paint' || (tool in PIECES && PIECES[tool as PieceType].paintable);
   const presetChip = (active: boolean) =>
     `col-span-4 rounded-md px-2 py-2 text-xs transition sm:py-1 ${active ? 'bg-white text-black' : 'bg-white/10 text-white/80 hover:bg-white/20'}`;
 
-  const materials = terrainTool ? (
+  const materials = wallTool ? (
+    <WallSettings />
+  ) : forestTool ? (
+    <ForestSettings />
+  ) : terrainTool ? (
     <TerrainSettings />
   ) : roadTool ? (
     <RoadSettings spec={roadSpec} onChange={setRoadSpec} onPreset={applyRoadPreset} activePreset={roadPreset} />
@@ -182,8 +198,8 @@ export function BuildPalette() {
         <SidePanel
           id="materials"
           side="left"
-          title={roadTool ? 'Road options' : terrainTool ? 'Terrain' : 'Materials'}
-          className={`pointer-events-auto absolute left-4 top-1/2 flex max-h-[80vh] flex-col gap-2 ${roadTool || terrainTool ? 'w-64' : ''} -translate-y-1/2 overflow-y-auto rounded-2xl p-3 ${glass}`}
+          title={roadTool ? 'Road options' : terrainTool ? 'Terrain' : forestTool ? 'Forest brush' : wallTool ? 'Wall options' : 'Materials'}
+          className={`pointer-events-auto absolute left-4 top-1/2 flex max-h-[80vh] flex-col gap-2 ${roadTool || terrainTool || forestTool || wallTool ? 'w-64' : ''} -translate-y-1/2 overflow-y-auto rounded-2xl p-3 ${glass}`}
         >
           {materials}
         </SidePanel>
@@ -218,6 +234,53 @@ export function BuildPalette() {
               </span>
             </button>
           ))}
+          {/* A phone has no side panel, so the road types sit right in the row, and "Options" opens the rest. */}
+          {compact && roadTool &&
+            ROAD_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => applyRoadPreset(p.id)}
+                className={`flex min-h-10 min-w-[3.6rem] shrink-0 flex-col items-center justify-center rounded-xl px-1.5 text-[11px] leading-tight transition ${
+                  roadPreset === p.id ? 'bg-white text-black' : 'text-white/80 active:bg-white/20'
+                }`}
+              >
+                <span className="text-lg">
+                  <Icon name={p.icon} />
+                </span>
+                <span className="whitespace-nowrap">{p.label}</span>
+              </button>
+            ))}
+          {compact && showMaterials && (
+            <button
+              onClick={() => setMaterialsOpen((v) => !v)}
+              className={`flex min-h-10 min-w-[3.6rem] shrink-0 flex-col items-center justify-center rounded-xl px-1.5 text-[11px] leading-tight transition ${
+                materialsOpen ? 'bg-white text-black' : 'bg-white/15 text-white'
+              }`}
+              aria-label="Options"
+            >
+              <span className="text-lg">
+                <Icon name="sliders" />
+              </span>
+              Options
+            </button>
+          )}
+          {tab === TOOLS_TAB && (
+            <button
+              onClick={() => {
+                setMultiSelect(!multiSelect);
+                setTool('select');
+              }}
+              title="Pick several buildings and plants and edit them together (Shift+click, or drag a box)"
+              className={`flex min-h-10 min-w-[3.6rem] shrink-0 flex-col items-center justify-center rounded-xl px-1.5 text-[11px] leading-tight transition sm:min-h-0 sm:min-w-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-sm ${
+                multiSelect ? 'bg-white text-black' : 'text-white/80 active:bg-white/20 sm:hover:bg-white/10'
+              }`}
+            >
+              <span className="text-lg sm:text-base">
+                <Icon name="check" />
+              </span>
+              Multi-select
+            </button>
+          )}
           {tab === TOOLS_TAB && (
             <button
               disabled={!hasPieces}

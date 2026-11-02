@@ -8,6 +8,7 @@ import {
   PIECES,
   blockBox,
   collidersOf,
+  isOverlay,
   pieceFootprint,
   resolveStyle,
   roofHeightOf,
@@ -19,7 +20,8 @@ import {
   type RoadSpec,
   type RoofId,
 } from './catalog';
-import { Balconies, LedScreen, RoofExtras, SignBoard } from './buildingExtras';
+import { Chimney, Balconies, LedScreen, RoofExtras, SignBoard } from './buildingExtras';
+import { BlockDetails } from './buildingDetails';
 import { getFacadeMaterial, getRoofMaterial } from './cityTextures';
 import { WATER_LEVEL, useTerrainStore } from '../terrain/terrain';
 import { LOT_HEIGHT, boxBodyGeometry, gableRoofGeometry } from './geometries';
@@ -27,6 +29,9 @@ import { roadGeometry } from './roadGeometry';
 import { darkMetalMaterial, glassDoorMaterial, metalMaterial, plinthMaterial, slabMaterial, solidMaterial } from './materials';
 import { registerWet } from './nightLights';
 import { PropModel } from './props';
+import { WallModel, wallColliders } from './WallModel';
+import { resolveWall, type WallSpec } from './walls';
+import { seedFromId as seedOfId, type TreeSpec } from './trees';
 import {
   ApronModel,
   ConnectedRail,
@@ -55,6 +60,7 @@ function seedOf(gx: number, gz: number): number {
   const n = Math.sin(gx * 127.1 + gz * 311.7) * 43758.5453;
   return n - Math.floor(n);
 }
+
 
 // --- Roads ---------------------------------------------------------------------
 
@@ -183,6 +189,12 @@ function BlockModel({ block, lot, facade, roof, style, quality, main, tower }: B
           <boxGeometry args={[box.w + 0.12, 0.5, box.d + 0.12]} />
         </mesh>
 
+        <BlockDetails box={box} floors={block.floors} trim={style.trim} cornice={style.cornice} corners={style.corners} bands={style.bands} />
+
+        {main && style.roofStyle === 'gable' && style.roofExtras.includes('chimney') && (
+          <Chimney box={box} top={top} ridgeAlongZ={ridgeAlongZ} />
+        )}
+
         {style.roofStyle === 'gable' ? (
           <mesh
             geometry={ridgeAlongZ ? gableRoofGeometry(box.d, box.w, roofHeightOf(box)) : gableRoofGeometry(box.w, box.d, roofHeightOf(box))}
@@ -307,6 +319,8 @@ export function PieceModel({
   style,
   seed,
   accent,
+  tree,
+  wall,
   scale = 1,
   rot = 0,
   road,
@@ -319,6 +333,8 @@ export function PieceModel({
   style: BuildingStyle;
   seed: number;
   accent?: string;
+  tree?: Partial<TreeSpec>;
+  wall?: Partial<WallSpec>;
   scale?: number;
   /** Quarter-turns of the piece (traffic lights use it to choose which road they serve). */
   rot?: number;
@@ -328,6 +344,7 @@ export function PieceModel({
   gx?: number;
   gz?: number;
 }): ReactNode {
+  if (type === 'wall') return <WallModel spec={resolveWall(wall)} />;
   if (type === 'road') {
     return gx === undefined || gz === undefined ? <RoadModel mask={0} road={road} /> : <ConnectedRoad gx={gx} gz={gz} road={road} />;
   }
@@ -364,7 +381,7 @@ export function PieceModel({
   }
   return (
     <group scale={scale}>
-      <PropModel type={type} seed={seed} accent={accent} led={style.led} rot={rot} />
+      <PropModel type={type} seed={seed} accent={accent} led={style.led} rot={rot} tree={tree} />
     </group>
   );
 }
@@ -372,11 +389,18 @@ export function PieceModel({
 /** A placed piece: its model plus (for solid pieces) fixed colliders for roam mode. */
 export const PieceView = memo(function PieceView({ piece }: { piece: Piece }) {
   const [w, d] = pieceFootprint(piece);
-  const position: [number, number, number] = [(piece.gx + w / 2) * CELL, 0, (piece.gz + d / 2) * CELL];
+  const isWall = piece.type === 'wall';
+  // A wall stands on a grid edge, not in the middle of its cell.
+  const position: [number, number, number] = isWall
+    ? piece.rot === 0
+      ? [(piece.gx + 0.5) * CELL, 0, piece.gz * CELL]
+      : [piece.gx * CELL, 0, (piece.gz + 0.5) * CELL]
+    : [(piece.gx + w / 2) * CELL + (piece.offset?.[0] ?? 0), 0, (piece.gz + d / 2) * CELL + (piece.offset?.[1] ?? 0)];
   const rotation: [number, number, number] = [0, (piece.rot * Math.PI) / 2, 0];
   const style = resolveStyle(piece.type, piece);
-  const colliders = collidersOf(piece.type, style, piece.scale ?? 1);
-  const seed = seedOf(piece.gx, piece.gz);
+  const colliders = isWall ? wallColliders(resolveWall(piece.wall)) : collidersOf(piece.type, style, piece.scale ?? 1);
+  // Trees can share a cell, so each gets its own seed (and with it its own shape) from its id.
+  const seed = isOverlay(piece.type) ? seedOfId(piece.id) : seedOf(piece.gx, piece.gz);
   const model = (
     <PieceModel
       type={piece.type}
@@ -385,6 +409,8 @@ export const PieceView = memo(function PieceView({ piece }: { piece: Piece }) {
       style={style}
       seed={seed}
       accent={piece.accent}
+      tree={piece.tree}
+      wall={piece.wall}
       scale={piece.scale}
       rot={piece.rot}
       road={piece.road}

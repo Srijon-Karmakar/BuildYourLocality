@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { atmo } from '../scenes/atmosphere';
-import { LED_ART_H, LED_ART_PALETTE, LED_ART_W, resolveLed, type LedFont, type LedSpec, type ResolvedLed } from './catalog';
-import { registerNightEmissive } from './nightLights';
+import { LED_ART_H, LED_ART_PALETTE, LED_ART_W, resolveLed, type LedAd, type LedFont, type LedLayout, type LedSpec, type ResolvedLed } from './catalog';
+import { getGlowTexture, registerNightEmissive } from './nightLights';
 
 /**
  * LED screens. Each screen paints a small "logical" canvas (one canvas pixel = one LED), then
@@ -11,8 +11,9 @@ import { registerNightEmissive } from './nightLights';
 
 /** Metres per LED for each detail level. */
 const PITCH = { low: 0.32, medium: 0.16, high: 0.08 } as const;
-const MAX_COLS = 192;
-const MAX_ROWS = 96;
+/** Most LEDs one screen may have, and the longest side: bigger screens get a coarser pitch, never a squashed one. */
+const MAX_PIXELS = 26000;
+const MAX_SIDE = 520;
 /** Repaint rates (frames per second) by how much the picture moves. */
 const FAST_FPS = 20;
 const SLOW_FPS = 2;
@@ -50,11 +51,32 @@ const hash = (n: number) => {
 
 /** Grid size for a screen of this physical size: same LED pitch whatever the shape. */
 export function ledGrid(spec: ResolvedLed, widthM: number, heightM: number): { cols: number; rows: number } {
-  const pitch = PITCH[spec.detail];
+  // One pitch for both directions keeps every LED square, so text and pictures are never stretched.
+  const pitch = Math.max(PITCH[spec.detail], Math.sqrt((widthM * heightM) / MAX_PIXELS), Math.max(widthM, heightM) / MAX_SIDE);
   return {
-    cols: Math.max(8, Math.min(MAX_COLS, Math.round(widthM / pitch))),
-    rows: Math.max(4, Math.min(MAX_ROWS, Math.round(heightM / pitch))),
+    cols: Math.max(8, Math.round(widthM / pitch)),
+    rows: Math.max(4, Math.round(heightM / pitch)),
   };
+}
+
+/** How many panels a screen of this shape is cut into (across, down). */
+export function panelGrid(layout: LedLayout, cols: number, rows: number): { nx: number; ny: number } {
+  if (layout === 'full') return { nx: 1, ny: 1 };
+  if (layout === 'auto' && (rows / cols < 1.6 || cols / rows >= 3.2)) return { nx: 1, ny: 1 };
+  const aspect = layout === 'wide' ? 2 : 1;
+  let best = { nx: 1, ny: 1 };
+  let bestScore = Infinity;
+  for (let nx = 1; nx <= 8; nx++) {
+    for (let ny = 1; ny <= 80; ny++) {
+      if (cols / nx < 10 || rows / ny < 6) continue;
+      const score = Math.abs(Math.log(cols / nx / (rows / ny) / aspect)) + 0.01 * nx * ny;
+      if (score < bestScore) {
+        bestScore = score;
+        best = { nx, ny };
+      }
+    }
+  }
+  return best;
 }
 
 // --- Painting ------------------------------------------------------------------------
@@ -66,6 +88,9 @@ interface Scene {
   spec: ResolvedLed;
   /** Seconds, already multiplied by the screen's speed. */
   t: number;
+  /** This picture's place among the screen's panels (0 for a whole-screen picture). */
+  panelIndex: number;
+  panelCount: number;
   color: Rgb;
   color2: Rgb;
   bg: Rgb;
@@ -124,6 +149,132 @@ function drawMessage(s: Scene, text: string, scroll: ResolvedLed['scroll'], colo
     ctx.fillText(text, cols / 2, shift - size * 0.7);
     ctx.fillText(text, cols / 2, shift - size * 0.7 - period);
   }
+}
+
+/** Splits words into `n` lines of roughly equal length. */
+function balance(words: string[], n: number): string[] {
+  if (n <= 1 || words.length <= 1) return [words.join(' ')];
+  const target = words.join(' ').length / n;
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    if (current && lines.length < n - 1 && (current + ' ' + word).length > target * 1.15) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = current ? current + ' ' + word : word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/** Centred text that wraps onto up to three lines, at the biggest size that fits the box. */
+function drawWrapped(s: Scene, text: string, colour: string | CanvasGradient, box = { y: 0, h: s.rows }) {
+  const { ctx, cols } = s;
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return;
+  let best: { lines: string[]; size: number } | null = null;
+  for (let n = 1; n <= Math.min(3, words.length); n++) {
+    const lines = balance(words, n);
+    let size = Math.max(5, Math.round((box.h * s.spec.textSize) / (n === 1 ? 1 : n * 0.95)));
+    const fits = () => {
+      ctx.font = `bold ${size}px ${FONTS[s.spec.font]}`;
+      return lines.every((l) => ctx.measureText(l).width <= cols * 0.94);
+    };
+    while (size > 5 && !fits()) size -= 1;
+    if (!best || size > best.size * 1.08) best = { lines, size };
+  }
+  if (!best) return;
+  ctx.font = `bold ${best.size}px ${FONTS[s.spec.font]}`;
+  ctx.fillStyle = colour;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  const lineH = best.size * 1.1;
+  const top = box.y + box.h / 2 - (lineH * (best.lines.length - 1)) / 2 + best.size * 0.05;
+  best.lines.forEach((l, i) => ctx.fillText(l, cols / 2, top + i * lineH));
+}
+
+// --- Pictures -------------------------------------------------------------------------
+
+const images = new Map<string, HTMLImageElement>();
+
+/** A loaded picture for an ad, or null while it is still decoding (screens repaint when it arrives). */
+function imageFor(url: string): HTMLImageElement | null {
+  let img = images.get(url);
+  if (!img) {
+    img = new Image();
+    img.onload = () => {
+      for (const screen of screens.values()) screen.lastPaint = 0;
+    };
+    img.src = url;
+    images.set(url, img);
+  }
+  return img.complete && img.naturalWidth > 0 ? img : null;
+}
+
+/** Draws a picture inside a box without ever stretching it: whole (contain) or filling the box and cropping (cover). */
+function drawPicture(ctx: CanvasRenderingContext2D, img: CanvasImageSource, iw: number, ih: number, box: { x: number; y: number; w: number; h: number }, fit: 'contain' | 'cover') {
+  const scale = (fit === 'cover' ? Math.max : Math.min)(box.w / iw, box.h / ih);
+  const w = iw * scale;
+  const h = ih * scale;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(box.x, box.y, box.w, box.h);
+  ctx.clip();
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(img, box.x + (box.w - w) / 2, box.y + (box.h - h) / 2, w, h);
+  ctx.restore();
+}
+
+function drawAd(s: Scene, ad: LedAd) {
+  const { ctx, cols, rows } = s;
+  ctx.fillStyle = ad.bg;
+  ctx.fillRect(0, 0, cols, rows);
+  const img = ad.image ? imageFor(ad.image) : null;
+  if (img) {
+    const caption = ad.text.trim().length > 0;
+    const pictureH = caption ? rows * 0.74 : rows;
+    drawPicture(ctx, img, img.naturalWidth, img.naturalHeight, { x: 0, y: 0, w: cols, h: pictureH }, s.spec.fit);
+    if (caption) drawWrapped(s, ad.text, ad.color, { y: pictureH, h: rows - pictureH });
+  } else if (ad.text.trim()) {
+    drawWrapped(s, ad.text, ad.color);
+  }
+}
+
+/** The playlist: each ad for its time, with the chosen change between them. */
+function drawAds(s: Scene) {
+  const { ctx, cols, spec } = s;
+  const ads = spec.ads;
+  const total = ads.reduce((sum, a) => sum + Math.max(1, a.seconds), 0);
+  let p = ((s.t % total) + total) % total;
+  let i = 0;
+  while (i < ads.length - 1 && p >= Math.max(1, ads[i].seconds)) {
+    p -= Math.max(1, ads[i].seconds);
+    i++;
+  }
+  const shift = spec.panels === 'next' ? s.panelIndex : 0;
+  const index = (i + shift) % ads.length;
+  const dur = Math.max(1, ads[i].seconds);
+  const change = 0.45;
+  if (spec.transition === 'slide' && p < change) {
+    const k = 1 - (1 - p / change) ** 2; // eased 0..1
+    const previous = ads[(index + ads.length - 1) % ads.length];
+    // The last ad slides out to the left while the next slides in from the right.
+    ctx.save();
+    ctx.translate(-k * cols, 0);
+    drawAd(s, previous);
+    ctx.restore();
+    ctx.save();
+    ctx.translate((1 - k) * cols, 0);
+    drawAd(s, ads[index]);
+    ctx.restore();
+    return;
+  }
+  const fade = spec.transition === 'fade' ? Math.min(1, p / change, (dur - p) / change) : 1;
+  ctx.globalAlpha = clamp01(fade);
+  drawAd(s, ads[index]);
+  ctx.globalAlpha = 1;
 }
 
 function drawWeatherIcon(s: Scene, cx: number, cy: number, r: number, kind: string, night: boolean) {
@@ -219,7 +370,7 @@ function drawArt(s: Scene) {
     actx.fillRect(i % LED_ART_W, Math.floor(i / LED_ART_W), 1, 1);
   }
   ctx.imageSmoothingEnabled = false;
-  const w = Math.min(cols, rows * (LED_ART_W / LED_ART_H));
+  const w = (spec.fit === 'cover' ? Math.max : Math.min)(cols, rows * (LED_ART_W / LED_ART_H));
   const h = w * (LED_ART_H / LED_ART_W);
   const y = (rows - h) / 2;
   if (spec.scroll === 'none') {
@@ -246,7 +397,11 @@ function paintScene(s: Scene) {
       fill(s, gradientAcross(s));
       break;
     case 'text':
-      drawMessage(s, spec.text || ' ', spec.scroll, gradientAcross(s));
+      if (spec.scroll === 'none') drawWrapped(s, spec.text || ' ', gradientAcross(s));
+      else drawMessage(s, spec.text || ' ', spec.scroll, gradientAcross(s));
+      break;
+    case 'ads':
+      drawAds(s);
       break;
     case 'ticker':
       drawMessage(s, spec.text || ' ', spec.scroll === 'none' ? 'left' : spec.scroll, gradientAcross(s));
@@ -255,11 +410,11 @@ function paintScene(s: Scene) {
       const slides = spec.text.split('|').map((x) => x.trim()).filter(Boolean);
       if (slides.length === 0) break;
       const slot = t / 3;
-      const idx = Math.floor(slot) % slides.length;
+      const idx = (Math.floor(slot) + (spec.panels === 'next' ? s.panelIndex : 0)) % slides.length;
       const phase = slot - Math.floor(slot);
       const alpha = Math.min(1, phase / 0.15, (1 - phase) / 0.15);
       ctx.globalAlpha = clamp01(alpha);
-      drawMessage(s, slides[idx], 'none', idx % 2 === 0 ? spec.color : spec.color2);
+      drawWrapped(s, slides[idx], idx % 2 === 0 ? spec.color : spec.color2);
       ctx.globalAlpha = 1;
       break;
     }
@@ -417,6 +572,8 @@ function repaintRate(spec: ResolvedLed): number {
     case 'text':
     case 'draw':
       return spec.scroll === 'none' ? 0 : FAST_FPS;
+    case 'ads':
+      return spec.transition === 'cut' ? 4 : 12;
     case 'clock':
     case 'weather':
       return spec.mode === 'weather' && (atmo.kind === 'rain' || atmo.kind === 'snow' || atmo.kind === 'storm' || atmo.kind === 'clear') ? 8 : SLOW_FPS;
@@ -440,7 +597,13 @@ interface LedScreenTexture {
   tile: number;
   seen: number;
   lastPaint: number;
-  speedClock: number;
+  /** Seconds added to the shared clock (chasing or independent screens). */
+  offset: number;
+  panel: { nx: number; ny: number };
+  panelCanvas: HTMLCanvasElement | null;
+  /** Average colour of the picture, 0..1 per channel, refreshed twice a second. */
+  average: [number, number, number];
+  averageAt: number;
   rate: number;
 }
 
@@ -473,20 +636,73 @@ function dotMask(kind: 'square' | 'round', tile: number): HTMLCanvasElement {
 
 const masks = new Map<string, HTMLCanvasElement>();
 
+/** Every screen reads this one clock, so screens with the same content always show the same moment. */
+const EPOCH = performance.now();
+const averageCanvas = document.createElement('canvas');
+averageCanvas.width = averageCanvas.height = 6;
+const averageCtx = averageCanvas.getContext('2d', { willReadFrequently: true })!;
+
 function render(screen: LedScreenTexture, now: number) {
   const { spec } = screen;
-  screen.speedClock += ((now - screen.lastPaint) / 1000) * spec.speed;
   screen.lastPaint = now;
-  paintScene({
-    ctx: screen.lctx,
-    cols: screen.cols,
-    rows: screen.rows,
+  const clock = ((now - EPOCH) / 1000) * spec.speed + screen.offset;
+  const base = {
     spec,
-    t: screen.speedClock,
     color: hexToRgb(spec.color),
     color2: hexToRgb(spec.color2),
     bg: hexToRgb(spec.bg),
-  });
+  };
+  const { nx, ny } = screen.panel;
+  if (nx * ny === 1) {
+    paintScene({ ctx: screen.lctx, cols: screen.cols, rows: screen.rows, t: clock, panelIndex: 0, panelCount: 1, ...base });
+  } else {
+    // A panel at a time on a scratch canvas (some looks write pixels directly, which ignores clipping).
+    const pw = Math.ceil(screen.cols / nx);
+    const ph = Math.ceil(screen.rows / ny);
+    const panel = (screen.panelCanvas ??= document.createElement('canvas'));
+    if (panel.width !== pw || panel.height !== ph) {
+      panel.width = pw;
+      panel.height = ph;
+    }
+    const pctx = panel.getContext('2d')!;
+    for (let iy = 0; iy < ny; iy++) {
+      for (let ix = 0; ix < nx; ix++) {
+        const index = iy * nx + ix;
+        const beat = spec.panels === 'chase' ? index * 0.55 : 0;
+        paintScene({ ctx: pctx, cols: pw, rows: ph, t: clock + beat, panelIndex: index, panelCount: nx * ny, ...base });
+        const x0 = Math.round((ix * screen.cols) / nx);
+        const x1 = Math.round(((ix + 1) * screen.cols) / nx);
+        const y0 = Math.round((iy * screen.rows) / ny);
+        const y1 = Math.round(((iy + 1) * screen.rows) / ny);
+        screen.lctx.imageSmoothingEnabled = false;
+        screen.lctx.drawImage(panel, 0, 0, pw, ph, x0, y0, x1 - x0, y1 - y0);
+      }
+    }
+  }
+  if (now - screen.averageAt > 500) {
+    screen.averageAt = now;
+    averageCtx.drawImage(screen.logical, 0, 0, 6, 6);
+    const px = averageCtx.getImageData(0, 0, 6, 6).data;
+    // Brighter pixels count for more, so a yellow headline on black throws yellow light, not grey.
+    let r = 0;
+    let g = 0;
+    let bl = 0;
+    let mean = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      const lum = (0.3 * px[i] + 0.59 * px[i + 1] + 0.11 * px[i + 2]) / 255;
+      const w = lum * lum + 0.002;
+      r += px[i] * w;
+      g += px[i + 1] * w;
+      bl += px[i + 2] * w;
+      mean += lum;
+    }
+    const pixels = px.length / 4;
+    const peak = Math.max(r, g, bl, 1);
+    // Colour from the weighted mix, brightness from the plain average.
+    const level = Math.min(1, (mean / pixels) * 2.2);
+    screen.average = [(r / peak) * level, (g / peak) * level, (bl / peak) * level];
+
+  }
   if (spec.dots === 'smooth') {
     screen.octx.imageSmoothingEnabled = true;
     screen.octx.drawImage(screen.logical, 0, 0, screen.output.width, screen.output.height);
@@ -504,8 +720,36 @@ function render(screen: LedScreenTexture, now: number) {
   screen.texture.needsUpdate = true;
 }
 
+interface LedGlow {
+  screen: LedScreenTexture;
+  halo: THREE.MeshBasicMaterial;
+  splash: THREE.MeshBasicMaterial;
+  amount: number;
+  /** How much of the light reaches the ground (screens high up light the street less). */
+  ground: number;
+  power: 'always' | 'night';
+}
+const glows = new Map<string, LedGlow>();
+
+/** Tints each screen's halo and ground light with the colour the screen is showing, and fades them with the night. */
+function updateGlows(now: number) {
+  for (const glow of glows.values()) {
+    if (now - glow.screen.seen > 3000) continue;
+    const [r, g, b] = glow.screen.average;
+    const peak = Math.max(r, g, b, 0.001);
+    // A dim picture throws little light; a bright one lots, in its own colour.
+    const strength = Math.min(1, peak * 1.7);
+    const level = glow.power === 'night' ? atmo.lamps : 0.2 + 0.8 * atmo.lamps;
+    glow.halo.color.setRGB(r / peak, g / peak, b / peak);
+    glow.splash.color.copy(glow.halo.color);
+    glow.halo.opacity = level * glow.amount * strength * 0.45;
+    glow.splash.opacity = level * glow.amount * strength * 0.7 * glow.ground;
+  }
+}
+
 function tick(now: number) {
   timer = requestAnimationFrame(tick);
+  updateGlows(now);
   for (const screen of active) {
     if (now - screen.seen > SEEN_WINDOW_MS) {
       active.delete(screen); // off screen: stop repainting until something draws it again
@@ -519,7 +763,25 @@ function tick(now: number) {
 
 /** The part of a spec that decides what the texture looks like (placement and glow are not part of it). */
 function textureKey(spec: ResolvedLed, cols: number, rows: number): string {
-  return [spec.mode, spec.text, spec.color, spec.color2, spec.bg, spec.speed, spec.dots, spec.font, spec.textSize, spec.scroll, spec.pixels, cols, rows].join('|');
+  const ads = spec.mode === 'ads' ? JSON.stringify(spec.ads) : '';
+  // Chasing and independent screens must not share a picture with their neighbours.
+  const place = spec.sync === 'chase' ? spec.side : spec.sync === 'solo' ? `${spec.block}${spec.side}${spec.bottom}${spec.offset}` : '';
+  return [spec.mode, spec.text, spec.color, spec.color2, spec.bg, spec.speed, spec.dots, spec.font, spec.textSize, spec.scroll, spec.pixels, spec.layout, spec.panels, spec.sync, spec.transition, spec.fit, ads.length > 0 ? hashText(ads) : '', place, cols, rows].join('|');
+}
+
+function hashText(text: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return (h >>> 0).toString(36);
+}
+
+const SIDE_ORDER = { front: 0, right: 1, back: 2, left: 3 } as const;
+
+/** Seconds a screen runs ahead of (or behind) the shared clock. */
+function clockOffset(spec: ResolvedLed, key: string): number {
+  if (spec.sync === 'chase') return (SIDE_ORDER[spec.side] ?? 0) * 1.6;
+  if (spec.sync === 'solo') return (parseInt(hashText(key), 36) % 4000) / 100;
+  return 0;
 }
 
 function getScreen(spec: ResolvedLed, cols: number, rows: number): LedScreenTexture {
@@ -564,7 +826,11 @@ function getScreen(spec: ResolvedLed, cols: number, rows: number): LedScreenText
     tile,
     seen: performance.now(),
     lastPaint: performance.now(),
-    speedClock: 0,
+    offset: clockOffset(spec, key),
+    panel: panelGrid(spec.layout, cols, rows),
+    panelCanvas: null,
+    average: [0, 0, 0],
+    averageAt: 0,
     rate: repaintRate(spec),
   };
   screens.set(key, screen);
@@ -584,6 +850,13 @@ function evict() {
     if (now - screen.seen < EVICT_AFTER_MS) continue;
     screens.delete(key);
     active.delete(screen);
+    for (const [glowKey, glow] of glows) {
+      if (glow.screen === screen) {
+        glow.halo.dispose();
+        glow.splash.dispose();
+        glows.delete(glowKey);
+      }
+    }
     screen.texture.dispose();
     for (const [matKey, entry] of materials) {
       if (entry.screenKey === key) {
@@ -623,6 +896,44 @@ export function getLedMaterial(input: LedSpec, widthM: number, heightM: number, 
   if (spec.power === 'night') registerNightEmissive(material, intensity);
   materials.set(key, { material, screenKey: textureKey(spec, cols, rows) });
   return material;
+}
+
+/**
+ * Halo behind a screen and a pool of light on the ground in front of it. Both are additive, take
+ * the colour of the picture as it changes, and grow with the night, like a street lamp's glow.
+ * `ground` (0..1) says how much of the light reaches the street.
+ */
+export function getLedGlow(input: LedSpec, widthM: number, heightM: number, ground: number): { halo: THREE.MeshBasicMaterial; splash: THREE.MeshBasicMaterial } {
+  const spec = resolveLed(input);
+  const { cols, rows } = ledGrid(spec, widthM, heightM);
+  const key = `${textureKey(spec, cols, rows)}|${spec.glowAmount}|${spec.brightness}|${spec.power}|${ground.toFixed(2)}`;
+  let glow = glows.get(key);
+  if (!glow) {
+    const make = () =>
+      new THREE.MeshBasicMaterial({
+        color: spec.color,
+        map: getGlowTexture(),
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+      });
+    glow = { screen: getScreen(spec, cols, rows), halo: make(), splash: make(), amount: spec.glowAmount * Math.min(1.6, spec.brightness), ground, power: spec.power };
+    glows.set(key, glow);
+  }
+  return { halo: glow.halo, splash: glow.splash };
+}
+
+/** The colour a screen is showing right now (0..1 per channel), for the light it throws on its surroundings. */
+export function getLedColour(input: LedSpec, widthM: number, heightM: number): () => [number, number, number] {
+  const spec = resolveLed(input);
+  const { cols, rows } = ledGrid(spec, widthM, heightM);
+  const screen = getScreen(spec, cols, rows);
+  return () => screen.average;
 }
 
 // --- Signs ---------------------------------------------------------------------

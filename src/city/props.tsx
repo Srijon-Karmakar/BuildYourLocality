@@ -1,7 +1,9 @@
 import { useFrame } from '@react-three/fiber';
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { CELL, type LedSpec, type PieceType } from './catalog';
+import { CELL, isTreeType, type LedSpec, type PieceType } from './catalog';
+import { TreeModel } from './TreeModel';
+import type { TreeSpec } from './trees';
 import { getLedMaterial, getSignMaterial } from './ledTextures';
 import { sim } from '../sim/simulation';
 import { lightFor, type Axis, type LightColour } from '../sim/signals';
@@ -12,11 +14,6 @@ import { atmo } from '../scenes/atmosphere';
 lampGlowMaterial.map = getGlowTexture();
 const poolGeometry = new THREE.PlaneGeometry(11, 11);
 
-const trunkMat = new THREE.MeshStandardMaterial({ color: '#5b3a1e', roughness: 0.95 });
-const leafMats = ['#3f8a3a', '#4c9a40', '#5aa046', '#6aa84f'].map(
-  (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.9, flatShading: true }),
-);
-const pineMat = new THREE.MeshStandardMaterial({ color: '#2f6b36', roughness: 0.9, flatShading: true });
 const bulbMat = new THREE.MeshStandardMaterial({ color: '#f4f7ff', emissive: '#dfe9ff', emissiveIntensity: 1.6 });
 const pathMat = new THREE.MeshStandardMaterial({ color: '#d2c7ae', roughness: 0.95 });
 const stoneMat = new THREE.MeshStandardMaterial({ color: '#b9b6ae', roughness: 0.75 });
@@ -39,41 +36,8 @@ interface PropProps {
   led?: LedSpec | null;
   /** Quarter-turns; traffic lights use it to pick the road they serve. */
   rot?: number;
-}
-
-function Tree({ seed, accent }: PropProps) {
-  const scale = 0.85 + seed * 0.4;
-  const leaf = accent ? solidMaterial(accent, 0.9) : leafMats[Math.floor(seed * leafMats.length)];
-  return (
-    <group scale={scale}>
-      <mesh position={[0, 1.2, 0]} material={trunkMat} castShadow>
-        <cylinderGeometry args={[0.22, 0.32, 2.4, 7]} />
-      </mesh>
-      <mesh position={[0, 3.5, 0]} material={leaf} castShadow receiveShadow>
-        <icosahedronGeometry args={[1.7, 1]} />
-      </mesh>
-      <mesh position={[0.7, 2.9, 0.4]} material={leaf} castShadow>
-        <icosahedronGeometry args={[1.1, 1]} />
-      </mesh>
-    </group>
-  );
-}
-
-function Pine({ seed, accent }: PropProps) {
-  const scale = 0.9 + seed * 0.4;
-  const leaf = accent ? solidMaterial(accent, 0.9) : pineMat;
-  return (
-    <group scale={scale}>
-      <mesh position={[0, 0.7, 0]} material={trunkMat} castShadow>
-        <cylinderGeometry args={[0.18, 0.26, 1.4, 6]} />
-      </mesh>
-      {[0, 1, 2].map((i) => (
-        <mesh key={i} position={[0, 1.9 + i * 1.15, 0]} material={leaf} castShadow>
-          <coneGeometry args={[1.5 - i * 0.4, 1.8, 8]} />
-        </mesh>
-      ))}
-    </group>
-  );
+  /** Trees: shape, colours and pattern number. */
+  tree?: Partial<TreeSpec>;
 }
 
 function Hedge({ accent }: PropProps) {
@@ -103,10 +67,10 @@ function Park({ seed, accent }: PropProps) {
         <boxGeometry args={[CELL, 0.04, 1.2]} />
       </mesh>
       <group position={[-1.7, 0, -1.7]} scale={0.8}>
-        <Tree seed={seed} />
+        <TreeModel type="tree" seed={seed} />
       </group>
       <group position={[1.9, 0, 1.6]} scale={0.7}>
-        <Tree seed={(seed * 3.7) % 1} />
+        <TreeModel type="tree" seed={(seed * 3.7) % 1} />
       </group>
       {[[1.8, -1.9], [-2, 1.9]].map(([x, z]) => (
         <mesh key={`${x},${z}`} position={[x, 0.4, z]} material={solidMaterial('#3d7a35', 1)} castShadow>
@@ -389,11 +353,8 @@ function TrafficLight({ accent, rot = 0 }: PropProps) {
 
 /** Visual for a non-building prop; undefined for types that are not props. */
 export function PropModel({ type, ...props }: PropProps & { type: PieceType }) {
+  if (isTreeType(type)) return <TreeModel type={type} seed={props.seed} accent={props.accent} spec={props.tree} />;
   switch (type) {
-    case 'tree':
-      return <Tree {...props} />;
-    case 'pine':
-      return <Pine {...props} />;
     case 'hedge':
       return <Hedge {...props} />;
     case 'park':

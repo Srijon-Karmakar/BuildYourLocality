@@ -52,7 +52,7 @@ const skyFragment = /* glsl */ `
   float fbm(vec2 p) {
     float v = 0.0;
     float a = 0.5;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < OCTAVES; i++) {
       v += a * noise(p);
       p = p * 2.03 + 17.1;
       a *= 0.5;
@@ -110,6 +110,8 @@ const skyFragment = /* glsl */ `
   }
 `;
 
+const skyCoarse = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+
 /** Procedural sky dome: gradient, sun, moon, stars and drifting clouds. No textures, one draw call. */
 function SkyDome() {
   const uniforms = useMemo(
@@ -143,6 +145,7 @@ function SkyDome() {
         vertexShader={skyVertex}
         fragmentShader={skyFragment}
         uniforms={uniforms}
+        defines={{ OCTAVES: skyCoarse ? 2 : 4 }}
         side={THREE.BackSide}
         depthWrite={false}
       />

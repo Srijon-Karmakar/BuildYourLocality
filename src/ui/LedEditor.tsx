@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { pictureForLed } from '../lib/ledImage';
 import {
+  LED_DEFAULT_ADS,
+  LED_MAX_ADS,
+  type LedAd,
+  type LedFit,
+  type LedLayout,
+  type LedPanels,
+  type LedSync,
+  type LedTransition,
   LED_ART_H,
   LED_ART_PALETTE,
   LED_ART_W,
@@ -21,10 +30,11 @@ const chip = (active: boolean) =>
   `min-h-9 rounded-lg px-3 py-2 text-center transition disabled:opacity-30 sm:min-h-0 sm:rounded-md sm:px-2 sm:py-1 ${active ? 'bg-white text-black' : 'bg-white/10 text-white/80 hover:bg-white/20 active:bg-white/25'}`;
 
 const TEXT_MODES: LedMode[] = ['text', 'ticker', 'slides'];
+const ADS_FONT: LedMode[] = ['ads'];
 const SCROLL_MODES: LedMode[] = ['text', 'ticker', 'draw'];
-const FONT_MODES: LedMode[] = ['text', 'ticker', 'slides', 'clock', 'weather'];
+const FONT_MODES: LedMode[] = ['text', 'ticker', 'slides', 'clock', 'weather', ...ADS_FONT];
 const TWO_COLOUR_MODES: LedMode[] = ['text', 'ticker', 'slides', 'clock', 'weather', 'wave', 'plasma', 'stripes', 'bars', 'checker', 'pulse', 'solid'];
-const BG_MODES: LedMode[] = ['text', 'ticker', 'slides', 'clock', 'weather', 'wave', 'plasma', 'matrix', 'stripes', 'bars', 'checker', 'pulse', 'solid', 'draw'];
+const BG_MODES: LedMode[] = ['text', 'ticker', 'slides', 'ads', 'clock', 'weather', 'wave', 'plasma', 'matrix', 'stripes', 'bars', 'checker', 'pulse', 'solid', 'draw'];
 
 /** Snaps each colour channel to a multiple of 8, so dragging a picker can't create unbounded textures. */
 function quantize(hex: string): string {
@@ -241,6 +251,113 @@ const HEART = (() => {
   return rows.map((r) => r.replace(/\./g, '0')).join('');
 })();
 
+/** One ad in the playlist: caption, colours, time on screen, and a picture if it has one. */
+function AdRow({ ad, index, count, onChange, onMove, onRemove }: { ad: LedAd; index: number; count: number; onChange: (change: Partial<LedAd>) => void; onMove: (dir: -1 | 1) => void; onRemove: () => void }) {
+  const [text, setText] = useDraft(ad.text, (v) => onChange({ text: v }), 300);
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg bg-white/5 p-2">
+      <div className="flex items-center gap-1.5">
+        <span className="w-4 shrink-0 text-center text-white/45">{index + 1}</span>
+        {ad.image ? (
+          <img src={ad.image} alt="" className="h-9 w-12 shrink-0 rounded object-contain" style={{ backgroundColor: ad.bg }} />
+        ) : (
+          <span className="flex h-9 w-12 shrink-0 items-center justify-center rounded text-[10px] font-bold" style={{ backgroundColor: ad.bg, color: ad.color }}>
+            Aa
+          </span>
+        )}
+        <input
+          value={text}
+          maxLength={80}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={ad.image ? 'Caption (optional)' : 'Your message'}
+          className="min-w-0 flex-1 rounded-md bg-white/10 px-2 py-1.5 text-base outline-none placeholder:text-white/35 sm:text-xs"
+        />
+      </div>
+      <div className="flex items-center gap-1.5">
+        <input type="color" value={ad.color} onChange={(e) => onChange({ color: quantize(e.target.value) })} className="h-7 w-9 shrink-0 cursor-pointer rounded border border-white/20 bg-transparent" title="Text colour" />
+        <input type="color" value={ad.bg} onChange={(e) => onChange({ bg: quantize(e.target.value) })} className="h-7 w-9 shrink-0 cursor-pointer rounded border border-white/20 bg-transparent" title="Background" />
+        <button className={chip(false) + ' w-8 px-0'} disabled={ad.seconds <= 1} onClick={() => onChange({ seconds: ad.seconds - 1 })} aria-label="Shorter">
+          −
+        </button>
+        <span className="w-9 text-center tabular-nums text-white/70">{ad.seconds}s</span>
+        <button className={chip(false) + ' w-8 px-0'} disabled={ad.seconds >= 30} onClick={() => onChange({ seconds: ad.seconds + 1 })} aria-label="Longer">
+          +
+        </button>
+        <span className="flex-1" />
+        <button className={chip(false) + ' w-8 px-0'} disabled={index === 0} onClick={() => onMove(-1)} aria-label="Earlier">
+          ↑
+        </button>
+        <button className={chip(false) + ' w-8 px-0'} disabled={index === count - 1} onClick={() => onMove(1)} aria-label="Later">
+          ↓
+        </button>
+        <button className={chip(false) + ' w-8 px-0'} onClick={onRemove} aria-label="Remove ad">
+          <Icon name="close" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Build the ad rotation: messages and your own pictures, each with its own colours and time. */
+function AdsEditor({ spec, onChange }: { spec: LedSpec; onChange: (change: Partial<LedSpec>) => void }) {
+  const ads = spec.ads && spec.ads.length > 0 ? spec.ads : LED_DEFAULT_ADS;
+  const [note, setNote] = useState<string | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const save = (next: LedAd[]) => onChange({ ads: next });
+  const edit = (i: number, change: Partial<LedAd>) => save(ads.map((a, k) => (k === i ? { ...a, ...change } : a)));
+
+  const addPicture = async (file: File | undefined) => {
+    if (!file) return;
+    const result = await pictureForLed(file);
+    if ('error' in result) return setNote(result.error);
+    setNote(null);
+    save([...ads, { text: '', image: result.url, color: '#ffffff', bg: '#000000', seconds: 5 }]);
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {ads.map((ad, i) => (
+        <AdRow
+          key={i}
+          ad={ad}
+          index={i}
+          count={ads.length}
+          onChange={(change) => edit(i, change)}
+          onMove={(dir) => {
+            const next = ads.slice();
+            [next[i], next[i + dir]] = [next[i + dir], next[i]];
+            save(next);
+          }}
+          onRemove={() => save(ads.filter((_, k) => k !== i))}
+        />
+      ))}
+      <div className="flex flex-wrap gap-1.5">
+        <button className={chip(false)} disabled={ads.length >= LED_MAX_ADS} onClick={() => save([...ads, { text: 'NEW AD', color: '#ffffff', bg: '#101820', seconds: 4 }])}>
+          + Message
+        </button>
+        <button className={chip(false)} disabled={ads.length >= LED_MAX_ADS} onClick={() => picker.current?.click()}>
+          + Picture
+        </button>
+        <span className="self-center text-white/45">
+          {ads.length} / {LED_MAX_ADS}
+        </span>
+        <input
+          ref={picker}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            void addPicture(e.target.files?.[0]);
+            e.target.value = '';
+          }}
+        />
+      </div>
+      {note && <div className="rounded-md bg-amber-500/20 px-2 py-1 text-amber-200">{note}</div>}
+      <p className="text-white/45">Pictures are shrunk to fit and never stretched. A caption appears under the picture.</p>
+    </div>
+  );
+}
+
 /**
  * Everything about what an LED screen shows and how it looks: content, colours, motion, text style,
  * pixel style, frame and glow. Where the screen sits on a building is handled by the caller.
@@ -288,6 +405,21 @@ export function LedEditor({ spec, onChange }: { spec: LedSpec; onChange: (change
         </Group>
       )}
 
+      {mode === 'ads' && (
+        <Group title="Ad playlist">
+          <AdsEditor spec={spec} onChange={onChange} />
+          <Chips<LedTransition>
+            value={look.transition}
+            options={[
+              { id: 'fade', label: 'Fade' },
+              { id: 'slide', label: 'Slide' },
+              { id: 'cut', label: 'Cut' },
+            ]}
+            onChange={(transition) => onChange({ transition })}
+          />
+        </Group>
+      )}
+
       {mode === 'draw' && (
         <Group title="Pixel art">
           <PixelEditor pixels={spec.pixels ?? ''} color={spec.color} onChange={(pixels) => onChange({ pixels })} />
@@ -300,6 +432,53 @@ export function LedEditor({ spec, onChange }: { spec: LedSpec; onChange: (change
           {TWO_COLOUR_MODES.includes(mode) && <Colour label="Colour 2" value={look.color2} onChange={(color2) => onChange({ color2 })} />}
           {BG_MODES.includes(mode) && <Colour label="Background" value={look.bg} onChange={(bg) => onChange({ bg })} />}
         </div>
+      </Group>
+
+      <Group title="Layout">
+        <Chips<LedLayout>
+          value={look.layout}
+          options={[
+            { id: 'auto', label: 'Auto' },
+            { id: 'full', label: 'One picture' },
+            { id: 'square', label: 'Square panels' },
+            { id: 'wide', label: 'Banner panels' },
+          ]}
+          onChange={(layout) => onChange({ layout })}
+        />
+        {look.layout !== 'full' && (
+          <Chips<LedPanels>
+            value={look.panels}
+            options={[
+              { id: 'same', label: 'Same on each' },
+              { id: 'next', label: 'Next ad on each' },
+              { id: 'chase', label: 'Ripple' },
+            ]}
+            onChange={(panels) => onChange({ panels })}
+          />
+        )}
+        {(mode === 'ads' || mode === 'draw') && (
+          <Chips<LedFit>
+            value={look.fit}
+            options={[
+              { id: 'contain', label: 'Show whole picture' },
+              { id: 'cover', label: 'Fill screen' },
+            ]}
+            onChange={(fit) => onChange({ fit })}
+          />
+        )}
+        <p className="text-white/45">Text and pictures keep their shape: a tall screen becomes a stack of panels instead of stretching one.</p>
+      </Group>
+
+      <Group title="Keeping time">
+        <Chips<LedSync>
+          value={look.sync}
+          options={[
+            { id: 'together', label: 'All in step' },
+            { id: 'chase', label: 'Round the building' },
+            { id: 'solo', label: 'On its own' },
+          ]}
+          onChange={(sync) => onChange({ sync })}
+        />
       </Group>
 
       <Group title="Motion">
@@ -392,6 +571,7 @@ export function LedEditor({ spec, onChange }: { spec: LedSpec; onChange: (change
               </div>
             )}
           </Group>
+          <Slider label="Light spill" value={look.glowAmount} min={0} max={2} step={0.1} format={(v) => `${Math.round(v * 100)}%`} onChange={(glowAmount) => onChange({ glowAmount })} />
           <label className="flex min-h-9 items-center justify-between sm:min-h-0">
             <span className="text-white/80">Glow at night</span>
             <input type="checkbox" className="h-5 w-5" checked={look.glow} onChange={(e) => onChange({ glow: e.target.checked })} />

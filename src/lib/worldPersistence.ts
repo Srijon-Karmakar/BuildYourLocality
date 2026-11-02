@@ -3,11 +3,16 @@ import {
   ROAD_SURFACES,
   type RoadSpec,
   BALCONY_MODES,
+  CORNER_STYLES,
+  CORNICE_STYLES,
   LED_MODES,
   ROOF_EXTRAS,
   type LedSpec,
   LED_ART_H,
   LED_ART_W,
+  LED_MAX_ADS,
+  LED_MAX_IMAGE_CHARS,
+  type LedAd,
   MAX_LEDS,
   type SignSpec,
   DOOR_SIDES,
@@ -26,6 +31,8 @@ import {
   type PieceType,
 } from '../city/catalog';
 import { type Piece } from '../state/useCityStore';
+import { TREE_SHAPES, type TreeSpec } from '../city/trees';
+import { WALL_CAPS, WALL_OPENINGS, WALL_POSTS, WALL_STYLES, type WallSpec } from '../city/walls';
 import { COVERS, MAX_HEIGHT, MIN_HEIGHT, type TerrainCell } from '../terrain/terrain';
 import { supabase } from './supabaseClient';
 
@@ -179,10 +186,81 @@ function sanitizeLed(led: unknown): LedSpec | undefined {
   out.bezel = oneOf(raw.bezel, ['none', 'thin', 'thick'] as const);
   out.power = oneOf(raw.power, ['always', 'night'] as const);
   if (typeof raw.glow === 'boolean') out.glow = raw.glow;
+  out.glowAmount = num(raw.glowAmount, 0, 2);
+  out.layout = oneOf(raw.layout, ['auto', 'full', 'square', 'wide'] as const);
+  out.panels = oneOf(raw.panels, ['same', 'next', 'chase'] as const);
+  out.sync = oneOf(raw.sync, ['together', 'chase', 'solo'] as const);
+  out.transition = oneOf(raw.transition, ['fade', 'slide', 'cut'] as const);
+  out.fit = oneOf(raw.fit, ['contain', 'cover'] as const);
+  if (Array.isArray(raw.ads)) {
+    const ads = raw.ads
+      .slice(0, LED_MAX_ADS)
+      .map((a: Partial<LedAd>): LedAd | null => {
+        if (!a || typeof a !== 'object') return null;
+        const ad: LedAd = {
+          text: typeof a.text === 'string' ? a.text.slice(0, 80) : '',
+          color: isHex(a.color) ? a.color : '#ffffff',
+          bg: isHex(a.bg) ? a.bg : '#000000',
+          seconds: typeof a.seconds === 'number' && Number.isFinite(a.seconds) ? Math.min(30, Math.max(1, Math.round(a.seconds))) : 4,
+        };
+        // Only small pictures made by this game's own resizer are kept.
+        if (typeof a.image === 'string' && a.image.length <= LED_MAX_IMAGE_CHARS && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(a.image)) ad.image = a.image;
+        return ad;
+      })
+      .filter((a: LedAd | null): a is LedAd => !!a);
+    if (ads.length > 0) out.ads = ads;
+  }
   if (typeof raw.pixels === 'string' && raw.pixels.length === LED_ART_W * LED_ART_H && /^[0-9a-f]+$/.test(raw.pixels)) out.pixels = raw.pixels;
   // Drop unset keys so saved data stays small.
   for (const key of Object.keys(out) as (keyof LedSpec)[]) if (out[key] === undefined) delete out[key];
   return out;
+}
+
+function sanitizeTree(tree: unknown): Partial<TreeSpec> | undefined {
+  if (!tree || typeof tree !== 'object') return undefined;
+  const raw = tree as Partial<TreeSpec>;
+  const out: Partial<TreeSpec> = {};
+  if (TREE_SHAPES.some((s) => s.id === raw.shape)) out.shape = raw.shape;
+  if (isHex(raw.trunk)) out.trunk = raw.trunk;
+  if (isHex(raw.leaf)) out.leaf = raw.leaf;
+  const num = (v: unknown, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : undefined);
+  const height = num(raw.height, 0.4, 2.5);
+  if (height !== undefined) out.height = height;
+  const canopy = num(raw.canopy, 0.4, 2.5);
+  if (canopy !== undefined) out.canopy = canopy;
+  const fullness = num(raw.fullness, 0, 1);
+  if (fullness !== undefined) out.fullness = fullness;
+  const lean = num(raw.lean, 0, 1);
+  if (lean !== undefined) out.lean = lean;
+  const variety = num(raw.variety, 0, 1);
+  if (variety !== undefined) out.variety = variety;
+  const bloom = num(raw.bloom, 0, 1);
+  if (bloom !== undefined) out.bloom = bloom;
+  if (isHex(raw.flower)) out.flower = raw.flower;
+  if (typeof raw.seed === 'number' && Number.isFinite(raw.seed)) out.seed = Math.floor(Math.abs(raw.seed)) % 100_000_000;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function sanitizeWall(wall: unknown): Partial<WallSpec> | undefined {
+  if (!wall || typeof wall !== 'object') return undefined;
+  const raw = wall as Partial<WallSpec>;
+  const out: Partial<WallSpec> = {};
+  const num = (v: unknown, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : undefined);
+  if (WALL_STYLES.some((s) => s.id === raw.style)) out.style = raw.style;
+  const height = num(raw.height, 0.5, 6);
+  if (height !== undefined) out.height = height;
+  const thickness = num(raw.thickness, 0.06, 1.2);
+  if (thickness !== undefined) out.thickness = thickness;
+  const gap = num(raw.gap, 0, 0.6);
+  if (gap !== undefined) out.gap = gap;
+  const postEvery = num(raw.postEvery, 0.5, 6);
+  if (postEvery !== undefined) out.postEvery = postEvery;
+  for (const key of ['colour', 'capColour', 'postColour'] as const) if (isHex(raw[key])) out[key] = raw[key];
+  if (WALL_CAPS.some((c) => c.id === raw.cap)) out.cap = raw.cap;
+  if (WALL_POSTS.some((p) => p.id === raw.posts)) out.posts = raw.posts;
+  if (WALL_OPENINGS.some((o) => o.id === raw.opening)) out.opening = raw.opening;
+  if (typeof raw.lights === 'boolean') out.lights = raw.lights;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function sanitizeSign(sign: unknown): SignSpec | undefined {
@@ -231,11 +309,21 @@ function sanitize(p: Piece): Piece {
     next.roofExtras = p.roofExtras.filter((e) => ROOF_EXTRAS.some((x) => x.id === e));
   }
   if (BALCONY_MODES.some((m) => m.id === p.balconies)) next.balconies = p.balconies;
+  if (CORNICE_STYLES.some((c) => c.id === p.cornice)) next.cornice = p.cornice;
+  if (CORNER_STYLES.some((c) => c.id === p.corners)) next.corners = p.corners;
+  if (typeof p.bands === 'boolean') next.bands = p.bands;
+  if (Array.isArray(p.offset) && p.offset.length === 2 && p.offset.every((v) => typeof v === 'number' && Number.isFinite(v))) {
+    next.offset = [Math.max(-3, Math.min(3, p.offset[0])), Math.max(-3, Math.min(3, p.offset[1]))];
+  }
   const road = sanitizeRoad(p.road);
   if (road) next.road = road;
   const sign = sanitizeSign(p.sign);
   if (sign) next.sign = sign;
   if (isHex(p.accent)) next.accent = p.accent;
+  const tree = sanitizeTree(p.tree);
+  if (tree) next.tree = tree;
+  const wall = sanitizeWall(p.wall);
+  if (wall) next.wall = wall;
   if (typeof p.scale === 'number' && Number.isFinite(p.scale)) next.scale = Math.min(2, Math.max(0.5, p.scale));
   if (WINDOW_STYLES.some((w) => w.id === p.windows)) next.windows = p.windows;
   return next;

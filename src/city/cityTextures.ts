@@ -299,6 +299,137 @@ const FACADE_PAINT: Record<FacadeId, FacadePaint> = {
     windowFrame: '#23282e',
     roughness: 0.6,
   },
+  whitebrick: { wall: brickWall([226, 222, 214], [168, 164, 156], 21), windowFrame: '#2b3036', roughness: 0.9 },
+  basketweave: {
+    // 16 x 16 blocks, each two bricks laid flat or on end, alternating like a checkerboard.
+    wall: (x, y) => {
+      const bi = Math.floor(x / 16);
+      const bj = Math.floor(y / 16);
+      const bx = x % 16;
+      const by = y % 16;
+      const flat = (bi + bj) % 2 === 0;
+      const seam = flat ? by % 8 < 1.4 || bx < 1.4 : bx % 8 < 1.4 || by < 1.4;
+      const brickId = flat ? Math.floor(by / 8) : Math.floor(bx / 8);
+      const tone = 0.84 + 0.3 * hash2(bi * 2 + brickId, bj, 23);
+      const grain = fbm(x / FW, y / FH, 10, 3, 24);
+      if (seam) return { rgb: [196, 186, 170], height: 0.12 };
+      const v = tone * (0.9 + grain * 0.2);
+      return { rgb: [168 * v, 85 * v, 59 * v], height: 0.7 + grain * 0.15 };
+    },
+    windowFrame: '#efe9dc',
+    roughness: 0.9,
+  },
+  limestone: {
+    // Ashlar courses: rows of 40 and 80 wide blocks, with fine pitting.
+    wall: (x, y) => {
+      const row = Math.floor(y / 16);
+      const width = row % 2 === 0 ? 80 : 40;
+      const off = (row % 2) * 20;
+      const bx = (x + off) % width;
+      const seam = y % 16 < 1.3 || bx < 1.3;
+      const tone = 0.9 + 0.2 * hash2(row, Math.floor((x + off) / width), 33);
+      const pit = fbm(x / FW, y / FH, 24, 2, 34);
+      const n = fbm(x / FW, y / FH, 6, 3, 35);
+      if (seam) return { rgb: [160, 148, 124], height: 0.12 };
+      const v = tone * (0.9 + n * 0.16) * (pit > 0.72 ? 0.86 : 1);
+      return { rgb: [228 * v, 214 * v, 184 * v], height: 0.62 + n * 0.2 };
+    },
+    windowFrame: '#3b3f44',
+    roughness: 0.9,
+  },
+  stucco: {
+    // Hand-trowelled render in a warm clay colour, with swirls and the odd patch.
+    wall: (x, y) => {
+      const swirl = fbm(x / FW, y / FH, 5, 4, 36);
+      const grit = tileNoise(x / FW, y / FH, 48, 48, 37);
+      const patch = fbm(x / FW, y / FH, 2, 3, 38);
+      const v = (0.88 + swirl * 0.2) * (0.96 + grit * 0.08) * (0.94 + patch * 0.1);
+      return { rgb: [218 * v, 152 * v, 108 * v], height: 0.4 + swirl * 0.35 + grit * 0.1 };
+    },
+    windowFrame: '#f3ece0',
+    roughness: 0.97,
+  },
+  rammed: {
+    // Layers of compacted earth in slightly different browns, with formwork joints.
+    wall: (x, y) => {
+      const layer = Math.floor(y / 6.4);
+      const tone = 0.8 + 0.4 * hash2(layer, 0, 39);
+      const strat = tileNoise(x / FW, y / FH, 3, 60, 40);
+      const grit = fbm(x / FW, y / FH, 20, 2, 41);
+      const edge = y % 6.4 < 0.7;
+      const joint = x % 80 < 1.2;
+      const v = tone * (0.88 + strat * 0.24) * (0.94 + grit * 0.12) * (edge ? 0.86 : 1) * (joint ? 0.74 : 1);
+      return { rgb: [180 * v, 130 * v, 94 * v], height: edge || joint ? 0.25 : 0.55 + grit * 0.3 };
+    },
+    windowFrame: '#2a2420',
+    roughness: 0.96,
+  },
+  shingle: {
+    // Staggered cedar shingles, each a little lighter at the exposed tip.
+    wall: (x, y) => {
+      const row = Math.floor(y / 8);
+      const off = (row % 2) * 10;
+      const col = Math.floor(((x + off) % FW) / 20);
+      const tone = 0.78 + 0.4 * hash2(row, col, 43);
+      const along = y % 8;
+      const edge = (x + off) % 20 < 1.1;
+      const grain = tileNoise(x / FW, y / FH, 5, 70, 44);
+      const shadow = along < 1.6 ? 0.55 : 0.85 + (along / 8) * 0.25;
+      const v = tone * shadow * (0.9 + grain * 0.2) * (edge ? 0.7 : 1);
+      return { rgb: [146 * v, 112 * v, 80 * v], height: 0.3 + (along / 8) * 0.6 };
+    },
+    windowFrame: '#f2efe8',
+    roughness: 0.88,
+  },
+  marble: {
+    // Polished slabs with grey veining.
+    wall: (x, y) => {
+      const joint = x % 80 < 1.1 || y % 64 < 1.1;
+      const warp = fbm(x / FW, y / FH, 4, 3, 45);
+      const vein = Math.abs(2 * fbm(x / FW + warp * 0.18, y / FH, 3, 5, 46) - 1);
+      const line = vein < 0.018 ? 0.66 : vein < 0.05 ? 0.88 : 1;
+      const v = (0.95 + warp * 0.07) * line;
+      if (joint) return { rgb: [150, 150, 148], height: 0.15, rough: 0.6 };
+      return { rgb: [238 * v, 238 * v, 234 * v], height: 0.7, rough: 0.16 };
+    },
+    windowFrame: '#2c3036',
+    roughness: 0.2,
+    reflective: true,
+  },
+  subway: {
+    // Glazed subway tile: glossy teal bricks in a running bond over pale grout.
+    wall: (x, y) => {
+      const row = Math.floor(y / 8);
+      const off = (row % 2) * 10;
+      const bx = (x + off) % 20;
+      const grout = y % 8 < 1.1 || bx < 1.1;
+      const tone = 0.9 + 0.2 * hash2(row, Math.floor(((x + off) % FW) / 20), 47);
+      const sheen = 0.94 + 0.1 * tileNoise(x / FW, y / FH, 4, 4, 48);
+      if (grout) return { rgb: [196, 198, 194], height: 0.1, rough: 0.85 };
+      return { rgb: [66 * tone * sheen, 154 * tone * sheen, 164 * tone * sheen], height: 0.7, rough: 0.14 };
+    },
+    windowFrame: '#f4f1ea',
+    roughness: 0.2,
+    reflective: true,
+  },
+  perforated: {
+    // Anodised bronze panels punched with a grid of round holes over a dark backing.
+    wall: (x, y) => {
+      const cx = (x % 8) - 4;
+      const cy = (y % 8) - 4;
+      const hole = Math.hypot(cx, cy) < 2.3;
+      const seam = x % 40 < 1.2 || y % 64 < 1.2;
+      const brushed = tileNoise(x / FW, y / FH, 3, 60, 49);
+      if (seam) return { rgb: [80, 62, 44], height: 0.9, rough: 0.5 };
+      if (hole) return { rgb: [26, 28, 32], height: 0.05, rough: 0.9 };
+      const v = 0.9 + brushed * 0.2;
+      return { rgb: [172 * v, 138 * v, 96 * v], height: 0.6, rough: 0.38 };
+    },
+    windowFrame: '#2a2218',
+    roughness: 0.4,
+    metalness: 0.7,
+    reflective: true,
+  },
   // Rendered with the animated LED material instead (see getFacadeMaterial); this is
   // only the unlit panel pattern.
   led: {
@@ -321,6 +452,41 @@ interface Rect {
   fill: string | [string, string]; // flat colour, or [top, bottom] gradient
   height: number;
   rough: number;
+  /** Outline: a plain rectangle unless set. An arch has a half-round top. */
+  shape?: 'arch' | 'ellipse';
+}
+
+/** Adds the rect's outline to the canvas path. */
+function tracePath(ctx: CanvasRenderingContext2D, r: Rect) {
+  ctx.beginPath();
+  if (r.shape === 'ellipse') {
+    ctx.ellipse(r.x + r.w / 2, r.y + r.h / 2, r.w / 2, r.h / 2, 0, 0, Math.PI * 2);
+  } else if (r.shape === 'arch') {
+    const rad = r.w / 2;
+    ctx.moveTo(r.x, r.y + r.h);
+    ctx.lineTo(r.x, r.y + rad);
+    ctx.arc(r.x + rad, r.y + rad, rad, Math.PI, 0);
+    ctx.lineTo(r.x + r.w, r.y + r.h);
+    ctx.closePath();
+  } else {
+    ctx.rect(r.x, r.y, r.w, r.h);
+  }
+}
+
+/** Is the design-space point inside the rect's outline? */
+function insideRect(r: Rect, x: number, y: number): boolean {
+  if (x < r.x || x > r.x + r.w || y < r.y || y > r.y + r.h) return false;
+  if (r.shape === 'ellipse') {
+    const dx = (x - (r.x + r.w / 2)) / (r.w / 2);
+    const dy = (y - (r.y + r.h / 2)) / (r.h / 2);
+    return dx * dx + dy * dy <= 1;
+  }
+  if (r.shape === 'arch') {
+    const rad = r.w / 2;
+    if (y >= r.y + rad) return true;
+    return Math.hypot(x - (r.x + rad), y - (r.y + rad)) <= rad;
+  }
+  return true;
 }
 
 function windowRects(style: WindowStyle, frame: string): Rect[] {
@@ -328,7 +494,52 @@ function windowRects(style: WindowStyle, frame: string): Rect[] {
   const paneBottom = '#35607e';
   const pane = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h, fill: [paneTop, paneBottom], height: 0.2, rough: 0.07 });
   const bar = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h, fill: frame, height: 0.85, rough: 0.5 });
+  const shaped = (shape: 'arch' | 'ellipse', x: number, y: number, w: number, h: number, glass: boolean): Rect =>
+    glass ? { ...pane(x, y, w, h), shape } : { ...bar(x, y, w, h), shape };
+  const sill = (x: number, y: number, w: number): Rect => ({ x, y, w, h: 5, fill: '#d8d3c8', height: 0.9, rough: 0.7 });
   switch (style) {
+    case 'arched':
+      return [
+        shaped('arch', 46, 18, 68, 82, false),
+        shaped('arch', 50, 22, 60, 78, true),
+        bar(78.5, 22, 3, 78),
+        bar(50, 60, 60, 3),
+        sill(38, 100, 84),
+      ];
+    case 'shuttered': {
+      // A narrower sash flanked by louvred shutters (painted in the frame colour's complement).
+      const shutter = '#4c6b57';
+      const leaf = (x: number): Rect[] => [
+        { x, y: 26, w: 13, h: 72, fill: shutter, height: 0.8, rough: 0.6 },
+        ...[36, 46, 56, 66, 76, 86].map((y): Rect => ({ x: x + 1.5, y, w: 10, h: 2.2, fill: '#35503f', height: 0.4, rough: 0.7 })),
+      ];
+      return [
+        bar(60, 26, 40, 72),
+        pane(63, 29, 34, 66),
+        bar(78.5, 29, 3, 66),
+        bar(63, 60.5, 34, 3),
+        ...leaf(44),
+        ...leaf(103),
+        sill(42, 98, 76),
+      ];
+    }
+    case 'loft': {
+      const cols = [20, 60, 100];
+      return [
+        bar(16, 14, 128, 100),
+        ...cols.flatMap((x) => [pane(x, 18, 36, 42), pane(x, 66, 36, 44)]),
+        bar(16, 61, 128, 3),
+      ];
+    }
+    case 'slit':
+      return [24, 56, 88, 120].flatMap((x) => [bar(x - 2, 10, 12, 108), pane(x, 12, 8, 104)]);
+    case 'round':
+      return [
+        shaped('ellipse', 46, 30, 68, 68, false),
+        shaped('ellipse', 51, 35, 58, 58, true),
+        bar(79, 35, 2, 58),
+        bar(51, 63, 58, 2),
+      ];
     case 'punched':
       return [
         bar(48, 26, 64, 72),
@@ -444,9 +655,11 @@ export function getFacadeMaterial(
       } else {
         ctx.fillStyle = r.fill;
       }
-      ctx.fillRect(r.x, r.y, r.w, r.h);
+      tracePath(ctx, r);
+      ctx.fill();
       for (let y = Math.floor(r.y * S); y < Math.ceil((r.y + r.h) * S) && y < H; y++) {
         for (let x = Math.floor(r.x * S); x < Math.ceil((r.x + r.w) * S) && x < W; x++) {
+          if (!insideRect(r, (x + 0.5) / S, (y + 0.5) / S)) continue;
           heights[y * W + x] = r.height;
           rough[y * W + x] = r.rough;
         }
@@ -483,7 +696,10 @@ export function getFacadeMaterial(
         g.fillRect(0, 0, 3, FH);
         g.fillRect(FW / 2 - 1.5, 0, 3, FH);
       } else {
-        for (const r of panes) g.fillRect(r.x, r.y, r.w, r.h);
+        for (const r of panes) {
+          tracePath(g, r);
+          g.fill();
+        }
       }
       glow = toTexture(glowCanvas, true);
     }
@@ -500,6 +716,7 @@ export function getFacadeMaterial(
   const { glow, ...pbr } = textures;
   const material = new THREE.MeshStandardMaterial({
     ...pbr,
+    normalMap: quality === 'low' ? null : pbr.normalMap,
     color: tint,
     roughness: 1, // the roughness map carries the real values
     metalness: paint.metalness ?? (id === 'glass' ? 0.25 : 0),
@@ -546,6 +763,11 @@ const ROOF_BASE: Record<RoofId, RGB> = {
   membrane: [214, 217, 217],
   solar: [30, 56, 94],
   sedum: [111, 143, 78],
+  asphalt: [72, 72, 78],
+  shake: [128, 98, 68],
+  copper: [92, 158, 138],
+  thatch: [178, 150, 88],
+  concrete: [152, 152, 148],
 };
 
 const roofCache = new Map<string, THREE.MeshStandardMaterial>();
@@ -595,6 +817,44 @@ export function getRoofMaterial(id: RoofId, quality: Quality): THREE.MeshStandar
         const bus = Math.abs(cellX - 8) < 0.4 || Math.abs(cellY - 5) < 0.3 || Math.abs(cellY - 11) < 0.3;
         tone = gap ? 0.3 : bus ? 1.9 : 0.85 + 0.25 * tileNoise(u, v, 4, 4, 3);
         height = gap ? 0.1 : 0.6;
+      } else if (id === 'asphalt') {
+        // Three-tab shingles with a dusting of granules.
+        const row = Math.floor(y / 8);
+        const col = Math.floor(((x + (row % 2) * 4) % RS) / 8);
+        const gap = (x + (row % 2) * 4) % 8 < 0.7 || y % 8 < 0.9;
+        const granule = tileNoise(u, v, 40, 40, 11);
+        tone = (0.78 + 0.32 * hash2(row, col, 12)) * (0.88 + granule * 0.24) * (gap ? 0.55 : 1);
+        height = gap ? 0.15 : 0.45 + ((y % 8) / 8) * 0.4;
+      } else if (id === 'shake') {
+        // Rough cedar boards, each a different length and shade.
+        const row = Math.floor(y / 8);
+        const shift = hash2(row, 0, 13) * 8;
+        const col = Math.floor(((x + shift) % RS) / 8);
+        const gap = (x + shift) % 8 < 0.8 || y % 8 < 1.2;
+        const grain = tileNoise(u, v, 3, 40, 14);
+        tone = (0.72 + 0.5 * hash2(row, col, 16)) * (0.86 + grain * 0.28) * (gap ? 0.5 : 1);
+        height = gap ? 0.1 : 0.4 + ((y % 8) / 8) * 0.5;
+      } else if (id === 'copper') {
+        // Standing-seam copper gone green, streaked where the rain runs.
+        const seam = x % 16 < 1.4;
+        const streak = tileNoise(u, v, 4, 14, 17);
+        const patina = fbm(u, v, 5, 3, 18);
+        tone = seam ? 0.62 : 0.78 + streak * 0.3 + patina * 0.2;
+        height = seam ? 0.95 : 0.42;
+      } else if (id === 'thatch') {
+        // Bundled straw: long strands running down the slope, with a rib every bundle.
+        const strand = tileNoise(u, v, 56, 5, 19);
+        const bundle = (y % 16) / 16;
+        tone = (0.62 + strand * 0.7) * (0.85 + bundle * 0.25);
+        height = 0.35 + strand * 0.4 + bundle * 0.2;
+      } else if (id === 'concrete') {
+        // Flat interlocking tiles with a groove down each joint.
+        const row = Math.floor(y / 16);
+        const gx = (x + (row % 2) * 8) % 16;
+        const groove = gx < 1.2 || y % 16 < 1.6;
+        const n = tileNoise(u, v, 12, 12, 20);
+        tone = (0.88 + 0.1 * hash2(row, Math.floor(((x + (row % 2) * 8) % RS) / 16), 21) + n * 0.1) * (groove ? 0.7 : 1);
+        height = groove ? 0.12 : 0.6;
       } else if (id === 'sedum') {
         const clump = fbm(u, v, 8, 3, 15);
         tone = 0.65 + clump * 0.7;
@@ -613,12 +873,12 @@ export function getRoofMaterial(id: RoofId, quality: Quality): THREE.MeshStandar
 
   const material = new THREE.MeshStandardMaterial({
     map: toTexture(color, true),
-    normalMap: toTexture(heightsToNormals(heights, N, N, 2.2 * S * 0.6), false),
-    roughness: id === 'green' ? 0.4 : id === 'solar' ? 0.12 : id === 'membrane' ? 0.7 : 0.88,
-    metalness: id === 'green' ? 0.55 : id === 'solar' ? 0.5 : 0,
+    normalMap: quality === 'low' ? null : toTexture(heightsToNormals(heights, N, N, 2.2 * S * 0.6), false),
+    roughness: id === 'green' ? 0.4 : id === 'copper' ? 0.42 : id === 'solar' ? 0.12 : id === 'membrane' ? 0.7 : 0.88,
+    metalness: id === 'green' ? 0.55 : id === 'copper' ? 0.5 : id === 'solar' ? 0.5 : 0,
     side: THREE.DoubleSide,
   });
-  if (id === 'green' || id === 'solar') registerReflective(material, id === 'solar' ? 1.4 : 1.1);
+  if (id === 'green' || id === 'solar' || id === 'copper') registerReflective(material, id === 'solar' ? 1.4 : 1.1);
   roofCache.set(key, material);
   return material;
 }

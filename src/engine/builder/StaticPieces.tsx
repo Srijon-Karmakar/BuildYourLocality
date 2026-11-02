@@ -5,6 +5,7 @@ import { PieceView } from '../../city/models';
 import { partialPiece, useConstructionStore } from '../../sim/construction';
 import { ConstructionLayer } from './ConstructionLayer';
 import { useCityStore, type Piece } from '../../state/useCityStore';
+import { useBuilderStore } from '../../state/useBuilderStore';
 import { useGameStore } from '../../state/useGameStore';
 import { useTerrainStore } from '../../terrain/terrain';
 import { fingerprint, mergeMeshes } from './batching';
@@ -132,8 +133,13 @@ export function PiecesLayer() {
   // Buildings under construction are drawn live, a few floors at a time, instead of in the merged scenery.
   const sites = useConstructionStore((s) => s.sites);
   const building = list.filter((p) => sites[p.id]).map((p) => partialPiece(p, sites[p.id].floors / sites[p.id].total));
-  const still = list.filter((p) => !MOVING.has(p.type) && !sites[p.id]);
-  const moving = list.filter((p) => MOVING.has(p.type));
+  // The building being edited is drawn live too: re-merging its whole chunk on every colour-picker
+  // step would make editing sluggish. It joins the merged scenery again when it is deselected.
+  const selectedIds = useBuilderStore((s) => s.selectedIds);
+  // (A big selection stays merged: drawing dozens of buildings live would cost more than re-merging.)
+  const editing = useMemo(() => new Set(selectedIds.length <= 12 ? selectedIds : []), [selectedIds]);
+  const still = list.filter((p) => !MOVING.has(p.type) && !sites[p.id] && !editing.has(p.id));
+  const moving = list.filter((p) => MOVING.has(p.type) || editing.has(p.id));
 
   return (
     <>

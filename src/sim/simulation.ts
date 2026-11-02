@@ -64,6 +64,14 @@ export interface Car {
   stoppedAt: string | null;
   /** Seconds spent unable to move; very long means gridlock and the car is removed. */
   stuck: number;
+  /** The player is driving it: the traffic system leaves it alone. */
+  driven?: boolean;
+  /** Left behind by the player: seconds until it is cleared away (it no longer follows the roads). */
+  abandoned?: number;
+  /** Height and tilt, when it is driven over uneven ground. */
+  y?: number;
+  pitch?: number;
+  roll?: number;
 }
 
 const CAR_COLOURS = [0xd7263d, 0x1b6ca8, 0xf2f2f2, 0x222831, 0xf4b942, 0x2e933c, 0x8d99ae, 0xe36414, 0x6a4c93];
@@ -246,7 +254,16 @@ export class Simulation {
     const factor = DENSITY[this.density] * this.ambient;
     this.manage(dt, factor);
     this.updateSignals(dt);
-    for (const car of this.cars) this.updateCar(car, dt);
+    for (const car of this.cars) {
+      if (car.driven) continue;
+      if (car.abandoned !== undefined) {
+        // A car the player left behind sits still, then is tidied away once nobody is near it.
+        car.abandoned -= dt;
+        if (car.abandoned <= 0 && !this.playerWithin(car.x, car.z, 60)) car.stuck = 999;
+        continue;
+      }
+      this.updateCar(car, dt);
+    }
     this.cars = this.cars.filter((c) => !this.releaseIfGone(c));
     this.trains.update(dt, factor);
     this.aircraft.update(dt, factor);
@@ -270,6 +287,7 @@ export class Simulation {
     for (const key of this.world.signalled) if (!this.controllers.has(key)) this.controllers.set(key, new SignalController());
     // Vehicles on road that no longer exists are removed; the rest carry on.
     for (const car of this.cars) {
+      if (car.driven || car.abandoned !== undefined) continue;
       const ok = this.world.roads.has(cellKey(...car.from)) && this.world.roads.has(cellKey(...car.to));
       if (!ok) car.stuck = 999;
       else car.next = this.pickNext(car.from, car.to);
@@ -293,7 +311,7 @@ export class Simulation {
   }
 
   private releaseIfGone(car: Car): boolean {
-    if (car.stuck < STUCK_LIMIT) return false;
+    if (car.driven || car.stuck < STUCK_LIMIT) return false;
     if (car.holding) this.junctionOwner.delete(car.holding);
     return true;
   }
@@ -313,7 +331,7 @@ export class Simulation {
     }
     // Shrink the crowd after the player lowers density or deletes things.
     if (this.cars.length > carTarget + 1) {
-      const extra = this.cars.find((c) => !c.holding);
+      const extra = this.cars.find((c) => !c.holding && !c.driven && c.abandoned === undefined);
       if (extra) extra.stuck = 999;
     }
     if (this.peds.length > pedTarget + 2) {
@@ -383,6 +401,29 @@ export class Simulation {
     ped.goal = null;
     ped.state = 'walking';
     return true;
+  }
+
+  /** Is the player within `r` metres of this spot? */
+  private playerWithin(x: number, z: number, r: number): boolean {
+    return (this.player.x - x) ** 2 + (this.player.z - z) ** 2 < r * r;
+  }
+
+  /** The player takes the wheel: the traffic system lets go of the car (and of any junction it held). */
+  takeOver(car: Car) {
+    if (car.holding) this.junctionOwner.delete(car.holding);
+    car.holding = null;
+    car.driven = true;
+    car.abandoned = undefined;
+    car.stuck = 0;
+    car.dwell = 0;
+    car.stoppedAt = null;
+  }
+
+  /** The player gets out: the car stays where it is, standing still, and is cleared away later. */
+  releaseCar(car: Car) {
+    car.driven = false;
+    car.speed = 0;
+    car.abandoned = 120;
   }
 
   /** Adds a new person at a spot (used to bring extra workers to a building site). */
@@ -617,6 +658,7 @@ export class Simulation {
     for (const key of this.controllers.keys()) demand.set(key, { ns: 0, ew: 0, peds: 0 });
 
     for (const car of this.cars) {
+      if (car.driven || car.abandoned !== undefined) continue;
       const segDir = this.dirIndex(car.from, car.to);
       if (segDir < 0) continue;
       const toKey = cellKey(car.to[0], car.to[1]);

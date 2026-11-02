@@ -3,6 +3,7 @@ import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { combat } from '../sim/combat';
 import { sim } from '../sim/simulation';
+import { ledSources } from '../city/ledRegistry';
 import { viewState } from '../engine/viewState';
 import { useGameStore } from '../state/useGameStore';
 import { atmo } from './atmosphere';
@@ -16,16 +17,19 @@ import { atmo } from './atmosphere';
  */
 
 const POOLS = {
-  low: { lamps: 3, cars: 2 },
-  medium: { lamps: 6, cars: 3 },
-  high: { lamps: 10, cars: 5 },
+  low: { lamps: 2, cars: 1, leds: 0 },
+  medium: { lamps: 5, cars: 3, leds: 2 },
+  high: { lamps: 10, cars: 5, leds: 4 },
 } as const;
+const LED_INTENSITY = 90;
 
 const LAMP_HEIGHT = 4.9;
 const LAMP_INTENSITY = 150;
 const CAR_INTENSITY = 230;
 const TORCH_INTENSITY = 420;
 const REASSIGN_EVERY = 0.2;
+const centre = new THREE.Vector3();
+const out = new THREE.Vector3();
 
 interface Slot {
   /** What this slot is lighting right now (a lamp index or a car id); -1 when free. */
@@ -51,6 +55,11 @@ export function NightLights() {
       l.castShadow = false;
       return l;
     });
+    const leds = Array.from({ length: size.leds }, () => {
+      const l = new THREE.PointLight('#ffffff', 0, 28, 2);
+      l.castShadow = false;
+      return l;
+    });
     const torch = new THREE.SpotLight('#fff4d8', 0, 48, 0.46, 0.55, 1.5);
     torch.castShadow = false;
     const torchTarget = new THREE.Object3D();
@@ -59,16 +68,21 @@ export function NightLights() {
     return {
       lamps,
       cars,
+      leds,
+      ledSlots: leds.map((): Slot => ({ key: -1, level: 0, target: 0 })),
+      /** Where each LED screen's light goes, refreshed with the assignments. */
+      ledPlace: new Map<number, { x: number; y: number; z: number; nx: number; nz: number }>(),
       torch,
       torchTarget,
       lampSlots: lamps.map((): Slot => ({ key: -1, level: 0, target: 0 })),
       carSlots: cars.map((): Slot => ({ key: -1, level: 0, target: 0 })),
       timer: 0,
     };
-  }, [size.lamps, size.cars]);
+  }, [size.lamps, size.cars, size.leds]);
 
   useEffect(() => {
     for (const l of rig.lamps) scene.add(l);
+    for (const l of rig.leds) scene.add(l);
     for (const l of rig.cars) {
       scene.add(l);
       scene.add(l.target);
@@ -77,13 +91,14 @@ export function NightLights() {
     camera.add(rig.torchTarget);
     return () => {
       for (const l of rig.lamps) scene.remove(l);
+      for (const l of rig.leds) scene.remove(l);
       for (const l of rig.cars) {
         scene.remove(l);
         scene.remove(l.target);
       }
       camera.remove(rig.torch);
       camera.remove(rig.torchTarget);
-      [...rig.lamps, ...rig.cars, rig.torch].forEach((l) => l.dispose());
+      [...rig.lamps, ...rig.leds, ...rig.cars, rig.torch].forEach((l) => l.dispose());
     };
   }, [rig, scene, camera]);
 
@@ -115,8 +130,25 @@ export function NightLights() {
         }
         carNear.sort((a, b) => a.d - b.d);
         assign(rig.carSlots, carNear.slice(0, size.cars).map((n) => n.id));
+
+        // The brightest screens close by lend their light to the street.
+        if (size.leds > 0) {
+          const ledNear: { id: number; d: number }[] = [];
+          for (const [id, led] of ledSources) {
+            led.object.updateWorldMatrix(true, false);
+            const m = led.object.matrixWorld;
+            centre.set(led.local[0], led.local[1], led.local[2]).applyMatrix4(m);
+            out.set(0, 0, 1).transformDirection(m);
+            const d = (centre.x - fx) ** 2 + (centre.z - fz) ** 2;
+            if (d > 80 * 80) continue;
+            rig.ledPlace.set(id, { x: centre.x, y: centre.y, z: centre.z, nx: out.x, nz: out.z });
+            ledNear.push({ id, d: d / Math.max(0.4, Math.sqrt(led.width * led.height) * led.brightness * led.glowAmount * 0.1) });
+          }
+          ledNear.sort((a, b) => a.d - b.d);
+          assign(rig.ledSlots, ledNear.slice(0, size.leds).map((n) => n.id));
+        }
       } else {
-        for (const s of [...rig.lampSlots, ...rig.carSlots]) s.target = 0;
+        for (const s of [...rig.lampSlots, ...rig.carSlots, ...rig.ledSlots]) s.target = 0;
       }
     }
 
@@ -141,6 +173,24 @@ export function NightLights() {
         light.target.updateMatrixWorld();
       }
       light.intensity = car ? CAR_INTENSITY * slot.level : 0;
+    });
+
+    rig.ledSlots.forEach((slot, i) => {
+      const light = rig.leds[i];
+      slot.level += (slot.target * night - slot.level) * fade;
+      const led = ledSources.get(slot.key);
+      const place = rig.ledPlace.get(slot.key);
+      if (led && place) {
+        // Out in front of the wall and no higher than street height, where it lights the road and the faces nearby.
+        light.position.set(place.x + place.nx * 3.5, Math.min(place.y, 7), place.z + place.nz * 3.5);
+        const [r, g, b] = led.colour();
+        const peak = Math.max(r, g, b, 0.001);
+        light.color.setRGB(r / peak, g / peak, b / peak);
+        const areaFactor = Math.min(1.6, Math.sqrt(led.width * led.height) / 10);
+        light.intensity = LED_INTENSITY * Math.min(1, peak * 1.7) * led.brightness * led.glowAmount * areaFactor * slot.level;
+      } else {
+        light.intensity = 0;
+      }
     });
 
     // --- The player's torch ---

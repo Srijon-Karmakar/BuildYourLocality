@@ -178,10 +178,11 @@ export function SimLayer() {
     if (carBody.current && carCabin.current && carWheels.current) {
       for (let i = 0; i < total; i++) {
         const isMoving = i < moving.length;
-        const car = isMoving ? moving[i] : parked.current[i - moving.length];
+        const car: { x: number; z: number; heading: number; color: number; y?: number; pitch?: number; roll?: number } = isMoving ? moving[i] : parked.current[i - moving.length];
         const bus = isMoving && moving[i].kind === 'bus';
-        _turn.setFromAxisAngle(UP, car.heading);
-        _base.compose(_pos.set(car.x, 0, car.z), _turn, _scale.set(1, 1, 1));
+        if (car.pitch || car.roll) _turn.setFromEuler(_euler.set(car.pitch ?? 0, car.heading, car.roll ?? 0, 'YXZ'));
+        else _turn.setFromAxisAngle(UP, car.heading);
+        _base.compose(_pos.set(car.x, car.y ?? 0, car.z), _turn, _scale.set(1, 1, 1));
         const sx = bus ? 1.2 : 1;
         const sy = bus ? 1.9 : 1;
         const sz = bus ? 2.25 : 1;

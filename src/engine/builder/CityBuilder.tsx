@@ -6,6 +6,7 @@ import {
   PIECES,
   blockBox,
   pieceFootprint,
+  ROAD_LIKE,
   presetStyle,
   resolveLook,
   resolveStyle,
@@ -15,7 +16,10 @@ import {
 } from '../../city/catalog';
 import { PieceModel, RoadModel } from '../../city/models';
 import { isDragTool, useBuilderStore, type BuilderTool } from '../../state/useBuilderStore';
-import { roadMaskAt, useCityStore, type Piece } from '../../state/useCityStore';
+import { clearForest, plantForest } from '../../city/forest';
+import { WallModel } from '../../city/WallModel';
+import { edgeCentre, edgeNear, resolveWall, type Edge } from '../../city/walls';
+import { roadMaskAt, topIdAt, useCityStore, wallNear, type Piece } from '../../state/useCityStore';
 import { useGameStore } from '../../state/useGameStore';
 import { brushOf, heightAt, isWaterCell, raycastTerrain, useTerrainStore } from '../../terrain/terrain';
 import { useTouchStore } from '../../state/useTouchStore';
@@ -33,10 +37,12 @@ interface Hover {
   /** Exact ground point under the cursor (the terrain brush works in metres, not cells). */
   px: number;
   pz: number;
+  /** The grid edge nearest the cursor (for walls). */
+  edge: Edge;
 }
 
 const isPlaceTool = (tool: BuilderTool): tool is PieceType =>
-  tool !== 'bulldoze' && tool !== 'paint' && tool !== 'select' && tool !== 'move' && tool !== 'terrain';
+  tool !== 'bulldoze' && tool !== 'paint' && tool !== 'select' && tool !== 'move' && tool !== 'terrain' && tool !== 'forest' && tool !== 'wall';
 
 /** Turns a model translucent and tints it green (can place) or red (blocked). */
 function ghostify(root: THREE.Object3D, valid: boolean) {
@@ -80,6 +86,16 @@ function pieceHeight(piece: Piece): number {
 
 /** Translucent box over a piece's footprint, used to show what a tool would act on. */
 function PieceHighlight({ piece, color, opacity }: { piece: Piece; color: string; opacity: number }) {
+  if (piece.type === 'wall') {
+    const c = edgeCentre({ gx: piece.gx, gz: piece.gz, rot: piece.rot as 0 | 1 }, CELL);
+    const spec = resolveWall(piece.wall);
+    return (
+      <mesh position={[c.x, spec.height / 2 + 0.1, c.z]} rotation={[0, piece.rot === 0 ? 0 : Math.PI / 2, 0]}>
+        <boxGeometry args={[CELL + 0.2, spec.height + 0.4, Math.max(spec.thickness, 0.3) + 0.3]} />
+        <meshBasicMaterial color={color} transparent opacity={opacity + 0.12} depthWrite={false} />
+      </mesh>
+    );
+  }
   const [w, d] = pieceFootprint(piece);
   const h = Math.max(0.3, pieceHeight(piece));
   return (
@@ -134,11 +150,13 @@ function hoverFromPoint(x: number, z: number): Hover {
     gz: Math.round(z / CELL - d / 2),
     px: x,
     pz: z,
+    edge: edgeNear(x, z, CELL),
   };
 }
 
 const sameHover = (a: Hover | null, b: Hover | null) => {
   if (!a || !b || a.hx !== b.hx || a.hz !== b.hz || a.gx !== b.gx || a.gz !== b.gz) return false;
+  if (useBuilderStore.getState().tool === 'wall') return a.edge.gx === b.edge.gx && a.edge.gz === b.edge.gz && a.edge.rot === b.edge.rot;
   // The terrain brush follows the cursor in metres, not just by cell.
   return useBuilderStore.getState().tool !== 'terrain' || (Math.abs(a.px - b.px) < 1.5 && Math.abs(a.pz - b.pz) < 1.5);
 };
@@ -194,7 +212,10 @@ export function CityBuilder() {
   const roof = useBuilderStore((s) => s.roof);
   const roadSpec = useBuilderStore((s) => s.roadSpec);
   const brushRadius = useBuilderStore((s) => s.brushRadius);
+  const forestRadius = useBuilderStore((s) => s.forest.radius);
+  const wall = useBuilderStore((s) => s.wall);
   const selectedId = useBuilderStore((s) => s.selectedId);
+  const selectedIds = useBuilderStore((s) => s.selectedIds);
   const selectedBlock = useBuilderStore((s) => s.selectedBlock);
   const movingId = useBuilderStore((s) => s.movingId);
   const pieces = useCityStore((s) => s.pieces);
@@ -209,6 +230,11 @@ export function CityBuilder() {
   const pendingRef = useRef<{ x: number; z: number } | null>(null);
   const pointerInside = useRef(false);
   const painting = useRef(false);
+  /** Shift / Ctrl held at the last mouse press: add to the selection instead of replacing it. */
+  const multiKey = useRef(false);
+  /** Corner cell where a drag-to-select box began, and the box as it grows. */
+  const marqueeStart = useRef<Hover | null>(null);
+  const [marquee, setMarquee] = useState<{ x0: number; z0: number; x1: number; z1: number } | null>(null);
   const touchMode = useRef(false);
   const ghostRef = useRef<THREE.Group>(null);
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
@@ -221,22 +247,41 @@ export function CityBuilder() {
     return g;
   }, []);
 
-  const apply = (h: Hover) => {
+  const apply = (h: Hover, dragging = false) => {
     const city = useCityStore.getState();
     const b = useBuilderStore.getState();
+    /** The piece that claims the cell (roads, buildings) and what a click on it means (a tree planted over it wins). */
     const cellId = city.occupancy[`${h.hx},${h.hz}`];
-    if (b.tool === 'terrain') {
+    // A wall runs along a cell edge, so clicking beside it (within a metre or so) means the wall.
+    const wallHit = b.tool === 'select' || b.tool === 'bulldoze' ? wallNear(city.pieces, h.px, h.pz, 1.3) : undefined;
+    const topId = wallHit?.id ?? topIdAt(city.pieces, city.occupancy, h.hx, h.hz);
+    if (b.tool === 'wall') {
+      // Drawing over an existing wall restyles it; elsewhere a new one goes up.
+      const existing = Object.values(city.pieces).find((p) => p.type === 'wall' && p.gx === h.edge.gx && p.gz === h.edge.gz && p.rot === h.edge.rot);
+      if (existing) city.updatePiece(existing.id, { wall: { ...b.wall } });
+      else city.place({ type: 'wall', gx: h.edge.gx, gz: h.edge.gz, rot: h.edge.rot, facade: 'brick', roof: 'gravel', wall: { ...b.wall } });
+    } else if (b.tool === 'forest') {
+      if (b.forest.mode === 'clear') clearForest(h.px, h.pz, b.forest);
+      else plantForest(h.px, h.pz, b.forest, dragging);
+    } else if (b.tool === 'terrain') {
       useTerrainStore.getState().paint(brushOf(b.brush), h.px, h.pz, b.brushRadius, b.brushMagnitude);
     } else if (b.tool === 'select') {
-      b.select(cellId && PIECES[city.pieces[cellId].type].customisable ? cellId : null);
+      const pickable = !!topId && PIECES[city.pieces[topId].type].customisable;
+      if (multiKey.current || b.multiSelect) {
+        // Roads have their own stretch editor, so a group is buildings and props only.
+        if (topId && pickable && city.pieces[topId].type !== 'road') b.toggleSelect(topId);
+      } else {
+        b.select(pickable ? topId! : null);
+      }
     } else if (b.tool === 'move') {
       if (b.movingId && city.movePiece(b.movingId, h.gx, h.gz, b.rotation)) {
         b.select(b.movingId);
         useBuilderStore.setState({ movingId: null, tool: 'select' });
       }
     } else if (b.tool === 'bulldoze') {
-      if (cellId && cellId === b.selectedId) b.select(null);
-      city.removeAt(h.hx, h.hz);
+      if (topId && topId === b.selectedId) b.select(null);
+      if (wallHit) city.removeById(wallHit.id);
+      else city.removeAt(h.hx, h.hz);
     } else if (b.tool === 'paint') {
       const target = cellId ? city.pieces[cellId] : undefined;
       if (target) {
@@ -289,7 +334,9 @@ export function CityBuilder() {
     if (sameHover(hoverRef.current, next)) return;
     hoverRef.current = next;
     setHover(next);
-    if (painting.current && isDragTool(useBuilderStore.getState().tool)) apply(next);
+    const anchor = marqueeStart.current;
+    if (anchor && painting.current) setMarquee({ x0: Math.min(anchor.gx, next.gx), z0: Math.min(anchor.gz, next.gz), x1: Math.max(anchor.gx, next.gx) + 1, z1: Math.max(anchor.gz, next.gz) + 1 });
+    if (painting.current && isDragTool(useBuilderStore.getState().tool)) apply(next, true);
   });
 
   useEffect(() => {
@@ -321,6 +368,7 @@ export function CityBuilder() {
           if (tap) tap.multi = true;
           return;
         }
+        multiKey.current = false;
         tap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), multi: false };
         if (isDragTool(useBuilderStore.getState().tool)) {
           // Draw-style tools act right away and while dragging, like the mouse.
@@ -337,6 +385,8 @@ export function CityBuilder() {
       }
       touchMode.current = false;
       if (e.button !== 0 || !hoverRef.current) return;
+      multiKey.current = e.shiftKey || e.ctrlKey || e.metaKey;
+      marqueeStart.current = useBuilderStore.getState().tool === 'select' ? hoverRef.current : null;
       painting.current = true;
       beginStrokes(); // one undo step per click or drag
       apply(hoverRef.current);
@@ -351,8 +401,31 @@ export function CityBuilder() {
         }
         if (tap?.id === e.pointerId) tap = null;
       }
+      finishMarquee();
       painting.current = false;
       endStrokes();
+    };
+
+    /** A drag in the select tool picks every building and prop inside the box. */
+    const finishMarquee = () => {
+      const start = marqueeStart.current;
+      const end = hoverRef.current;
+      marqueeStart.current = null;
+      setMarquee(null);
+      if (!start || !end || (start.gx === end.gx && start.gz === end.gz)) return;
+      const x0 = Math.min(start.gx, end.gx);
+      const x1 = Math.max(start.gx, end.gx);
+      const z0 = Math.min(start.gz, end.gz);
+      const z1 = Math.max(start.gz, end.gz);
+      const { pieces } = useCityStore.getState();
+      const inside = Object.values(pieces)
+        .filter((p) => PIECES[p.type].customisable && p.type !== 'road' && !ROAD_LIKE.includes(p.type))
+        .filter((p) => {
+          const [w, d] = pieceFootprint(p);
+          return p.gx <= x1 && p.gx + w - 1 >= x0 && p.gz <= z1 && p.gz + d - 1 >= z0;
+        })
+        .map((p) => p.id);
+      if (inside.length > 0) useBuilderStore.getState().selectMany(inside, multiKey.current || useBuilderStore.getState().multiSelect);
     };
 
     const onTap = (clientX: number, clientY: number) => {
@@ -399,13 +472,19 @@ export function CityBuilder() {
       const wantsDelete = e.code === 'Delete' || e.code === 'Backspace' || e.code === 'KeyX';
       if (wantsDelete) {
         e.preventDefault();
-        if (b.selectedId && e.code !== 'KeyX') {
+        if (b.selectedIds.length > 1 && e.code !== 'KeyX') {
+          city.removeMany(b.selectedIds);
+          b.select(null);
+        } else if (b.selectedId && e.code !== 'KeyX') {
           city.removeById(b.selectedId);
           b.select(null);
         } else if (hoverRef.current) {
-          const id = city.occupancy[`${hoverRef.current.hx},${hoverRef.current.hz}`];
+          const hovered = hoverRef.current;
+          const wall = wallNear(city.pieces, hovered.px, hovered.pz, 1.3);
+          const id = wall?.id ?? topIdAt(city.pieces, city.occupancy, hovered.hx, hovered.hz);
           if (id && id === b.selectedId) b.select(null);
-          city.removeAt(hoverRef.current.hx, hoverRef.current.hz);
+          if (wall) city.removeById(wall.id);
+          else city.removeAt(hovered.hx, hovered.hz);
         }
       }
     };
@@ -472,7 +551,7 @@ export function CityBuilder() {
 
   // Re-apply the ghost tint whenever the ghost model may have been rebuilt.
   useLayoutEffect(() => {
-    if (ghostRef.current) ghostify(ghostRef.current, valid);
+    if (ghostRef.current) ghostify(ghostRef.current, ghostRef.current.userData.ok ?? valid);
   });
 
   if (mode !== 'build') return null;
@@ -504,8 +583,22 @@ export function CityBuilder() {
     );
   }
 
+  // The wall about to be drawn follows the nearest grid edge.
+  let wallGhost = null;
+  if (hover && tool === 'wall') {
+    const c = edgeCentre(hover.edge, CELL);
+    const taken = Object.values(pieces).some((p) => p.type === 'wall' && p.gx === hover.edge.gx && p.gz === hover.edge.gz && p.rot === hover.edge.rot);
+    const ok = taken || useCityStore.getState().canPlace('wall', hover.edge.gx, hover.edge.gz, hover.edge.rot);
+    wallGhost = (
+      <group ref={ghostRef} position={[c.x, 0.02, c.z]} rotation={[0, hover.edge.rot === 0 ? 0 : Math.PI / 2, 0]} userData={{ ok }}>
+        <WallModel spec={wall} />
+      </group>
+    );
+  }
+
   const gridAt = touchGhost ? shown : hover;
-  const target = hover ? pieces[occupancy[hover.hx + ',' + hover.hz]] : undefined;
+  const hoveredWall = hover && (tool === 'select' || tool === 'bulldoze') ? wallNear(pieces, hover.px, hover.pz, 1.3) : undefined;
+  const target = hoveredWall ?? (hover ? pieces[topIdAt(pieces, occupancy, hover.hx, hover.hz) ?? ''] : undefined);
   const selected = selectedId ? pieces[selectedId] : undefined;
   const targetable =
     target &&
@@ -516,9 +609,18 @@ export function CityBuilder() {
     <>
       {gridAt && tool !== 'terrain' && <primitive object={grid} position={[gridAt.hx * CELL, 0.02, gridAt.hz * CELL]} />}
       {hover && tool === 'terrain' && <BrushRing x={hover.px} z={hover.pz} radius={brushRadius * CELL} />}
+      {hover && tool === 'forest' && <BrushRing x={hover.px} z={hover.pz} radius={forestRadius * CELL} />}
       {ghost}
-      {selected && <PieceHighlight piece={selected} color="#ffffff" opacity={0.16} />}
-      {selected && !movingId && PIECES[selected.type].paintable && <BlockHighlight piece={selected} index={selectedBlock} />}
+      {wallGhost}
+      {selectedIds.length > 1 && selectedIds.map((id) => (pieces[id] ? <PieceHighlight key={id} piece={pieces[id]} color="#ffd23f" opacity={0.22} /> : null))}
+      {selectedIds.length <= 1 && selected && <PieceHighlight piece={selected} color="#ffffff" opacity={0.16} />}
+      {marquee && (
+        <mesh position={[((marquee.x0 + marquee.x1) / 2) * CELL, 0.4, ((marquee.z0 + marquee.z1) / 2) * CELL]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[(marquee.x1 - marquee.x0) * CELL, (marquee.z1 - marquee.z0) * CELL]} />
+          <meshBasicMaterial color="#3aa0ff" transparent opacity={0.28} depthWrite={false} />
+        </mesh>
+      )}
+      {selectedIds.length <= 1 && selected && !movingId && PIECES[selected.type].paintable && <BlockHighlight piece={selected} index={selectedBlock} />}
       {targetable && <PieceHighlight piece={target} color={highlightColor} opacity={0.28} />}
     </>
   );

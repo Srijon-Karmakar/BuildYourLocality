@@ -7,7 +7,9 @@ import { useGameStore } from './state/useGameStore';
 import { Scene } from './scenes/Scene';
 import { BuildingInspector } from './ui/BuildingInspector';
 import { BuildPalette } from './ui/BuildPalette';
+import { CurtainLoader } from './ui/CurtainLoader';
 import { CombatHud } from './ui/CombatHud';
+import { VehicleHud } from './ui/VehicleHud';
 import { Crosshair } from './ui/Crosshair';
 import { SyncConflictDialog } from './ui/SyncConflictDialog';
 import { SampleAdOverlay } from './ui/SampleAdOverlay';
@@ -38,6 +40,7 @@ function App() {
       {mode === 'roam' && !touch && <Crosshair />}
       <TopBar />
       <CombatHud />
+      <VehicleHud />
       <BuildPalette />
       <BuildingInspector />
       {touch && mode === 'build' && (
@@ -49,6 +52,7 @@ function App() {
       {touch && mode === 'roam' && <WalkControls />}
       <SyncConflictDialog />
       <SampleAdOverlay />
+      <CurtainLoader />
     </div>
   );
 }

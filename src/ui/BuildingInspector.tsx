@@ -2,6 +2,9 @@ import { useState, type ReactNode } from 'react';
 import {
   BALCONY_MODES,
   ROOF_EXTRAS,
+  CORNER_STYLES,
+  isTreeType,
+  CORNICE_STYLES,
   type DoorSide,
   MAX_LEDS,
   type LedSpec,
@@ -31,9 +34,12 @@ import {
 import { maxDoorOffset } from '../city/models';
 import { Icon } from './icons';
 import { SidePanel } from './SidePanel';
+import { WallEditor } from './WallEditor';
+import { resolveWall, wallStyleOf } from '../city/walls';
+import { FLOWER_SWATCHES, GRASS_SWATCHES, LEAF_SWATCHES, TREE_SHAPES, TRUNK_SWATCHES, resolveTree, seedFromId, type TreeSpec } from '../city/trees';
 import { LedEditor } from './LedEditor';
 import { useBuilderStore } from '../state/useBuilderStore';
-import { connectedRoads, useCityStore, type Piece } from '../state/useCityStore';
+import { connectedRoads, useCityStore, type Piece, type PiecePatch } from '../state/useCityStore';
 import { RoadSettings } from './RoadSettings';
 import { useGameStore } from '../state/useGameStore';
 
@@ -133,7 +139,7 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
 }
 
 /** Full building editor: walls, layout (lot, blocks, floors), doors and roof, plus move/rotate/delete. */
-export function BuildingInspector() {
+function SingleInspector() {
   const mode = useGameStore((s) => s.mode);
   const selectedId = useBuilderStore((s) => s.selectedId);
   const selectedBlock = useBuilderStore((s) => s.selectedBlock);
@@ -147,6 +153,7 @@ export function BuildingInspector() {
 
   if (mode !== 'build' || !piece || !PIECES[piece.type].customisable) return null;
   if (piece.type === 'road') return <RoadInspector piece={piece} />;
+  if (piece.type === 'wall') return <WallInspector piece={piece} />;
   if (!PIECES[piece.type].paintable) return <PropInspector piece={piece} />;
 
   if (movingId) {
@@ -225,6 +232,25 @@ export function BuildingInspector() {
       saveLeds([...leds, screenFor(side)]);
       setLedSel(leds.length);
     }
+  };
+  /** One tap: a screen on every side, floor to roof, in the look of the one being edited (door storey left clear). */
+  const coverBuilding = () => {
+    const look = { ...(led ?? defaultLed) };
+    // Eight screens at most: all four sides of the two tallest blocks.
+    const tallest = style.blocks
+      .map((b, index) => ({ b, index }))
+      .sort((x, y) => y.b.floors - x.b.floors)
+      .slice(0, Math.max(1, Math.floor(MAX_LEDS / DOOR_SIDES.length)));
+    const screens: LedSpec[] = [];
+    for (const { b, index } of tallest) {
+      for (const sd of DOOR_SIDES) {
+        const doorHere = style.door.style !== 'none' && style.door.block === index && style.door.side === sd.id;
+        const bottom = doorHere && b.floors > 1 ? 1 : 0;
+        screens.push({ ...look, block: index, side: sd.id, bottom, height: Math.max(1, b.floors - bottom), width: 0, offset: 0 });
+      }
+    }
+    saveLeds(screens);
+    setLedSel(0);
   };
   const allSides = () => {
     const missing = DOOR_SIDES.filter((sd) => !leds.some((l) => l.side === sd.id)).map((sd) => screenFor(sd.id));
@@ -306,6 +332,34 @@ export function BuildingInspector() {
                   {w.label}
                 </button>
               ))}
+            </div>
+          </Section>
+          <Section title="Cornice">
+            <div className="flex flex-wrap gap-1.5">
+              {CORNICE_STYLES.map((c) => (
+                <button key={c.id} className={chip(style.cornice === c.id)} onClick={() => patch({ cornice: c.id })}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </Section>
+          <Section title="Corners">
+            <div className="flex flex-wrap gap-1.5">
+              {CORNER_STYLES.map((c) => (
+                <button key={c.id} className={chip(style.corners === c.id)} onClick={() => patch({ corners: c.id })}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </Section>
+          <Section title="Floor bands">
+            <div className="flex gap-1.5">
+              <button className={chip(!style.bands)} onClick={() => patch({ bands: false })}>
+                Off
+              </button>
+              <button className={chip(style.bands)} onClick={() => patch({ bands: true })}>
+                Trim at every floor
+              </button>
             </div>
           </Section>
           <ColorField label="Trim colour" value={style.trim} onChange={(trim) => patch({ trim })} />
@@ -453,6 +507,9 @@ export function BuildingInspector() {
                 );
               })}
             </div>
+            <button className="min-h-10 rounded-lg bg-white px-3 py-2 text-sm font-medium text-black transition active:bg-white/80 sm:min-h-0 sm:py-1.5" onClick={coverBuilding}>
+              Cover the whole building
+            </button>
             <div className="flex flex-wrap gap-1.5">
               <button className={chip(false)} disabled={DOOR_SIDES.every((sd) => leds.some((l) => l.side === sd.id))} onClick={allSides}>
                 All four sides
@@ -571,10 +628,10 @@ export function BuildingInspector() {
               ))}
             </div>
           </Section>
-          {style.roofStyle === 'flat' && (
-            <Section title="Rooftop features">
+          {(
+            <Section title={style.roofStyle === 'flat' ? 'Rooftop features' : 'Roof features'}>
               <div className="flex flex-wrap gap-1.5">
-                {ROOF_EXTRAS.map((e) => (
+                {ROOF_EXTRAS.filter((e) => style.roofStyle === 'flat' || e.id === 'chimney').map((e) => (
                   <button key={e.id} className={chip(style.roofExtras.includes(e.id))} onClick={() => toggleExtra(e.id)}>
                     {e.label}
                   </button>
@@ -608,6 +665,101 @@ export function BuildingInspector() {
         Delete building <span className="ml-1 text-xs opacity-70">Del</span>
       </button>
     </SidePanel>
+  );
+}
+
+/** Everything about how one tree grows: kind of crown, colours, proportions and the pattern number. */
+function TreeEditor({ piece }: { piece: Piece }) {
+  const { updatePiece } = useCityStore.getState();
+  const spec = resolveTree(piece.type, piece.accent, piece.tree, seedFromId(piece.id));
+  const set = (change: Partial<TreeSpec>) => updatePiece(piece.id, { tree: { ...piece.tree, ...change } });
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const shuffle = () => set({ seed: Math.floor(Math.random() * 1_000_000) });
+  const grass = spec.shape === 'grass';
+  const hasTrunk = spec.shape !== 'bush' && !grass;
+
+  return (
+    <>
+      <Section title="Kind of crown">
+        <div className="flex flex-wrap gap-1.5">
+          {TREE_SHAPES.map((s) => (
+            <button key={s.id} className={chip(spec.shape === s.id)} onClick={() => set({ shape: s.id })}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Pattern">
+        <div className="flex items-center gap-1.5">
+          <button className={chip(false) + ' w-10 text-center sm:w-7'} onClick={() => set({ seed: Math.max(0, spec.seed - 1) })} aria-label="Previous pattern">
+            −
+          </button>
+          <input
+            type="number"
+            min={0}
+            max={99999999}
+            value={spec.seed}
+            onChange={(e) => set({ seed: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
+            className="min-h-9 w-full min-w-0 bg-white/10 px-2 py-1 text-center text-base tabular-nums outline-none sm:min-h-0 sm:text-sm"
+            aria-label="Pattern number"
+          />
+          <button className={chip(false) + ' w-10 text-center sm:w-7'} onClick={() => set({ seed: spec.seed + 1 })} aria-label="Next pattern">
+            +
+          </button>
+          <button className={chip(false) + ' flex shrink-0 items-center gap-1'} onClick={shuffle}>
+            <Icon name="shuffle" /> Random
+          </button>
+        </div>
+        <p className="mt-1 text-white/45">Every number grows a different tree. Keep one you like by noting its number.</p>
+      </Section>
+
+      <Section title={grass ? 'Blade colour' : 'Leaf colour'}>
+        <div className="flex flex-wrap gap-1.5">
+          {(grass ? GRASS_SWATCHES : LEAF_SWATCHES).map((s) => (
+            <button
+              key={s.color}
+              title={s.label}
+              className={swatch(spec.leaf.toLowerCase() === s.color)}
+              style={{ backgroundColor: s.color }}
+              onClick={() => updatePiece(piece.id, { accent: s.color })}
+            />
+          ))}
+        </div>
+      </Section>
+
+      {grass && (
+        <Section title="Flowers">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {FLOWER_SWATCHES.map((s) => (
+              <button key={s.color} title={s.label} className={swatch(spec.flower.toLowerCase() === s.color)} style={{ backgroundColor: s.color }} onClick={() => set({ flower: s.color, bloom: Math.max(spec.bloom, 0.5) })} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {hasTrunk && (
+        <Section title="Trunk colour">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {TRUNK_SWATCHES.map((s) => (
+              <button key={s.color} title={s.label} className={swatch(spec.trunk.toLowerCase() === s.color)} style={{ backgroundColor: s.color }} onClick={() => set({ trunk: s.color })} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      <div className="flex flex-col gap-1.5">
+        <Stepper label="Height" value={Math.round(spec.height * 10) / 10} min={0.4} max={2.5} step={0.1} format={pct} onChange={(height) => set({ height })} />
+        <Stepper label={grass ? 'Clump width' : 'Crown width'} value={Math.round(spec.canopy * 10) / 10} min={0.4} max={2.5} step={0.1} format={pct} onChange={(canopy) => set({ canopy })} />
+        <Stepper label={grass ? 'Blades' : 'Fullness'} value={Math.round(spec.fullness * 10) / 10} min={0} max={1} step={0.1} format={pct} onChange={(fullness) => set({ fullness })} />
+        {grass && <Stepper label="Flowers" value={Math.round(spec.bloom * 10) / 10} min={0} max={1} step={0.1} format={pct} onChange={(bloom) => set({ bloom })} />}
+        {(hasTrunk || grass) && <Stepper label={grass ? 'Windswept' : 'Lean'} value={Math.round(spec.lean * 10) / 10} min={0} max={1} step={0.1} format={pct} onChange={(lean) => set({ lean })} />}
+        <Stepper label="Shade variety" value={Math.round(spec.variety * 10) / 10} min={0} max={1} step={0.1} format={pct} onChange={(variety) => set({ variety })} />
+      </div>
+      <button className={chip(false)} disabled={!piece.tree && !piece.accent} onClick={() => updatePiece(piece.id, { tree: undefined, accent: undefined })}>
+        Reset to the usual {PIECES[piece.type].label.toLowerCase()}
+      </button>
+    </>
   );
 }
 
@@ -645,9 +797,11 @@ function PropInspector({ piece }: { piece: Piece }) {
       </div>
       {note && <div className="rounded-md bg-amber-500/20 px-2 py-1 text-amber-200">{note}</div>}
 
+      {isTreeType(piece.type) && <TreeEditor piece={piece} />}
+
       <div className="flex items-center gap-2">
         <div className="flex-1">
-          <ColorField label="Colour" value={piece.accent ?? '#4c9a40'} onChange={(accent) => updatePiece(piece.id, { accent })} />
+          <ColorField label={isTreeType(piece.type) ? 'Custom leaf colour' : 'Colour'} value={piece.accent ?? resolveTree(piece.type, undefined, piece.tree, 0).leaf} onChange={(accent) => updatePiece(piece.id, { accent })} />
         </div>
         <button className={chip(false)} disabled={!piece.accent} onClick={() => updatePiece(piece.id, { accent: undefined })}>
           Reset
@@ -763,6 +917,260 @@ function RoadInspector({ piece }: { piece: Piece }) {
         }}
       >
         Delete road cell <span className="ml-1 text-xs opacity-70">Del</span>
+      </button>
+    </SidePanel>
+  );
+}
+
+/** The one place the inspector is mounted: a single piece, or a group when several are picked. */
+export function BuildingInspector() {
+  const mode = useGameStore((s) => s.mode);
+  const count = useBuilderStore((s) => s.selectedIds.length);
+  if (mode !== 'build') return null;
+  return count > 1 ? <MultiInspector /> : <SingleInspector />;
+}
+
+/** A placed wall: all its settings, plus doing the same to every wall at once. */
+function WallInspector({ piece }: { piece: Piece }) {
+  const { select } = useBuilderStore.getState();
+  const { updatePiece, updateMany, removeById, pieces } = useCityStore.getState();
+  const spec = resolveWall(piece.wall);
+  const walls = Object.values(pieces).filter((p) => p.type === 'wall');
+  return (
+    <SidePanel id="inspector" side="right" title={wallStyleOf(spec.style).label} onClose={() => select(null)} className={GROUP_CLASS}>
+      <WallEditor
+        spec={spec}
+        onChange={(change) => updatePiece(piece.id, { wall: { ...piece.wall, ...change } })}
+        onStyle={(id) => updatePiece(piece.id, { wall: { ...wallStyleOf(id).defaults } })}
+      />
+      <div className="flex flex-wrap gap-1.5">
+        <button className={chip(false)} disabled={walls.length < 2} onClick={() => updateMany(walls.map((p) => p.id), () => ({ wall: { ...piece.wall } }))}>
+          Copy this look to all {walls.length} walls
+        </button>
+        <button className={chip(false)} disabled={walls.length < 2} onClick={() => useBuilderStore.getState().selectMany(walls.map((p) => p.id))}>
+          Select all walls
+        </button>
+      </div>
+      <button
+        className="min-h-10 rounded-xl bg-red-600/90 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-500 active:bg-red-500 sm:min-h-0 sm:rounded-lg"
+        onClick={() => {
+          removeById(piece.id);
+          select(null);
+        }}
+      >
+        Remove this wall <span className="ml-1 text-xs opacity-70">Del</span>
+      </button>
+    </SidePanel>
+  );
+}
+
+const GROUP_CLASS =
+  'pointer-events-auto absolute inset-x-0 bottom-0 z-10 flex max-h-[50dvh] flex-col gap-2 overflow-y-auto rounded-t-2xl bg-black/62 pointer-coarse:bg-black/84 p-3 pb-[calc(var(--safe-bottom)+0.75rem)] text-xs sm:gap-3 sm:p-4 sm:text-sm text-white backdrop-blur-[6px] sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-20 sm:max-h-[calc(100vh-7rem)] sm:rounded-xl sm:bg-black/52 sm:pb-4 sm:text-xs sm:w-80';
+
+/** Edits every picked building and plant at once; each change is one undo step. */
+function MultiInspector() {
+  const ids = useBuilderStore((s) => s.selectedIds);
+  const multiSelect = useBuilderStore((s) => s.multiSelect);
+  const pieces = useCityStore((s) => s.pieces);
+  const { select, selectMany, setMultiSelect } = useBuilderStore.getState();
+  const { updateMany, removeMany } = useCityStore.getState();
+  const [confirm, setConfirm] = useState(false);
+
+  const chosen = ids.map((id) => pieces[id]).filter((p): p is Piece => !!p);
+  const buildings = chosen.filter((p) => PIECES[p.type].paintable);
+  const plants = chosen.filter((p) => isTreeType(p.type));
+  const props = chosen.length - buildings.length - plants.length;
+  const styles = buildings.map((p) => resolveStyle(p.type, p));
+  /** The value every building shares, or undefined when they differ. */
+  const shared = <T,>(pick: (p: Piece, s: ReturnType<typeof resolveStyle>) => T): T | undefined => {
+    if (buildings.length === 0) return undefined;
+    const first = pick(buildings[0], styles[0]);
+    return buildings.every((p, i) => JSON.stringify(pick(p, styles[i])) === JSON.stringify(first)) ? first : undefined;
+  };
+
+  const editBuildings = (patch: PiecePatch) => updateMany(buildings.map((p) => p.id), () => patch);
+  const editPlants = (change: (p: Piece) => PiecePatch) => updateMany(plants.map((p) => p.id), change);
+  const floors = (delta: number) =>
+    updateMany(
+      buildings.map((p) => p.id),
+      (p) => ({ blocks: resolveStyle(p.type, p).blocks.map((b) => ({ ...b, floors: Math.max(1, b.floors + delta) })) }),
+    );
+  const similar = () => {
+    const kinds = new Set(chosen.map((p) => p.type));
+    selectMany(Object.values(pieces).filter((p) => kinds.has(p.type)).map((p) => p.id));
+  };
+  const summary = [
+    buildings.length > 0 && `${buildings.length} building${buildings.length === 1 ? '' : 's'}`,
+    plants.length > 0 && `${plants.length} plant${plants.length === 1 ? '' : 's'}`,
+    props > 0 && `${props} other`,
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  return (
+    <SidePanel id="inspector" side="right" title={`${chosen.length} selected`} onClose={() => select(null)} className={GROUP_CLASS}>
+      <div className="text-white/60">{summary}</div>
+      <div className="flex flex-wrap gap-1.5">
+        <button className={chip(multiSelect)} onClick={() => setMultiSelect(!multiSelect)} title="Tap pieces to add or remove them">
+          Add more: {multiSelect ? 'on' : 'off'}
+        </button>
+        <button className={chip(false)} onClick={similar}>
+          Select all alike
+        </button>
+        <button className={chip(false)} onClick={() => select(null)}>
+          Clear
+        </button>
+      </div>
+      <p className="text-white/45">Shift or Ctrl + click adds or removes one piece. Drag a box with the select tool to pick everything inside it.</p>
+
+      {buildings.length > 0 && (
+        <>
+          <div className="mt-1 font-medium text-white/80">Buildings ({buildings.length})</div>
+          <Section title="Walls">
+            <div className="flex flex-wrap gap-1.5">
+              {FACADES.map((f) => (
+                <button key={f.id} title={f.label} className={swatch(shared((p) => p.facade) === f.id)} style={{ backgroundColor: f.swatch }} onClick={() => updateMany(buildings.map((p) => p.id), () => ({ facade: f.id }))} />
+              ))}
+            </div>
+          </Section>
+          <Section title="Wall tint">
+            <div className="flex flex-wrap gap-1.5">
+              {TINTS.map((c) => (
+                <button key={c.id} title={c.label} className={swatch(shared((_, s) => s.tint) === c.id)} style={{ backgroundColor: c.id }} onClick={() => editBuildings({ tint: c.id })} />
+              ))}
+            </div>
+            <ColorField label="Custom colour" value={shared((_, s) => s.tint) ?? '#ffffff'} onChange={(tint) => editBuildings({ tint })} />
+          </Section>
+          <Section title="Roof material">
+            <div className="flex flex-wrap gap-1.5">
+              {ROOFS.map((r) => (
+                <button key={r.id} title={r.label} className={swatch(shared((p) => p.roof) === r.id)} style={{ backgroundColor: r.swatch }} onClick={() => editBuildings({ roof: r.id })} />
+              ))}
+            </div>
+          </Section>
+          <Section title="Roof shape">
+            <div className="flex gap-1.5">
+              {(['flat', 'gable'] as const).map((r) => (
+                <button key={r} className={chip(shared((_, s) => s.roofStyle) === r)} onClick={() => editBuildings({ roofStyle: r })}>
+                  {r === 'flat' ? 'Flat' : 'Pitched'}
+                </button>
+              ))}
+            </div>
+          </Section>
+          <Section title="Window style">
+            <div className="flex flex-wrap gap-1.5">
+              {WINDOW_STYLES.map((w) => (
+                <button key={w.id} className={chip(shared((_, s) => s.windows) === w.id)} onClick={() => editBuildings({ windows: w.id })}>
+                  {w.label}
+                </button>
+              ))}
+            </div>
+          </Section>
+          <Section title="Cornice">
+            <div className="flex flex-wrap gap-1.5">
+              {CORNICE_STYLES.map((c) => (
+                <button key={c.id} className={chip(shared((_, s) => s.cornice) === c.id)} onClick={() => editBuildings({ cornice: c.id })}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </Section>
+          <Section title="Corners">
+            <div className="flex flex-wrap gap-1.5">
+              {CORNER_STYLES.map((c) => (
+                <button key={c.id} className={chip(shared((_, s) => s.corners) === c.id)} onClick={() => editBuildings({ corners: c.id })}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </Section>
+          <Section title="Floor bands">
+            <div className="flex gap-1.5">
+              <button className={chip(shared((_, s) => s.bands) === false)} onClick={() => editBuildings({ bands: false })}>
+                Off
+              </button>
+              <button className={chip(shared((_, s) => s.bands) === true)} onClick={() => editBuildings({ bands: true })}>
+                On
+              </button>
+            </div>
+          </Section>
+          <Section title="Balconies">
+            <div className="flex flex-wrap gap-1.5">
+              {BALCONY_MODES.map((m) => (
+                <button key={m.id} className={chip(shared((_, s) => s.balconies) === m.id)} onClick={() => editBuildings({ balconies: m.id })}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </Section>
+          <ColorField label="Trim colour" value={shared((_, s) => s.trim) ?? '#d9dcdc'} onChange={(trim) => editBuildings({ trim })} />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-white/70">Floors (all blocks)</span>
+            <div className="flex gap-1.5">
+              <button className={chip(false) + ' w-12 text-center sm:w-9'} onClick={() => floors(-5)}>
+                −5
+              </button>
+              <button className={chip(false) + ' w-12 text-center sm:w-9'} onClick={() => floors(-1)}>
+                −1
+              </button>
+              <button className={chip(false) + ' w-12 text-center sm:w-9'} onClick={() => floors(1)}>
+                +1
+              </button>
+              <button className={chip(false) + ' w-12 text-center sm:w-9'} onClick={() => floors(5)}>
+                +5
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {plants.length > 0 && (
+        <>
+          <div className="mt-1 font-medium text-white/80">Plants ({plants.length})</div>
+          <Section title="Kind of crown">
+            <div className="flex flex-wrap gap-1.5">
+              {TREE_SHAPES.map((s) => (
+                <button key={s.id} className={chip(false)} onClick={() => editPlants((p) => ({ tree: { ...p.tree, shape: s.id } }))}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </Section>
+          <Section title="Leaf colour">
+            <div className="flex flex-wrap gap-1.5">
+              {[...LEAF_SWATCHES, ...GRASS_SWATCHES.slice(0, 4)].map((s) => (
+                <button key={s.color} title={s.label} className={swatch(false)} style={{ backgroundColor: s.color }} onClick={() => editPlants(() => ({ accent: s.color }))} />
+              ))}
+            </div>
+          </Section>
+          <div className="flex flex-wrap gap-1.5">
+            <button className={chip(false)} onClick={() => editPlants((p) => ({ tree: { ...p.tree, seed: Math.floor(Math.random() * 1_000_000) } }))}>
+              <Icon name="shuffle" className="mr-1 inline" />
+              New pattern for each
+            </button>
+            <button className={chip(false)} onClick={() => editPlants((p) => ({ scale: Math.min(2, (p.scale ?? 1) + 0.1) }))}>
+              Bigger
+            </button>
+            <button className={chip(false)} onClick={() => editPlants((p) => ({ scale: Math.max(0.5, (p.scale ?? 1) - 0.1) }))}>
+              Smaller
+            </button>
+            <button className={chip(false)} onClick={() => editPlants(() => ({ tree: undefined, accent: undefined, scale: undefined }))}>
+              Reset
+            </button>
+          </div>
+        </>
+      )}
+
+      <button
+        className="min-h-10 rounded-xl bg-red-600/90 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-500 active:bg-red-500 sm:min-h-0 sm:rounded-lg"
+        onBlur={() => setConfirm(false)}
+        onClick={() => {
+          if (!confirm) return setConfirm(true);
+          removeMany(ids);
+          select(null);
+        }}
+      >
+        {confirm ? `Tap again to delete ${chosen.length}` : `Delete ${chosen.length} pieces`} <span className="ml-1 text-xs opacity-70">Del</span>
       </button>
     </SidePanel>
   );

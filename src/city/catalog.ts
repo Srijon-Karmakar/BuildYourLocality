@@ -1,3 +1,6 @@
+import type { TreeSpec } from './trees';
+import type { WallSpec } from './walls';
+
 /** Edge length of one city grid cell, in world units (1 unit is about 1 metre). */
 export const CELL = 6;
 export const FLOOR_H = 2.4;
@@ -17,6 +20,15 @@ export const FACADES = [
   { id: 'brick', label: 'Brick', swatch: '#a4492f' },
   { id: 'wood', label: 'Wood siding', swatch: '#9a6b3f' },
   { id: 'sandstone', label: 'Sandstone', swatch: '#cfae7f' },
+  { id: 'whitebrick', label: 'White brick', swatch: '#e2ded6' },
+  { id: 'basketweave', label: 'Basketweave brick', swatch: '#a8553b' },
+  { id: 'limestone', label: 'Limestone blocks', swatch: '#e0d3b4' },
+  { id: 'stucco', label: 'Warm stucco', swatch: '#d9966a' },
+  { id: 'rammed', label: 'Rammed earth', swatch: '#b0805c' },
+  { id: 'shingle', label: 'Cedar shingles', swatch: '#8a684a' },
+  { id: 'marble', label: 'White marble', swatch: '#ecece8' },
+  { id: 'subway', label: 'Glazed tile', swatch: '#3f9aa6' },
+  { id: 'perforated', label: 'Perforated metal', swatch: '#a8865c' },
 ] as const;
 export type FacadeId = (typeof FACADES)[number]['id'];
 
@@ -35,9 +47,14 @@ export const TINTS = [
   { id: '#c9b8e0', label: 'Lavender' },
 ] as const;
 
-export type WindowStyle = 'punched' | 'ribbon' | 'tall' | 'none';
+export type WindowStyle = 'punched' | 'arched' | 'shuttered' | 'loft' | 'slit' | 'round' | 'ribbon' | 'tall' | 'none';
 export const WINDOW_STYLES: { id: WindowStyle; label: string }[] = [
   { id: 'punched', label: 'Classic' },
+  { id: 'arched', label: 'Arched' },
+  { id: 'shuttered', label: 'Shuttered' },
+  { id: 'loft', label: 'Loft grid' },
+  { id: 'slit', label: 'Slits' },
+  { id: 'round', label: 'Portholes' },
   { id: 'ribbon', label: 'Ribbon' },
   { id: 'tall', label: 'Floor-to-ceiling' },
   { id: 'none', label: 'None' },
@@ -54,6 +71,11 @@ export const ROOFS = [
   { id: 'terracotta', label: 'Terracotta', swatch: '#b4553a' },
   { id: 'green', label: 'Green metal', swatch: '#4f7a4a' },
   { id: 'gravel', label: 'Gravel', swatch: '#8a8a85' },
+  { id: 'asphalt', label: 'Asphalt shingle', swatch: '#46464a' },
+  { id: 'shake', label: 'Cedar shake', swatch: '#7f6244' },
+  { id: 'copper', label: 'Aged copper', swatch: '#4fa08a' },
+  { id: 'thatch', label: 'Thatch', swatch: '#b08e50' },
+  { id: 'concrete', label: 'Concrete tile', swatch: '#969690' },
 ] as const;
 export type RoofId = (typeof ROOFS)[number]['id'];
 
@@ -72,8 +94,18 @@ export type PieceType =
   | 'tower'
   | 'skyscraper'
   // nature
+  | 'wall'
   | 'tree'
   | 'pine'
+  | 'birch'
+  | 'palm'
+  | 'willow'
+  | 'blossom'
+  | 'cypress'
+  | 'bush'
+  | 'grass'
+  | 'tallgrass'
+  | 'wildflower'
   | 'hedge'
   | 'park'
   | 'fountain'
@@ -118,7 +150,7 @@ export function gableHeightForSpan(span: number): number {
   return Math.min(4, Math.max(1.6, span * 0.3));
 }
 
-export type Category = 'roads' | 'buildings' | 'nature' | 'street' | 'transit' | 'airport' | 'port';
+export type Category = 'roads' | 'buildings' | 'nature' | 'walls' | 'street' | 'transit' | 'airport' | 'port';
 
 // --- Roads -------------------------------------------------------------------------
 
@@ -301,6 +333,7 @@ export type LedMode =
   | 'solid'
   | 'text'
   | 'slides'
+  | 'ads'
   | 'clock'
   | 'weather'
   | 'rainbow'
@@ -312,6 +345,7 @@ export type LedMode =
 export const LED_MODES: { id: LedMode; label: string; icon: string }[] = [
   { id: 'text', label: 'Message', icon: 'led-text' },
   { id: 'ticker', label: 'Scrolling text', icon: 'led-ticker' },
+  { id: 'ads', label: 'Ad playlist', icon: 'led-ads' },
   { id: 'slides', label: 'Slideshow', icon: 'led-slides' },
   { id: 'draw', label: 'Pixel art', icon: 'led-draw' },
   { id: 'clock', label: 'Clock', icon: 'led-clock' },
@@ -332,6 +366,36 @@ export type LedDots = 'square' | 'round' | 'smooth';
 export type LedFont = 'bold' | 'mono' | 'serif' | 'round' | 'pixel';
 export type LedScroll = 'none' | 'left' | 'right' | 'up' | 'down';
 export type LedBezel = 'none' | 'thin' | 'thick';
+
+/** How a screen is cut into pictures: one for the whole screen, or a stack / row of equal panels. */
+export type LedLayout = 'auto' | 'full' | 'square' | 'wide';
+/** What the panels do relative to each other. */
+export type LedPanels = 'same' | 'next' | 'chase';
+/** How screens keep time with each other. */
+export type LedSync = 'together' | 'chase' | 'solo';
+export type LedTransition = 'fade' | 'slide' | 'cut';
+export type LedFit = 'contain' | 'cover';
+
+/** One ad in a playlist: a message, or a picture (with an optional caption). */
+export interface LedAd {
+  text: string;
+  /** A small picture as a data URL (see lib/ledImage). */
+  image?: string;
+  color: string;
+  bg: string;
+  /** Seconds on screen at normal speed. */
+  seconds: number;
+}
+
+export const LED_MAX_ADS = 8;
+/** Longest picture data URL kept on an ad, in characters. */
+export const LED_MAX_IMAGE_CHARS = 48_000;
+
+export const LED_DEFAULT_ADS: LedAd[] = [
+  { text: 'YOUR AD HERE', color: '#ffe066', bg: '#1a0a2e', seconds: 4 },
+  { text: '50% OFF TODAY', color: '#ff6b6b', bg: '#06142b', seconds: 3 },
+  { text: 'OPEN 24/7', color: '#35e0ff', bg: '#001018', seconds: 3 },
+];
 
 /** Pixel-art canvas size (columns x rows) for the "Pixel art" mode. */
 export const LED_ART_W = 32;
@@ -368,6 +432,19 @@ export interface LedSpec {
   power?: 'always' | 'night';
   /** Soft light spilling around the screen at night. */
   glow?: boolean;
+  /** How far the light reaches and how strong it is, 0 - 2 (1 = normal). */
+  glowAmount?: number;
+  /** How the screen is divided into pictures (auto: tall screens become stacked square panels). */
+  layout?: LedLayout;
+  /** With several panels: show the same thing, the next ad on each, or the same thing a beat apart. */
+  panels?: LedPanels;
+  /** Keeping time with other screens: together (one shared clock), chasing round the building, or on its own. */
+  sync?: LedSync;
+  transition?: LedTransition;
+  /** Pictures and pixel art: fit whole inside the screen, or fill it and crop. */
+  fit?: LedFit;
+  /** The playlist for the "Ad playlist" mode. */
+  ads?: LedAd[];
   /** Pixel art, one hex digit per pixel (see LED_ART_PALETTE), row by row. */
   pixels?: string;
   /** Block index and wall it is mounted on. */
@@ -384,7 +461,7 @@ export interface LedSpec {
 
 /** A LedSpec with every optional look setting filled in. */
 export type ResolvedLed = LedSpec &
-  Required<Pick<LedSpec, 'text' | 'color2' | 'bg' | 'speed' | 'brightness' | 'detail' | 'dots' | 'font' | 'textSize' | 'scroll' | 'bezel' | 'frame' | 'power' | 'glow' | 'pixels'>>;
+  Required<Pick<LedSpec, 'text' | 'color2' | 'bg' | 'speed' | 'brightness' | 'detail' | 'dots' | 'font' | 'textSize' | 'scroll' | 'bezel' | 'frame' | 'power' | 'glow' | 'glowAmount' | 'layout' | 'panels' | 'sync' | 'transition' | 'fit' | 'ads' | 'pixels'>>;
 
 export const LED_DEFAULT_TEXT = 'APNAGALI CITY  *  OPEN 24/7  *  WELCOME';
 
@@ -404,7 +481,14 @@ export function resolveLed(spec: LedSpec): ResolvedLed {
     bezel: spec.bezel ?? 'thin',
     frame: spec.frame ?? '#1c1f24',
     power: spec.power ?? 'always',
-    glow: spec.glow ?? false,
+    glow: spec.glow ?? true,
+    glowAmount: spec.glowAmount ?? 1,
+    layout: spec.layout ?? 'auto',
+    panels: spec.panels ?? 'same',
+    sync: spec.sync ?? 'together',
+    transition: spec.transition ?? 'fade',
+    fit: spec.fit ?? 'contain',
+    ads: spec.ads && spec.ads.length > 0 ? spec.ads : LED_DEFAULT_ADS,
     pixels: spec.pixels ?? '',
   };
 }
@@ -414,6 +498,7 @@ export const LED_PRESETS: { id: string; label: string; icon: string; spec: Parti
   { id: 'neon', label: 'Neon sign', icon: 'look-neon', spec: { mode: 'text', text: 'OPEN', color: '#ff2fd0', color2: '#ff2fd0', bg: '#12020f', dots: 'smooth', detail: 'high', font: 'round', textSize: 0.7, scroll: 'none', glow: true, brightness: 1.4 } },
   { id: 'stocks', label: 'News ticker', icon: 'look-news', spec: { mode: 'ticker', text: 'BREAKING  *  NEW PARK OPENS DOWNTOWN  *  TRAFFIC LIGHT UPGRADE COMPLETE  *  ', color: '#ffb000', bg: '#000000', dots: 'square', detail: 'medium', font: 'mono', textSize: 0.7, scroll: 'left', speed: 1.2 } },
   { id: 'cinema', label: 'Cinema', icon: 'look-cinema', spec: { mode: 'slides', text: 'NOW SHOWING|MIDNIGHT CITY|8 PM  10 PM', color: '#ffe066', color2: '#ff6b6b', bg: '#0a0614', dots: 'round', detail: 'medium', font: 'serif', textSize: 0.55, glow: true } },
+  { id: 'ads', label: 'Ad rotation', icon: 'led-ads', spec: { mode: 'ads', dots: 'round', detail: 'medium', font: 'bold', textSize: 0.5, glow: true, brightness: 1.3, ads: LED_DEFAULT_ADS } },
   { id: 'clock', label: 'City clock', icon: 'led-clock', spec: { mode: 'clock', color: '#35e0ff', bg: '#00060a', dots: 'round', detail: 'medium', font: 'mono', textSize: 0.7 } },
   { id: 'weather', label: 'Weather', icon: 'led-weather', spec: { mode: 'weather', color: '#ffe066', color2: '#8fd3ff', bg: '#000814', dots: 'round', detail: 'medium', textSize: 0.5 } },
   { id: 'retro', label: 'Retro arcade', icon: 'look-retro', spec: { mode: 'matrix', color: '#4dff7a', bg: '#000a02', dots: 'square', detail: 'low', speed: 1 } },
@@ -424,13 +509,33 @@ export const LED_PRESETS: { id: string; label: string; icon: string; spec: Parti
 /** Most screens one building can carry (all four sides, a couple of rows each). */
 export const MAX_LEDS = 8;
 
-export type RoofExtra = 'plant' | 'antenna' | 'solar' | 'garden' | 'helipad';
+
+export type RoofExtra = 'plant' | 'antenna' | 'solar' | 'garden' | 'helipad' | 'chimney' | 'watertank' | 'skylight';
 export const ROOF_EXTRAS: { id: RoofExtra; label: string }[] = [
   { id: 'plant', label: 'AC units' },
   { id: 'antenna', label: 'Antenna' },
   { id: 'solar', label: 'Solar array' },
   { id: 'garden', label: 'Roof garden' },
   { id: 'helipad', label: 'Helipad' },
+  { id: 'chimney', label: 'Chimney' },
+  { id: 'watertank', label: 'Water tank' },
+  { id: 'skylight', label: 'Skylight' },
+];
+
+/** Moulding that runs round the top of the walls. */
+export type CorniceStyle = 'none' | 'ledge' | 'classic';
+export const CORNICE_STYLES: { id: CorniceStyle; label: string }[] = [
+  { id: 'none', label: 'None' },
+  { id: 'ledge', label: 'Ledge' },
+  { id: 'classic', label: 'Classic' },
+];
+
+/** What dresses the vertical corners of the walls. */
+export type CornerStyle = 'none' | 'quoins' | 'pilasters';
+export const CORNER_STYLES: { id: CornerStyle; label: string }[] = [
+  { id: 'none', label: 'Plain' },
+  { id: 'quoins', label: 'Quoin stones' },
+  { id: 'pilasters', label: 'Pilasters' },
 ];
 
 export type BalconyMode = 'none' | 'front' | 'all';
@@ -465,12 +570,20 @@ export interface StyleOverrides {
   leds?: LedSpec[];
   roofExtras?: RoofExtra[];
   balconies?: BalconyMode;
+  /** Detailing: moulding under the roof, corner treatment, and a trim band at every floor line. */
+  cornice?: CorniceStyle;
+  corners?: CornerStyle;
+  bands?: boolean;
   sign?: SignSpec | null;
   /** Roads: lanes, surface, pavements, markings and rules (merged over DEFAULT_ROAD). */
   road?: Partial<RoadSpec>;
   /** Props: main colour (foliage, paint, water, ...) and size multiplier. */
   accent?: string;
   scale?: number;
+  /** Trees: shape, colours and the pattern number that shapes every lobe and branch. */
+  tree?: Partial<TreeSpec>;
+  /** Walls and fences: style, size, colours, caps, posts and openings. */
+  wall?: Partial<WallSpec>;
 }
 
 export interface BuildingStyle {
@@ -486,6 +599,9 @@ export interface BuildingStyle {
   leds: LedSpec[];
   roofExtras: RoofExtra[];
   balconies: BalconyMode;
+  cornice: CorniceStyle;
+  corners: CornerStyle;
+  bands: boolean;
   sign: SignSpec | null;
 }
 
@@ -575,8 +691,18 @@ export const PIECES: Record<PieceType, PieceDef> = {
     style: { roofExtras: ['helipad', 'antenna'], led: { mode: 'wave', color: '#ff3df0', block: 0, side: 'front', bottom: 20, height: 4, width: 0, offset: 0 } },
   }),
 
+  wall: prop('Wall', 'walls'),
   tree: prop('Tree', 'nature', [0.8, 3, 0.8]),
   pine: prop('Pine', 'nature', [0.8, 3, 0.8]),
+  birch: prop('Birch', 'nature', [0.8, 3, 0.8]),
+  palm: prop('Palm', 'nature', [0.8, 3, 0.8]),
+  willow: prop('Willow', 'nature', [0.8, 3, 0.8]),
+  blossom: prop('Cherry blossom', 'nature', [0.8, 3, 0.8]),
+  cypress: prop('Cypress', 'nature', [0.8, 3, 0.8]),
+  bush: prop('Bush', 'nature', [1.2, 1, 1.2]),
+  grass: prop('Grass', 'nature'),
+  tallgrass: prop('Tall grass', 'nature'),
+  wildflower: prop('Wildflowers', 'nature'),
   hedge: prop('Hedge', 'nature', [5, 1.2, 1]),
   park: prop('Park', 'nature'),
   fountain: prop('Fountain', 'nature', [3.4, 1, 3.4]),
@@ -621,6 +747,7 @@ export const CATEGORIES: { id: Category; label: string }[] = [
   { id: 'roads', label: 'Roads' },
   { id: 'buildings', label: 'Buildings' },
   { id: 'nature', label: 'Nature' },
+  { id: 'walls', label: 'Walls' },
   { id: 'street', label: 'Street' },
   { id: 'transit', label: 'Transit' },
   { id: 'airport', label: 'Airport' },
@@ -628,6 +755,22 @@ export const CATEGORIES: { id: Category; label: string }[] = [
 ];
 
 export const PIECE_TYPES = Object.keys(PIECES) as PieceType[];
+
+/**
+ * Pieces that may be planted over other things: several trees to a cell, or a tree in the garden
+ * of a building. They do not claim their cell, so whatever stands there stays put.
+ */
+export const TREE_TYPES: PieceType[] = ['tree', 'pine', 'birch', 'palm', 'willow', 'blossom', 'cypress', 'bush'];
+/** Ground cover: walkable, and just as freely planted over other things. */
+export const GRASS_TYPES: PieceType[] = ['grass', 'tallgrass', 'wildflower'];
+/** Every plant the tree editor and the forest brush deal with. */
+export const PLANT_TYPES: PieceType[] = [...TREE_TYPES, ...GRASS_TYPES];
+export const isTreeType = (type: PieceType) => PLANT_TYPES.includes(type);
+export const OVERLAY_TYPES: PieceType[] = PLANT_TYPES;
+export const isOverlay = (type: PieceType) => OVERLAY_TYPES.includes(type);
+
+/** Pieces an overlay can never sit on: they carry traffic. */
+export const keepsClear = (type: PieceType) => ROAD_LIKE.includes(type) || ['transit', 'airport', 'port'].includes(PIECES[type].category);
 
 /** Pieces that sit on the ground like a road: level land, or water (as a bridge). */
 export const ROAD_LIKE: PieceType[] = ['road', 'rail', 'crossing', 'metrotrack', 'pier'];
@@ -695,6 +838,9 @@ export function resolveStyle(type: PieceType, o: StyleOverrides): BuildingStyle 
     leds: o.leds ?? (o.led ? [o.led] : []),
     roofExtras: o.roofExtras ?? (def.roof === 'flat' ? ['plant'] : []),
     balconies: o.balconies ?? 'none',
+    cornice: o.cornice ?? 'none',
+    corners: o.corners ?? 'none',
+    bands: o.bands ?? false,
     sign: o.sign ?? null,
   };
 }

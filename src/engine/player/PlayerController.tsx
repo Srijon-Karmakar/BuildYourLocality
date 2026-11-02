@@ -4,6 +4,7 @@ import type { RefObject } from 'react';
 import * as THREE from 'three';
 import { useEffect } from 'react';
 import { combat } from '../../sim/combat';
+import { vehicle } from '../../sim/vehicle';
 import { useGameStore } from '../../state/useGameStore';
 import { WATER_LEVEL, hasTerrain, heightAt } from '../../terrain/terrain';
 import { viewState, virtualInput } from '../viewState';
@@ -53,6 +54,15 @@ export function PlayerController({ start = [0, 2, 0], bodyRef }: PlayerControlle
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  // Development only: lets tests put the player somewhere.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    (window as unknown as { __teleport?: (x: number, z: number) => void }).__teleport = (x, z) => {
+      bodyRef.current?.setTranslation({ x, y: Math.max(0, heightAt(x, z)) + 1.5, z }, true);
+      bodyRef.current?.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    };
+  }, [bodyRef]);
+
   const forward = new THREE.Vector3();
   const right = new THREE.Vector3();
   const wishDir = new THREE.Vector3();
@@ -62,6 +72,8 @@ export function PlayerController({ start = [0, 2, 0], bodyRef }: PlayerControlle
     const body = bodyRef.current;
     // In build mode the builder camera owns the view; the capsule just rests on the ground.
     if (!body || useGameStore.getState().mode !== 'roam') return;
+    // Behind the wheel the car moves the player (see VehicleController).
+    if (vehicle.active) return;
 
     // Put the player back after being knocked out.
     if (combat.respawn) {

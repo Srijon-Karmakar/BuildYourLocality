@@ -28,6 +28,8 @@ export const virtualInput = {
   crouch: false,
   /** Held run button (touch). */
   sprint: false,
+  /** Held horn button while driving (touch). */
+  horn: false,
 };
 
 /**

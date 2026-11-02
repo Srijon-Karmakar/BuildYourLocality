@@ -162,8 +162,10 @@ export function fingerprint(root: THREE.Object3D): number {
     const mesh = o as THREE.Mesh;
     if (mesh.isMesh) {
       h = (h * 31 + (mesh.geometry?.id ?? 0)) | 0;
-      const material = mesh.material as (THREE.Material & { id?: number }) | undefined;
-      h = (h * 31 + (material && !Array.isArray(material) ? (material.id ?? 0) : 0)) | 0;
+      // A building's walls use one material per box face (an array), so every one must count: otherwise
+      // re-colouring or re-texturing a building would never be noticed and it would keep its old look.
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const material of materials) h = (h * 31 + ((material as { id?: number } | undefined)?.id ?? 0)) | 0;
       h = (h * 31 + (mesh.castShadow ? 1 : 0) + (mesh.receiveShadow ? 2 : 0)) | 0;
     }
   });

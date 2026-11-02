@@ -1,7 +1,8 @@
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import {
   FLOOR_H,
+  gableHeightForSpan,
   type BalconyMode,
   type BlockBox,
   type DoorSide,
@@ -12,8 +13,8 @@ import {
 } from './catalog';
 import { getRoofMaterial } from './cityTextures';
 import { LOT_HEIGHT } from './geometries';
-import { getLedMaterial, getSignMaterial } from './ledTextures';
-import { getHaloMaterial } from './nightLights';
+import { getLedColour, getLedGlow, getLedMaterial, getSignMaterial } from './ledTextures';
+import { registerLed } from './ledRegistry';
 import { darkMetalMaterial, glassMaterial, metalMaterial, solidMaterial } from './materials';
 import { wallPlacement } from './wall';
 
@@ -65,7 +66,7 @@ export function Balconies({ box, floors, mode, trim }: { box: BlockBox; floors: 
   );
 }
 
-/** An animated LED panel mounted on a wall, spanning some storeys. */
+/** An animated LED panel mounted on a wall: it glows, throws light on its surroundings, and keeps time with its neighbours. */
 export function LedScreen({ spec, box, floors }: { spec: LedSpec; box: BlockBox; floors: number }) {
   const wall = wallPlacement(box, spec.side);
   const bottom = Math.max(0, Math.min(spec.bottom, floors - 1));
@@ -79,9 +80,22 @@ export function LedScreen({ spec, box, floors }: { spec: LedSpec; box: BlockBox;
   const y = LOT_HEIGHT + bottom * FLOOR_H + 0.25 + height / 2;
   const border = look.bezel === 'thick' ? 0.45 : look.bezel === 'thin' ? 0.12 : 0;
   const frame = useMemo(() => solidMaterial(look.frame, 0.5, 0.5), [look.frame]);
+  // Screens high up the wall light the street less than ones at the bottom.
+  const ground = 1 / (1 + (bottom * FLOOR_H) / 22);
+  const glow = useMemo(() => (look.glow ? getLedGlow(spec, width, height, ground) : null), [spec, width, height, look.glow, ground]);
+  const colour = useMemo(() => getLedColour(spec, width, height), [spec, width, height]);
+  const wallRef = useRef<THREE.Group>(null);
+
+  // Tell the night lighting this screen exists so it can borrow a real light for it.
+  useEffect(() => {
+    if (!wallRef.current || !look.glow) return;
+    return registerLed({ object: wallRef.current, local: [offset, y, 0.2], width, height, brightness: look.brightness, glowAmount: look.glowAmount, colour });
+  }, [offset, y, width, height, look.brightness, look.glowAmount, look.glow, colour]);
+
+  const reach = Math.min(10, 3 + height * 0.12) * (0.6 + look.glowAmount * 0.4);
 
   return (
-    <group position={wall.position} rotation={[0, wall.rotY, 0]}>
+    <group ref={wallRef} position={wall.position} rotation={[0, wall.rotY, 0]}>
       {border > 0 && (
         <mesh position={[offset, y, 0.07]} material={frame} castShadow>
           <boxGeometry args={[width + border * 2, height + border * 2, 0.14]} />
@@ -90,10 +104,15 @@ export function LedScreen({ spec, box, floors }: { spec: LedSpec; box: BlockBox;
       <mesh position={[offset, y, 0.16]} material={material}>
         <boxGeometry args={[width, height, 0.05]} />
       </mesh>
-      {look.glow && (
-        <mesh position={[offset, y, 0.3]} material={getHaloMaterial(look.color)} renderOrder={3}>
-          <planeGeometry args={[width + 3.5, height + 3.5]} />
-        </mesh>
+      {glow && (
+        <>
+          <mesh position={[offset, y, 0.1]} material={glow.halo} renderOrder={3}>
+            <planeGeometry args={[width + 3.5 + look.glowAmount * 2, height + 3.5 + look.glowAmount * 2]} />
+          </mesh>
+          <mesh position={[offset, LOT_HEIGHT + 0.06, reach / 2 + 0.3]} rotation={[-Math.PI / 2, 0, 0]} material={glow.splash} renderOrder={2}>
+            <planeGeometry args={[width * 1.1 + 3, reach]} />
+          </mesh>
+        </>
       )}
     </group>
   );
@@ -190,6 +209,45 @@ export function RoofExtras({ extras, box, top, towerAntenna }: { extras: RoofExt
         </group>
       )}
 
+      {has('chimney') && <ChimneyStack x={box.w * 0.25} z={-box.d * 0.2} y={0} />}
+
+      {has('watertank') && (
+        <group position={[-box.w * 0.22, 0, -box.d * 0.18]}>
+          {[
+            [-0.55, -0.55],
+            [0.55, -0.55],
+            [-0.55, 0.55],
+            [0.55, 0.55],
+          ].map(([x, z]) => (
+            <mesh key={`${x},${z}`} position={[x, 0.7, z]} material={darkMetalMaterial} castShadow>
+              <boxGeometry args={[0.1, 1.4, 0.1]} />
+            </mesh>
+          ))}
+          <mesh position={[0, 2.2, 0]} material={solidMaterial('#8a6a45', 0.9)} castShadow receiveShadow>
+            <cylinderGeometry args={[0.95, 0.95, 1.6, 16]} />
+          </mesh>
+          {[1.6, 2.2, 2.8].map((y) => (
+            <mesh key={y} position={[0, y, 0]} material={metalMaterial}>
+              <cylinderGeometry args={[0.99, 0.99, 0.06, 16]} />
+            </mesh>
+          ))}
+          <mesh position={[0, 3.25, 0]} material={solidMaterial('#6b4f32', 0.9)} castShadow>
+            <coneGeometry args={[1.05, 0.5, 16]} />
+          </mesh>
+        </group>
+      )}
+
+      {has('skylight') && (
+        <group position={[-box.w * 0.18, 0, box.d * 0.2]}>
+          <mesh position={[0, 0.2, 0]} material={darkMetalMaterial} castShadow>
+            <boxGeometry args={[Math.min(2.6, box.w * 0.4), 0.4, Math.min(1.8, box.d * 0.3)]} />
+          </mesh>
+          <mesh position={[0, 0.5, 0]} material={glassMaterial} castShadow>
+            <boxGeometry args={[Math.min(2.3, box.w * 0.36), 0.22, Math.min(1.5, box.d * 0.26)]} />
+          </mesh>
+        </group>
+      )}
+
       {has('helipad') && (
         <group position={[0, 0.06, 0]}>
           <mesh material={solidMaterial('#2b2f35', 0.9)} receiveShadow>
@@ -211,4 +269,32 @@ export function RoofExtras({ extras, box, top, towerAntenna }: { extras: RoofExt
       )}
     </group>
   );
+}
+
+const chimneyBrick = solidMaterial('#8f4a37', 0.95);
+
+/** A brick chimney stack with a stone cap; `y` is where its foot sits. */
+function ChimneyStack({ x, z, y }: { x: number; z: number; y: number }) {
+  return (
+    <group position={[x, y, z]}>
+      <mesh position={[0, 1.1, 0]} material={chimneyBrick} castShadow>
+        <boxGeometry args={[0.8, 2.4, 0.8]} />
+      </mesh>
+      <mesh position={[0, 2.38, 0]} material={solidMaterial('#8d8f93', 0.85)} castShadow>
+        <boxGeometry args={[1, 0.16, 1]} />
+      </mesh>
+      <mesh position={[0, 2.2, 0]} material={darkMetalMaterial}>
+        <boxGeometry args={[0.5, 0.05, 0.5]} />
+      </mesh>
+    </group>
+  );
+}
+
+/** A chimney rising through a pitched roof, set a little off the ridge. */
+export function Chimney({ box, top, ridgeAlongZ }: { box: BlockBox; top: number; ridgeAlongZ: boolean }) {
+  const rise = gableHeightForSpan(Math.min(box.w, box.d));
+  const across = Math.min(box.w, box.d) * 0.2;
+  const along = (ridgeAlongZ ? box.d : box.w) * 0.2;
+  const foot = top + rise * (1 - (across / (Math.min(box.w, box.d) / 2))) - 0.4;
+  return <ChimneyStack x={ridgeAlongZ ? across : along} z={ridgeAlongZ ? along : across} y={foot} />;
 }
