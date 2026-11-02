@@ -16,18 +16,39 @@ import {
   type DoorStyle,
   type FacadeId,
   type PieceType,
+  type RoadSpec,
   type RoofId,
 } from './catalog';
 import { Balconies, LedScreen, RoofExtras, SignBoard } from './buildingExtras';
 import { getFacadeMaterial, getRoofMaterial } from './cityTextures';
-import { LOT_HEIGHT, boxBodyGeometry, gableRoofGeometry, roadGeometry } from './geometries';
+import { WATER_LEVEL, useTerrainStore } from '../terrain/terrain';
+import { LOT_HEIGHT, boxBodyGeometry, gableRoofGeometry } from './geometries';
+import { roadGeometry } from './roadGeometry';
 import { darkMetalMaterial, glassDoorMaterial, metalMaterial, plinthMaterial, slabMaterial, solidMaterial } from './materials';
+import { registerWet } from './nightLights';
 import { PropModel } from './props';
+import {
+  ApronModel,
+  ConnectedRail,
+  ContainersModel,
+  ParkingModel,
+  PierModel,
+  PortCraneModel,
+  TaxiStandModel,
+  CrossingModel,
+  MetroEntranceModel,
+  MetroTrackModel,
+  RailModel,
+  RunwayModel,
+  StationModel,
+  TaxiwayModel,
+} from './transitModels';
 import { maxDoorOffset, wallPlacement } from './wall';
 
 export { maxDoorOffset };
 
 const roadMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 });
+registerWet(roadMaterial);
 
 /** Cheap stable per-cell variation so repeated trees/houses don't look cloned. */
 function seedOf(gx: number, gz: number): number {
@@ -37,13 +58,15 @@ function seedOf(gx: number, gz: number): number {
 
 // --- Roads ---------------------------------------------------------------------
 
-export function RoadModel({ mask }: { mask: number }) {
-  return <mesh geometry={roadGeometry(mask)} material={roadMaterial} receiveShadow castShadow />;
+export function RoadModel({ mask, road, bridge = false }: { mask: number; road?: Partial<RoadSpec>; bridge?: boolean }) {
+  return <mesh geometry={roadGeometry(mask, road, bridge)} material={roadMaterial} receiveShadow castShadow />;
 }
 
-function ConnectedRoad({ gx, gz }: { gx: number; gz: number }) {
+function ConnectedRoad({ gx, gz, road }: { gx: number; gz: number; road?: Partial<RoadSpec> }) {
   const mask = useCityStore((s) => roadMaskAt(s.pieces, s.occupancy, gx, gz));
-  return <RoadModel mask={mask} />;
+  // A road laid over water becomes a bridge.
+  const bridge = useTerrainStore((s) => (s.cells[`${gx},${gz}`]?.h ?? 0) < WATER_LEVEL);
+  return <RoadModel mask={mask} road={road} bridge={bridge} />;
 }
 
 // --- Buildings -----------------------------------------------------------------
@@ -234,8 +257,8 @@ export function BuildingModel({ type, facade, roof, style, seed }: BuildingProps
         />
       ))}
 
-      {style.led && style.blocks[style.led.block] && (
-        <LedScreen spec={style.led} box={blockBox(style.blocks[style.led.block], style.lot)} floors={style.blocks[style.led.block].floors} />
+      {style.leds.map((led, i) =>
+        style.blocks[led.block] ? <LedScreen key={i} spec={led} box={blockBox(style.blocks[led.block], style.lot)} floors={style.blocks[led.block].floors} /> : null,
       )}
 
       {style.sign && (
@@ -285,6 +308,8 @@ export function PieceModel({
   seed,
   accent,
   scale = 1,
+  rot = 0,
+  road,
   gx,
   gz,
 }: {
@@ -295,19 +320,51 @@ export function PieceModel({
   seed: number;
   accent?: string;
   scale?: number;
+  /** Quarter-turns of the piece (traffic lights use it to choose which road they serve). */
+  rot?: number;
+  /** Road settings (lanes, pavement, markings ...) when this is a road. */
+  road?: Partial<RoadSpec>;
   /** When given, a road connects to its real neighbours; the ghost passes a mask instead. */
   gx?: number;
   gz?: number;
 }): ReactNode {
   if (type === 'road') {
-    return gx === undefined || gz === undefined ? <RoadModel mask={0} /> : <ConnectedRoad gx={gx} gz={gz} />;
+    return gx === undefined || gz === undefined ? <RoadModel mask={0} road={road} /> : <ConnectedRoad gx={gx} gz={gz} road={road} />;
+  }
+  switch (type) {
+    case 'rail':
+      return gx === undefined || gz === undefined ? <RailModel mask={5} /> : <ConnectedRail gx={gx} gz={gz} />;
+    case 'station':
+      return <StationModel gx={gx} gz={gz} />;
+    case 'crossing':
+      return <CrossingModel />;
+    case 'metrotrack':
+      return <MetroTrackModel gx={gx} gz={gz} />;
+    case 'metroentrance':
+      return <MetroEntranceModel />;
+    case 'parking':
+      return <ParkingModel />;
+    case 'taxistand':
+      return <TaxiStandModel />;
+    case 'pier':
+      return <PierModel gx={gx} gz={gz} />;
+    case 'portcrane':
+      return <PortCraneModel />;
+    case 'containers':
+      return <ContainersModel seed={seed} />;
+    case 'runway':
+      return <RunwayModel gx={gx} gz={gz} />;
+    case 'taxiway':
+      return <TaxiwayModel gx={gx} gz={gz} />;
+    case 'apron':
+      return <ApronModel gx={gx} gz={gz} />;
   }
   if (PIECES[type].paintable) {
     return <BuildingModel type={type} facade={facade} roof={roof} style={style} seed={seed} />;
   }
   return (
     <group scale={scale}>
-      <PropModel type={type} seed={seed} accent={accent} led={style.led} />
+      <PropModel type={type} seed={seed} accent={accent} led={style.led} rot={rot} />
     </group>
   );
 }
@@ -329,6 +386,8 @@ export const PieceView = memo(function PieceView({ piece }: { piece: Piece }) {
       seed={seed}
       accent={piece.accent}
       scale={piece.scale}
+      rot={piece.rot}
+      road={piece.road}
       gx={piece.gx}
       gz={piece.gz}
     />

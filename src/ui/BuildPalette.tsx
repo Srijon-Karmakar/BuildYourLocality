@@ -11,48 +11,38 @@ import {
 import { useBuilderStore, type BuilderTool } from '../state/useBuilderStore';
 import { useCityStore } from '../state/useCityStore';
 import { useGameStore } from '../state/useGameStore';
+import { BRUSHES, type BrushId } from '../terrain/terrain';
+import { RoadSettings } from './RoadSettings';
+import { TerrainSettings } from './TerrainSettings';
+import { Icon } from './icons';
 import { useIsCompact, useIsTouch } from './useMediaQuery';
 
 const TOOLS_TAB = 'tools' as const;
-type Tab = Category | typeof TOOLS_TAB;
+type Tab = Category | typeof TOOLS_TAB | 'terrain';
 
-const TABS: { id: Tab; label: string }[] = [...CATEGORIES, { id: TOOLS_TAB, label: 'Tools' }];
+const TABS: { id: Tab; label: string }[] = [...CATEGORIES, { id: 'terrain', label: 'Terrain' }, { id: TOOLS_TAB, label: 'Tools' }];
 
-const ICONS: Partial<Record<BuilderTool, string>> = {
-  road: '🛣️',
-  house: '🏠',
-  villa: '🏡',
-  shop: '🏪',
-  cafe: '☕',
-  apartment: '🏘️',
-  warehouse: '🏭',
-  office: '🏢',
-  hotel: '🏨',
-  mall: '🛍️',
-  tower: '🗼',
-  skyscraper: '🌆',
-  tree: '🌳',
-  pine: '🌲',
-  hedge: '🌿',
-  park: '🏞️',
-  fountain: '⛲',
-  lamp: '💡',
-  bench: '🪑',
-  busstop: '🚏',
-  billboard: '📺',
-  kiosk: '🛒',
-  trafficlight: '🚦',
-  plaza: '⬜',
-  select: '✏️',
-  paint: '🎨',
-  bulldoze: '🗑️',
+interface Item {
+  id: BuilderTool;
+  label: string;
+  icon?: string;
+  /** Terrain items share the 'terrain' tool and differ by brush. */
+  brush?: BrushId;
+}
+
+const ICON_BY_TOOL: Partial<Record<BuilderTool, string>> = {
+  bulldoze: 'bulldoze',
 };
 
-const ITEMS: Record<Tab, { id: BuilderTool; label: string }[]> = {
+const ITEMS: Record<Tab, Item[]> = {
+  terrain: BRUSHES.map((b) => ({ id: 'terrain' as const, label: b.label, icon: b.icon, brush: b.id })),
   roads: [],
   buildings: [],
   nature: [],
   street: [],
+  transit: [],
+  airport: [],
+  port: [],
   tools: [
     { id: 'select', label: 'Edit' },
     { id: 'paint', label: 'Paint' },
@@ -66,10 +56,50 @@ const swatchClass = (active: boolean) =>
 
 const glass = 'bg-black/55 backdrop-blur-md';
 
+const HINT_KEY = 'apnagali.hint.seen';
+
+/** Control reminder. On a phone it is a one-time tip that fades after a few seconds, to keep the screen clear. */
+function ControlsHint({ touch }: { touch: boolean }) {
+  const [visible, setVisible] = useState(() => {
+    if (!touch) return true;
+    try {
+      return localStorage.getItem(HINT_KEY) !== '1';
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    if (!touch || !visible) return;
+    const id = window.setTimeout(() => {
+      setVisible(false);
+      try {
+        localStorage.setItem(HINT_KEY, '1');
+      } catch {
+        /* nothing to remember it with */
+      }
+    }, 9000);
+    return () => window.clearTimeout(id);
+  }, [touch, visible]);
+
+  if (!visible) return null;
+  return (
+    <div className="pointer-events-none rounded-md bg-black/40 px-2 py-0.5 text-[11px] text-white/70 sm:text-xs">
+      {touch
+        ? 'Tap to place · Drag to pan · Pinch to zoom · Twist to rotate'
+        : 'Click: place · R: rotate · Del/X: delete · Ctrl+Z: undo · WASD: pan · Q/E: turn · Right-drag: orbit · Wheel: zoom · Tab: walk'}
+    </div>
+  );
+}
+
 /** The tool dock: scrollable item row, category tabs, undo/redo, plus the material picker. */
 export function BuildPalette() {
   const mode = useGameStore((s) => s.mode);
-  const { tool, facade, roof, selectedId, setTool, setFacade, setRoof } = useBuilderStore();
+  const { tool, brush, facade, roof, selectedId, roadSpec, roadPreset, setTool, setBrush, setFacade, setRoof, setRoadSpec, applyRoadPreset } = useBuilderStore();
+  const activate = (item: Item) => {
+    setTool(item.id);
+    if (item.brush) setBrush(item.brush);
+  };
+  const isActive = (item: Item) => tool === item.id && (!item.brush || brush === item.brush);
   const [tab, setTab] = useState<Tab>('roads');
   const [materialsOpen, setMaterialsOpen] = useState(false);
   const undo = useCityStore((s) => s.undo);
@@ -88,11 +118,14 @@ export function BuildPalette() {
       if (e.target instanceof HTMLInputElement) return;
       const match = /^Digit([1-9])$/.exec(e.code);
       const item = match ? ITEMS[tab][Number(match[1]) - 1] : undefined;
-      if (item) setTool(item.id);
+      if (item) {
+        setTool(item.id);
+        if (item.brush) setBrush(item.brush);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [mode, tab, setTool]);
+  }, [mode, tab, setTool, setBrush]);
 
   // The inspector takes over the bottom of a small screen while a building is open.
   if (mode !== 'build' || (compact && selectedId)) return null;
@@ -100,13 +133,19 @@ export function BuildPalette() {
   const selectTab = (next: Tab) => {
     setTab(next);
     const first = ITEMS[next][0];
-    if (first && !ITEMS[next].some((i) => i.id === tool)) setTool(first.id);
+    if (first && !ITEMS[next].some((i) => isActive(i))) activate(first);
   };
-  const showMaterials = tool === 'paint' || (tool in PIECES && PIECES[tool as PieceType].paintable);
+  const roadTool = tool === 'road';
+  const terrainTool = tool === 'terrain';
+  const showMaterials = roadTool || terrainTool || tool === 'paint' || (tool in PIECES && PIECES[tool as PieceType].paintable);
   const presetChip = (active: boolean) =>
     `col-span-4 rounded-md px-2 py-2 text-xs transition sm:py-1 ${active ? 'bg-white text-black' : 'bg-white/10 text-white/80 hover:bg-white/20'}`;
 
-  const materials = (
+  const materials = terrainTool ? (
+    <TerrainSettings />
+  ) : roadTool ? (
+    <RoadSettings spec={roadSpec} onChange={setRoadSpec} onPreset={applyRoadPreset} activePreset={roadPreset} />
+  ) : (
     <div className="flex flex-col gap-3 text-xs text-white">
       <div>
         <div className="mb-1.5 text-white/60">Facade</div>
@@ -138,8 +177,8 @@ export function BuildPalette() {
   return (
     <>
       {/* Desktop: a fixed side panel. Phone: a sheet opened from the dock's palette button. */}
-      {showMaterials && !compact && (
-        <div className={`pointer-events-auto absolute left-4 top-1/2 max-h-[80vh] -translate-y-1/2 overflow-y-auto rounded-xl p-3 ${glass}`}>
+      {showMaterials && !compact && !selectedId && (
+        <div className={`pointer-events-auto absolute left-4 top-1/2 max-h-[80vh] ${roadTool || terrainTool ? "w-64" : ""} -translate-y-1/2 overflow-y-auto rounded-xl p-3 ${glass}`}>
           {materials}
         </div>
       )}
@@ -160,13 +199,13 @@ export function BuildPalette() {
         <div className={`no-scrollbar pointer-events-auto flex w-full max-w-full gap-1.5 overflow-x-auto rounded-2xl p-1.5 sm:w-auto sm:max-w-[92vw] sm:flex-wrap sm:justify-center sm:overflow-visible ${glass}`}>
           {ITEMS[tab].map((item, i) => (
             <button
-              key={item.id}
-              onClick={() => setTool(item.id)}
+              key={item.brush ?? item.id}
+              onClick={() => activate(item)}
               className={`flex min-h-14 min-w-[4.25rem] shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl px-2 text-[11px] leading-tight transition sm:min-h-0 sm:min-w-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-sm ${
-                tool === item.id ? 'bg-white text-black' : 'text-white/80 active:bg-white/20 sm:hover:bg-white/10'
+                isActive(item) ? 'bg-white text-black' : 'text-white/80 active:bg-white/20 sm:hover:bg-white/10'
               }`}
             >
-              <span className="text-xl sm:text-base">{ICONS[item.id]}</span>
+              <span className="text-xl sm:text-base"><Icon name={item.icon ?? ICON_BY_TOOL[item.id] ?? item.id} /></span>
               <span className="whitespace-nowrap">
                 <span className="mr-1 hidden text-xs opacity-60 sm:inline">{i + 1}</span>
                 {item.label}
@@ -188,7 +227,7 @@ export function BuildPalette() {
               className={`flex min-h-14 min-w-[4.25rem] shrink-0 flex-col items-center justify-center rounded-xl px-2 text-[11px] transition disabled:opacity-30 sm:min-h-0 sm:flex-row sm:px-3 sm:py-1.5 sm:text-sm ${confirmClear ? 'bg-red-600 text-white' : 'text-red-300 active:bg-red-500/20 sm:hover:bg-red-500/20'}`}
               title="Delete everything (undoable)"
             >
-              <span className="text-xl sm:mr-1.5 sm:text-base">💥</span>
+              <span className="text-xl sm:mr-1.5 sm:text-base"><Icon name="clearall" /></span>
               {confirmClear ? 'Sure?' : 'Clear all'}
             </button>
           )}
@@ -208,10 +247,10 @@ export function BuildPalette() {
           ))}
           <span className="mx-1 h-5 w-px shrink-0 bg-white/20" />
           <button className={iconBtn + ' text-white/90 hover:bg-white/10'} disabled={!canUndo} onClick={undo} title="Undo (Ctrl+Z)" aria-label="Undo">
-            ↶
+            <Icon name="undo" />
           </button>
           <button className={iconBtn + ' text-white/90 hover:bg-white/10'} disabled={!canRedo} onClick={redo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
-            ↷
+            <Icon name="redo" />
           </button>
           {compact && showMaterials && (
             <button
@@ -219,16 +258,12 @@ export function BuildPalette() {
               onClick={() => setMaterialsOpen((v) => !v)}
               aria-label="Materials"
             >
-              🎨
+              <Icon name="paint" />
             </button>
           )}
         </div>
 
-        <div className="pointer-events-none rounded-md bg-black/40 px-2 py-0.5 text-[11px] text-white/70 sm:text-xs">
-          {touch
-            ? 'Tap to place · Drag to pan · Pinch to zoom · Twist to rotate'
-            : 'Click: place · R: rotate · Del/X: delete · Ctrl+Z: undo · WASD: pan · Q/E: turn · Right-drag: orbit · Wheel: zoom · Tab: walk'}
-        </div>
+        <ControlsHint touch={touch} />
       </div>
     </>
   );

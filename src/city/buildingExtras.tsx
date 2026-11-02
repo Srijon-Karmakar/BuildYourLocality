@@ -6,12 +6,14 @@ import {
   type BlockBox,
   type DoorSide,
   type LedSpec,
+  resolveLed,
   type RoofExtra,
   type SignSpec,
 } from './catalog';
 import { getRoofMaterial } from './cityTextures';
 import { LOT_HEIGHT } from './geometries';
 import { getLedMaterial, getSignMaterial } from './ledTextures';
+import { getHaloMaterial } from './nightLights';
 import { darkMetalMaterial, glassMaterial, metalMaterial, solidMaterial } from './materials';
 import { wallPlacement } from './wall';
 
@@ -72,17 +74,27 @@ export function LedScreen({ spec, box, floors }: { spec: LedSpec; box: BlockBox;
   const width = spec.width > 0 ? Math.min(spec.width, maxWidth) : maxWidth;
   const height = storeys * FLOOR_H - 0.5;
   const offset = Math.max(-(maxWidth - width) / 2, Math.min((maxWidth - width) / 2, spec.offset));
-  const material = getLedMaterial(spec.mode, spec.color);
+  const look = resolveLed(spec);
+  const material = getLedMaterial(spec, width, height);
   const y = LOT_HEIGHT + bottom * FLOOR_H + 0.25 + height / 2;
+  const border = look.bezel === 'thick' ? 0.45 : look.bezel === 'thin' ? 0.12 : 0;
+  const frame = useMemo(() => solidMaterial(look.frame, 0.5, 0.5), [look.frame]);
 
   return (
     <group position={wall.position} rotation={[0, wall.rotY, 0]}>
-      <mesh position={[offset, y, 0.07]} material={darkMetalMaterial} castShadow>
-        <boxGeometry args={[width + 0.24, height + 0.24, 0.14]} />
-      </mesh>
+      {border > 0 && (
+        <mesh position={[offset, y, 0.07]} material={frame} castShadow>
+          <boxGeometry args={[width + border * 2, height + border * 2, 0.14]} />
+        </mesh>
+      )}
       <mesh position={[offset, y, 0.16]} material={material}>
         <boxGeometry args={[width, height, 0.05]} />
       </mesh>
+      {look.glow && (
+        <mesh position={[offset, y, 0.3]} material={getHaloMaterial(look.color)} renderOrder={3}>
+          <planeGeometry args={[width + 3.5, height + 3.5]} />
+        </mesh>
+      )}
     </group>
   );
 }

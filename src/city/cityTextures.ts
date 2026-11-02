@@ -3,6 +3,7 @@ import { PAINTERS, fbm, hash2, lerp, mix, tileNoise, wrap } from '../engine/voxe
 import type { GraphicsSettings } from '../state/useGameStore';
 import type { FacadeId, RoofId, WindowStyle } from './catalog';
 import { getLedMaterial } from './ledTextures';
+import { enableNightWindows, registerReflection } from './nightLights';
 
 type Quality = GraphicsSettings['textureQuality'];
 type RGB = [number, number, number];
@@ -378,10 +379,11 @@ function registerReflective(material: THREE.MeshStandardMaterial, intensity: num
   material.envMap = reflectionEnv;
   material.envMapIntensity = intensity;
   reflectiveMaterials.add(material);
+  registerReflection(material, intensity);
 }
 const facadeTextureCache = new Map<
   string,
-  { map: THREE.CanvasTexture; normalMap: THREE.CanvasTexture; roughnessMap: THREE.CanvasTexture }
+  { map: THREE.CanvasTexture; normalMap: THREE.CanvasTexture; roughnessMap: THREE.CanvasTexture; glow: THREE.CanvasTexture | null }
 >();
 
 /**
@@ -400,7 +402,7 @@ export function getFacadeMaterial(
 
   if (id === 'led') {
     // Media wall: the tint picks the LED colour (white = cyan).
-    const led = getLedMaterial('wave', tint === '#ffffff' ? '#35e0ff' : tint, 1.5);
+    const led = getLedMaterial({ mode: 'wave', color: tint === '#ffffff' ? '#35e0ff' : tint, detail: 'high', block: 0, side: 'front', bottom: 0, height: 1, width: 0, offset: 0 }, 3, 2.4, 1.5);
     facadeCache.set(matKey, led);
     return led;
   }
@@ -461,7 +463,33 @@ export function getFacadeMaterial(
       ctx.fill();
     }
 
+    // Glass panes light up at night: white where there is glass, black where there is wall.
+    let glow: THREE.CanvasTexture | null = null;
+    const panes = windowRects(style, paint.windowFrame).filter((r) => Array.isArray(r.fill));
+    if (paint.curtain || panes.length > 0) {
+      const glowCanvas = document.createElement('canvas');
+      glowCanvas.width = W;
+      glowCanvas.height = H;
+      const g = glowCanvas.getContext('2d')!;
+      g.fillStyle = '#000';
+      g.fillRect(0, 0, W, H);
+      g.scale(S, S);
+      g.fillStyle = '#fff';
+      if (paint.curtain) {
+        // Curtain wall: the whole module is glass except for hairline mullions.
+        g.fillRect(0, 0, FW, FH);
+        g.fillStyle = '#000';
+        g.fillRect(0, 0, FW, 3);
+        g.fillRect(0, 0, 3, FH);
+        g.fillRect(FW / 2 - 1.5, 0, 3, FH);
+      } else {
+        for (const r of panes) g.fillRect(r.x, r.y, r.w, r.h);
+      }
+      glow = toTexture(glowCanvas, true);
+    }
+
     textures = {
+      glow,
       map: toTexture(canvas, true),
       normalMap: toTexture(heightsToNormals(heights, W, H, (id === 'glass' ? 1.2 : 2.6) * S * 0.6), false),
       roughnessMap: toTexture(grayscale(rough, W, H), false),
@@ -469,16 +497,42 @@ export function getFacadeMaterial(
     facadeTextureCache.set(texKey, textures);
   }
 
+  const { glow, ...pbr } = textures;
   const material = new THREE.MeshStandardMaterial({
-    ...textures,
+    ...pbr,
     color: tint,
     roughness: 1, // the roughness map carries the real values
     metalness: paint.metalness ?? (id === 'glass' ? 0.25 : 0),
     envMapIntensity: 0.6,
   });
+  if (glow) {
+    material.emissive = new THREE.Color('#ffffff');
+    material.emissiveMap = glow;
+    enableNightWindows(material);
+  }
   if (paint.reflective || id === 'glass') registerReflective(material, id === 'mirror' ? 1.5 : id === 'glass' ? 1.2 : 0.9);
   facadeCache.set(matKey, material);
   return material;
+}
+
+/**
+ * Paints every facade and roof texture a little at a time while the game is idle, so choosing a
+ * material later never stalls on generating it. Returns a function that cancels the warm-up.
+ */
+export function warmTextures(quality: Quality, facades: readonly FacadeId[], roofs: readonly RoofId[]): () => void {
+  const jobs: (() => void)[] = [
+    ...facades.map((id) => () => void getFacadeMaterial(id, 'punched', '#ffffff', quality)),
+    ...roofs.map((id) => () => void getRoofMaterial(id, quality)),
+  ];
+  let handle = 0;
+  const next = () => {
+    const job = jobs.shift();
+    if (!job) return;
+    job();
+    handle = window.setTimeout(next, 120);
+  };
+  handle = window.setTimeout(next, 1500);
+  return () => window.clearTimeout(handle);
 }
 
 // --- Roofs ---------------------------------------------------------------------
@@ -567,4 +621,56 @@ export function getRoofMaterial(id: RoofId, quality: Quality): THREE.MeshStandar
   if (id === 'green' || id === 'solar') registerReflective(material, id === 'solar' ? 1.4 : 1.1);
   roofCache.set(key, material);
   return material;
+}
+
+// --- Terrain: rock, sand and water ---------------------------------------------------------
+
+const terrainCache = new Map<Quality, { rock: THREE.CanvasTexture; sand: THREE.CanvasTexture }>();
+
+/** Tileable rock (the cracked-stone painter) and sand textures for slopes and shores. */
+export function getTerrainTextures(quality: Quality) {
+  let tex = terrainCache.get(quality);
+  if (!tex) {
+    const size = GROUND_SIZE[quality];
+    const paintTile = (paint: (u: number, v: number) => { rgb: RGB; height: number }) => {
+      const data = new ImageData(size, size);
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const s = paint(x / size, 1 - y / size);
+          data.data.set([clamp255(s.rgb[0]), clamp255(s.rgb[1]), clamp255(s.rgb[2]), 255], (y * size + x) * 4);
+        }
+      }
+      return toTexture(data, true);
+    };
+    tex = {
+      rock: paintTile(PAINTERS[3]),
+      sand: paintTile((u, v) => {
+        const grain = fbm(u, v, 16, 3, 41);
+        const ripple = tileNoise(u, v, 6, 14, 42);
+        const t = 0.82 + grain * 0.22 + (ripple - 0.5) * 0.12;
+        return { rgb: [218 * t, 193 * t, 140 * t], height: grain };
+      }),
+    };
+    terrainCache.set(quality, tex);
+  }
+  return tex;
+}
+
+let waterNormals: THREE.CanvasTexture | null = null;
+
+/** Tileable ripple normal map for lakes, rivers and the sea (scrolled by the water mesh). */
+export function getWaterNormals(): THREE.CanvasTexture {
+  if (!waterNormals) {
+    const size = 256;
+    const heights = new Float32Array(size * size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const u = x / size;
+        const v = y / size;
+        heights[y * size + x] = fbm(u, v, 8, 4, 61) * 0.7 + (1 - Math.abs(2 * tileNoise(u, v, 6, 6, 62) - 1)) * 0.3;
+      }
+    }
+    waterNormals = toTexture(heightsToNormals(heights, size, size, 3.2), false);
+  }
+  return waterNormals;
 }

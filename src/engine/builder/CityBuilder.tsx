@@ -13,14 +13,15 @@ import {
   rotatedFootprint,
   type PieceType,
 } from '../../city/catalog';
-import { PieceModel, PieceView, RoadModel } from '../../city/models';
+import { PieceModel, RoadModel } from '../../city/models';
 import { isDragTool, useBuilderStore, type BuilderTool } from '../../state/useBuilderStore';
 import { roadMaskAt, useCityStore, type Piece } from '../../state/useCityStore';
 import { useGameStore } from '../../state/useGameStore';
+import { brushOf, heightAt, isWaterCell, raycastTerrain, useTerrainStore } from '../../terrain/terrain';
 import { useTouchStore } from '../../state/useTouchStore';
 
 const GRID_CELLS = 24; // even, so grid lines fall on cell borders when centred on a cell corner
-const MAX_PICK_DISTANCE = 600;
+const MAX_PICK_DISTANCE = 1400;
 
 interface Hover {
   /** Cell under the cursor (used by bulldoze / paint / select). */
@@ -29,10 +30,13 @@ interface Hover {
   /** Anchor cell for placing the selected piece, centred on the cursor. */
   gx: number;
   gz: number;
+  /** Exact ground point under the cursor (the terrain brush works in metres, not cells). */
+  px: number;
+  pz: number;
 }
 
 const isPlaceTool = (tool: BuilderTool): tool is PieceType =>
-  tool !== 'bulldoze' && tool !== 'paint' && tool !== 'select' && tool !== 'move';
+  tool !== 'bulldoze' && tool !== 'paint' && tool !== 'select' && tool !== 'move' && tool !== 'terrain';
 
 /** Turns a model translucent and tints it green (can place) or red (blocked). */
 function ghostify(root: THREE.Object3D, valid: boolean) {
@@ -103,27 +107,12 @@ function BlockHighlight({ piece, index }: { piece: Piece; index: number }) {
   );
 }
 
-/** Every placed piece, shown in both build and roam modes. */
-export function PiecesLayer() {
-  const pieces = useCityStore((s) => s.pieces);
-  const list = useMemo(() => Object.values(pieces), [pieces]);
-  return (
-    <>
-      {list.map((piece) => (
-        <PieceView key={piece.id} piece={piece} />
-      ))}
-    </>
-  );
-}
-
-/** World-space point on the ground under a screen position, or null if the ray misses it. */
+/** World-space point on the ground (hills and mountains included) under a screen position. */
 function groundPoint(raycaster: THREE.Raycaster, camera: THREE.Camera, ndc: THREE.Vector2): { x: number; z: number } | null {
   raycaster.setFromCamera(ndc, camera);
   const { origin, direction } = raycaster.ray;
-  if (direction.y > -1e-4) return null;
-  const t = -origin.y / direction.y;
-  if (t > MAX_PICK_DISTANCE) return null;
-  return { x: origin.x + direction.x * t, z: origin.z + direction.z * t };
+  const hit = raycastTerrain(origin.x, origin.y, origin.z, direction.x, direction.y, direction.z, MAX_PICK_DISTANCE);
+  return hit ? { x: hit.x, z: hit.z } : null;
 }
 
 /** Cells under a ground point for whatever the current tool would act on. */
@@ -143,11 +132,44 @@ function hoverFromPoint(x: number, z: number): Hover {
     hz: Math.floor(z / CELL),
     gx: Math.round(x / CELL - w / 2),
     gz: Math.round(z / CELL - d / 2),
+    px: x,
+    pz: z,
   };
 }
 
-const sameHover = (a: Hover | null, b: Hover | null) =>
-  !!a && !!b && a.hx === b.hx && a.hz === b.hz && a.gx === b.gx && a.gz === b.gz;
+const sameHover = (a: Hover | null, b: Hover | null) => {
+  if (!a || !b || a.hx !== b.hx || a.hz !== b.hz || a.gx !== b.gx || a.gz !== b.gz) return false;
+  // The terrain brush follows the cursor in metres, not just by cell.
+  return useBuilderStore.getState().tool !== 'terrain' || (Math.abs(a.px - b.px) < 1.5 && Math.abs(a.pz - b.pz) < 1.5);
+};
+
+const beginStrokes = () => {
+  useCityStore.getState().beginStroke();
+  useTerrainStore.getState().beginStroke();
+};
+const endStrokes = () => {
+  useCityStore.getState().endStroke();
+  useTerrainStore.getState().endStroke();
+};
+
+/** The brush footprint: a ring that follows the ground under the cursor. */
+function BrushRing({ x, z, radius }: { x: number; z: number; radius: number }) {
+  const geometry = useMemo(() => {
+    const points: THREE.Vector3[] = [];
+    for (let i = 0; i < 72; i++) {
+      const a = (i / 72) * Math.PI * 2;
+      const px = x + Math.cos(a) * radius;
+      const pz = z + Math.sin(a) * radius;
+      points.push(new THREE.Vector3(px, Math.max(heightAt(px, pz), -0.2) + 0.5, pz));
+    }
+    return new THREE.BufferGeometry().setFromPoints(points);
+  }, [x, z, radius]);
+  return (
+    <lineLoop geometry={geometry}>
+      <lineBasicMaterial color="#ffffff" transparent opacity={0.9} depthTest={false} />
+    </lineLoop>
+  );
+}
 
 /** A finger that moves less than this (px) and lifts quickly counts as a tap, not a drag. */
 const TAP_SLOP = 12;
@@ -170,6 +192,8 @@ export function CityBuilder() {
   const rotation = useBuilderStore((s) => s.rotation);
   const facade = useBuilderStore((s) => s.facade);
   const roof = useBuilderStore((s) => s.roof);
+  const roadSpec = useBuilderStore((s) => s.roadSpec);
+  const brushRadius = useBuilderStore((s) => s.brushRadius);
   const selectedId = useBuilderStore((s) => s.selectedId);
   const selectedBlock = useBuilderStore((s) => s.selectedBlock);
   const movingId = useBuilderStore((s) => s.movingId);
@@ -201,7 +225,9 @@ export function CityBuilder() {
     const city = useCityStore.getState();
     const b = useBuilderStore.getState();
     const cellId = city.occupancy[`${h.hx},${h.hz}`];
-    if (b.tool === 'select') {
+    if (b.tool === 'terrain') {
+      useTerrainStore.getState().paint(brushOf(b.brush), h.px, h.pz, b.brushRadius, b.brushMagnitude);
+    } else if (b.tool === 'select') {
       b.select(cellId && PIECES[city.pieces[cellId].type].customisable ? cellId : null);
     } else if (b.tool === 'move') {
       if (b.movingId && city.movePiece(b.movingId, h.gx, h.gz, b.rotation)) {
@@ -217,6 +243,18 @@ export function CityBuilder() {
         const look = resolveLook(target.type, b.facade, b.roof);
         city.paintAt(h.hx, h.hz, look.facade, look.roof);
       }
+    } else if (b.tool === 'crossing' && cellId && city.pieces[cellId]?.type === 'road') {
+      // A level crossing replaces the road cell it is laid on, keeping the road's direction.
+      const road = city.pieces[cellId];
+      const mask = roadMaskAt(city.pieces, city.occupancy, road.gx, road.gz);
+      const rot = mask & 5 && !(mask & 10) ? 0 : mask & 10 && !(mask & 5) ? 1 : b.rotation;
+      city.removeById(cellId);
+      if (!city.place({ type: 'crossing', gx: road.gx, gz: road.gz, rot, facade: 'brick', roof: 'gravel' })) {
+        city.place({ ...road }); // put the road back if the crossing can't go here
+      }
+    } else if (b.tool === 'road' && cellId && city.pieces[cellId]?.type === 'road') {
+      // Painting road over road restyles it with the chosen road settings.
+      city.updateRoads([cellId], b.roadSpec);
     } else {
       const look = resolveLook(b.tool, b.facade, b.roof);
       city.place({
@@ -226,6 +264,7 @@ export function CityBuilder() {
         rot: b.tool === 'road' ? 0 : b.rotation,
         ...look,
         ...presetStyle(b.tool),
+        ...(b.tool === 'road' ? { road: b.roadSpec } : {}),
       });
     }
   };
@@ -278,7 +317,7 @@ export function CityBuilder() {
         if (touches.size > 1) {
           // A second finger means a camera gesture: abandon any stroke or tap in progress.
           painting.current = false;
-          useCityStore.getState().endStroke();
+          endStrokes();
           if (tap) tap.multi = true;
           return;
         }
@@ -291,7 +330,7 @@ export function CityBuilder() {
           hoverRef.current = h;
           setHover(h);
           painting.current = true;
-          useCityStore.getState().beginStroke();
+          beginStrokes();
           apply(h);
         }
         return;
@@ -299,7 +338,7 @@ export function CityBuilder() {
       touchMode.current = false;
       if (e.button !== 0 || !hoverRef.current) return;
       painting.current = true;
-      useCityStore.getState().beginStroke(); // one undo step per click or drag
+      beginStrokes(); // one undo step per click or drag
       apply(hoverRef.current);
     };
     const onUp = (e: PointerEvent) => {
@@ -313,7 +352,7 @@ export function CityBuilder() {
         if (tap?.id === e.pointerId) tap = null;
       }
       painting.current = false;
-      useCityStore.getState().endStroke();
+      endStrokes();
     };
 
     const onTap = (clientX: number, clientY: number) => {
@@ -402,7 +441,12 @@ export function CityBuilder() {
 
   let valid = false;
   if (shown && placeType) {
-    valid = useCityStore.getState().canPlace(placeType, shown.gx, shown.gz, placeType === 'road' ? 0 : rotation);
+    const city = useCityStore.getState();
+    const existing = city.pieces[city.occupancy[`${shown.gx},${shown.gz}`]];
+    valid =
+      existing?.type === 'road' && (placeType === 'road' || placeType === 'crossing')
+        ? true // restyle the road that is already here (or turn it into a level crossing)
+        : city.canPlace(placeType, shown.gx, shown.gz, placeType === 'road' ? 0 : rotation, undefined, undefined, roadSpec);
   } else if (shown && moving) {
     valid = useCityStore.getState().canPlace(moving.type, shown.gx, shown.gz, rotation, moving.lot, moving.id);
   }
@@ -441,7 +485,7 @@ export function CityBuilder() {
     ghost = (
       <group ref={ghostRef} position={[(shown.gx + w / 2) * CELL, 0.02, (shown.gz + d / 2) * CELL]} rotation={[0, (rot * Math.PI) / 2, 0]}>
         {type === 'road' ? (
-          <RoadModel mask={roadMaskAt(pieces, occupancy, shown.gx, shown.gz)} />
+          <RoadModel mask={roadMaskAt(pieces, occupancy, shown.gx, shown.gz)} road={moving?.road ?? roadSpec} bridge={isWaterCell(shown.gx, shown.gz)} />
         ) : (
           <PieceModel
             type={type}
@@ -450,6 +494,9 @@ export function CityBuilder() {
             style={resolveStyle(type, moving ?? presetStyle(type))}
             accent={moving?.accent}
             scale={moving?.scale}
+            rot={rot}
+            gx={shown.gx}
+            gz={shown.gz}
             seed={0.5}
           />
         )}
@@ -467,7 +514,8 @@ export function CityBuilder() {
 
   return (
     <>
-      {gridAt && <primitive object={grid} position={[gridAt.hx * CELL, 0.02, gridAt.hz * CELL]} />}
+      {gridAt && tool !== 'terrain' && <primitive object={grid} position={[gridAt.hx * CELL, 0.02, gridAt.hz * CELL]} />}
+      {hover && tool === 'terrain' && <BrushRing x={hover.px} z={hover.pz} radius={brushRadius * CELL} />}
       {ghost}
       {selected && <PieceHighlight piece={selected} color="#ffffff" opacity={0.16} />}
       {selected && !movingId && PIECES[selected.type].paintable && <BlockHighlight piece={selected} index={selectedBlock} />}

@@ -1,77 +1,7 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CELL, FLOOR_H } from './catalog';
+import { FLOOR_H } from './catalog';
 
 export const LOT_HEIGHT = 0.12;
-
-// --- Roads ---------------------------------------------------------------------
-
-const ASPHALT = new THREE.Color('#3c3f44');
-const CURB = new THREE.Color('#b9b6ae');
-const PAINT = new THREE.Color('#e8c547');
-
-function coloredBox(
-  w: number,
-  h: number,
-  d: number,
-  x: number,
-  y: number,
-  z: number,
-  color: THREE.Color,
-): THREE.BufferGeometry {
-  const g = new THREE.BoxGeometry(w, h, d);
-  g.translate(x, y, z);
-  const count = g.getAttribute('position').count;
-  const colors = new Float32Array(count * 3);
-  for (let i = 0; i < count; i++) color.toArray(colors, i * 3);
-  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  g.deleteAttribute('uv');
-  return g;
-}
-
-const roadCache = new Map<number, THREE.BufferGeometry>();
-
-/**
- * One road cell as a single merged mesh (one draw call), cached per connection mask.
- * Mask bits: N (-z) = 1, E (+x) = 2, S (+z) = 4, W (-x) = 8. Edges with no road
- * neighbour get a raised sidewalk; each connected arm gets yellow dashes. The dash
- * period (1.5) lines up across cells so a long road reads as one continuous line.
- */
-export function roadGeometry(mask: number): THREE.BufferGeometry {
-  let geometry = roadCache.get(mask);
-  if (geometry) return geometry;
-
-  const half = CELL / 2;
-  const parts: THREE.BufferGeometry[] = [coloredBox(CELL, 0.08, CELL, 0, 0.04, 0, ASPHALT)];
-  const curbW = 1;
-
-  // [direction bit, unit vector (x, z) pointing out of the cell through that edge]
-  const arms: [number, number, number][] = [
-    [1, 0, -1],
-    [2, 1, 0],
-    [4, 0, 1],
-    [8, -1, 0],
-  ];
-  for (const [bit, dx, dz] of arms) {
-    const alongX = dx === 0; // edge runs along x for N/S, along z for E/W
-    if (!(mask & bit)) {
-      const cx = dx * (half - curbW / 2);
-      const cz = dz * (half - curbW / 2);
-      parts.push(coloredBox(alongX ? CELL : curbW, 0.16, alongX ? curbW : CELL, cx, 0.08, cz, CURB));
-    } else {
-      for (const dist of [0.75, 2.25]) {
-        parts.push(
-          coloredBox(alongX ? 0.14 : 0.8, 0.02, alongX ? 0.8 : 0.14, dx * dist, 0.09, dz * dist, PAINT),
-        );
-      }
-    }
-  }
-
-  geometry = mergeGeometries(parts)!;
-  parts.forEach((p) => p.dispose());
-  roadCache.set(mask, geometry);
-  return geometry;
-}
 
 // --- Building bodies -----------------------------------------------------------
 

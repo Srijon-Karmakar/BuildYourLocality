@@ -1,7 +1,16 @@
+import { useFrame } from '@react-three/fiber';
+import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { CELL, type LedSpec, type PieceType } from './catalog';
 import { getLedMaterial, getSignMaterial } from './ledTextures';
+import { sim } from '../sim/simulation';
+import { lightFor, type Axis, type LightColour } from '../sim/signals';
 import { darkMetalMaterial, glassMaterial, solidMaterial } from './materials';
+import { getGlowTexture, lampGlowMaterial } from './nightLights';
+import { atmo } from '../scenes/atmosphere';
+
+lampGlowMaterial.map = getGlowTexture();
+const poolGeometry = new THREE.PlaneGeometry(11, 11);
 
 const trunkMat = new THREE.MeshStandardMaterial({ color: '#5b3a1e', roughness: 0.95 });
 const leafMats = ['#3f8a3a', '#4c9a40', '#5aa046', '#6aa84f'].map(
@@ -28,6 +37,8 @@ interface PropProps {
   /** Player-chosen main colour; each prop falls back to its own default. */
   accent?: string;
   led?: LedSpec | null;
+  /** Quarter-turns; traffic lights use it to pick the road they serve. */
+  rot?: number;
 }
 
 function Tree({ seed, accent }: PropProps) {
@@ -158,22 +169,48 @@ function Fountain({ accent }: PropProps) {
   );
 }
 
+/** Motion-sensing streetlight: idles dim and brightens when a person or vehicle is nearby. */
 function Lamp({ accent }: PropProps) {
   const pole = accent ? solidMaterial(accent, 0.45, 0.6) : darkMetalMaterial;
+  const group = useRef<THREE.Group>(null);
+  const bulb = useMemo(() => {
+    const m = bulbMat.clone();
+    m.emissiveIntensity = 0;
+    return m;
+  }, []);
+  const level = useRef(0);
+  const here = useMemo(() => new THREE.Vector3(), []);
+  const placed = useRef(false);
+
+  // Off by day. After dark it idles at a soft glow and brightens when someone or something comes near.
+  useFrame((_, dt) => {
+    if (!group.current) return;
+    if (!placed.current) {
+      group.current.getWorldPosition(here);
+      placed.current = true;
+    }
+    const dark = atmo.lamps;
+    if (dark < 0.01 && level.current < 0.01) return;
+    const target = dark * (sim.activityNear(here.x, here.z, 14) ? 3 : 1.25);
+    level.current += (target - level.current) * Math.min(1, dt * 6);
+    bulb.emissiveIntensity = level.current;
+  });
+
   return (
-    <group>
+    <group ref={group}>
       <mesh position={[0, 2.5, 0]} material={pole} castShadow>
         <cylinderGeometry args={[0.07, 0.11, 5, 10]} />
       </mesh>
       <mesh position={[0.5, 5, 0]} material={pole} castShadow>
         <boxGeometry args={[1.1, 0.09, 0.09]} />
       </mesh>
-      <mesh position={[0.98, 4.9, 0]} material={bulbMat}>
+      <mesh position={[0.98, 4.9, 0]} material={bulb}>
         <boxGeometry args={[0.7, 0.1, 0.32]} />
       </mesh>
       <mesh position={[0.98, 4.97, 0]} material={pole} castShadow>
         <boxGeometry args={[0.76, 0.06, 0.38]} />
       </mesh>
+      <mesh position={[0.98, 0.09, 0]} rotation={[-Math.PI / 2, 0, 0]} geometry={poolGeometry} material={lampGlowMaterial} renderOrder={3} />
     </group>
   );
 }
@@ -221,7 +258,7 @@ function BusStop({ accent, led }: PropProps) {
       <mesh position={[1.45, 1.3, 0.05]} material={darkMetalMaterial} castShadow>
         <boxGeometry args={[0.95, 1.75, 0.14]} />
       </mesh>
-      <mesh position={[1.45, 1.3, 0.14]} material={getLedMaterial(spec.mode, spec.color)}>
+      <mesh position={[1.45, 1.3, 0.14]} material={getLedMaterial(spec, 0.8, 1.6)}>
         <boxGeometry args={[0.8, 1.6, 0.04]} />
       </mesh>
     </group>
@@ -231,7 +268,7 @@ function BusStop({ accent, led }: PropProps) {
 function Billboard({ accent, led }: PropProps) {
   const spec = led ?? DEFAULT_LED.billboard;
   const frame = solidMaterial(accent ?? '#1c1f24', 0.5, 0.5);
-  const screen = getLedMaterial(spec.mode, spec.color, 2.2);
+  const screen = getLedMaterial(spec, 7.5, 3.5, 2.2);
   return (
     <group>
       {[-1.6, 1.6].map((x) => (
@@ -275,28 +312,77 @@ function Kiosk({ accent }: PropProps) {
   );
 }
 
-function TrafficLight({ accent }: PropProps) {
+/**
+ * An intelligent traffic light with a pedestrian signal and a radar sensor. A junction with
+ * one beside it runs an adaptive signal: it extends green while traffic keeps coming, gaps out
+ * when a road empties, rests on green when nothing is waiting, and gives people who press for
+ * the crossing an all-red walk phase. The light's rotation picks which road its main head
+ * serves (even turns: north-south, odd: east-west).
+ */
+function TrafficLight({ accent, rot = 0 }: PropProps) {
   const pole = accent ? solidMaterial(accent, 0.45, 0.6) : darkMetalMaterial;
+  const axis: Axis = rot % 2 === 0 ? 0 : 1;
+  const group = useRef<THREE.Group>(null);
+  const here = useMemo(() => new THREE.Vector3(), []);
+  const lamps = useMemo(() => [redLight, amberLight, greenLight].map((m) => m.clone()), []);
+  const walkLamps = useMemo(() => [redLight, greenLight].map((m) => m.clone()), []);
+  const sensor = useMemo(() => new THREE.MeshStandardMaterial({ color: '#7de3ff', emissive: '#7de3ff', emissiveIntensity: 0.4 }), []);
+
+  useFrame(() => {
+    let colour: LightColour;
+    let walk = false;
+    let waiting = false;
+    if (group.current) {
+      group.current.getWorldPosition(here);
+      const controller = sim.signalAt(here.x, here.z);
+      colour = controller ? controller.colour(axis) : lightFor(axis, sim.time);
+      walk = !!controller?.walk;
+      waiting = !!controller;
+    } else {
+      colour = 'red';
+    }
+    lamps[0].emissiveIntensity = colour === 'red' ? 2.6 : 0.08;
+    lamps[1].emissiveIntensity = colour === 'yellow' ? 2.6 : 0.08;
+    lamps[2].emissiveIntensity = colour === 'green' ? 2.6 : 0.08;
+    walkLamps[0].emissiveIntensity = walk ? 0.08 : 2.2;
+    walkLamps[1].emissiveIntensity = walk ? 2.4 : 0.08;
+    // The radar blinks while the signal is actively reading traffic.
+    sensor.emissiveIntensity = waiting ? 0.9 + 0.8 * Math.sin(sim.time * 6) : 0.3;
+  });
+
   return (
-    <group>
+    <group ref={group}>
       <mesh position={[0, 2.5, 0]} material={pole} castShadow>
         <cylinderGeometry args={[0.07, 0.1, 5, 8]} />
       </mesh>
       <mesh position={[0.9, 4.8, 0]} material={pole} castShadow>
         <boxGeometry args={[1.8, 0.08, 0.08]} />
       </mesh>
+      {/* Vehicle signal head */}
       <mesh position={[1.7, 4.5, 0]} material={darkMetalMaterial} castShadow>
         <boxGeometry args={[0.34, 1, 0.34]} />
       </mesh>
-      {[
-        [redLight, 4.8],
-        [amberLight, 4.5],
-        [greenLight, 4.2],
-      ].map(([material, y], i) => (
-        <mesh key={i} position={[1.7, y as number, 0.18]} material={material as THREE.Material}>
+      {lamps.map((material, i) => (
+        <mesh key={i} position={[1.7, 4.8 - i * 0.3, 0.18]} material={material}>
           <sphereGeometry args={[0.09, 10, 10]} />
         </mesh>
       ))}
+      {/* Pedestrian signal and push-button */}
+      <mesh position={[0, 2.9, 0.14]} material={darkMetalMaterial} castShadow>
+        <boxGeometry args={[0.3, 0.5, 0.16]} />
+      </mesh>
+      {walkLamps.map((material, i) => (
+        <mesh key={i} position={[0, 3.05 - i * 0.25, 0.23]} material={material}>
+          <boxGeometry args={[0.14, 0.14, 0.03]} />
+        </mesh>
+      ))}
+      <mesh position={[0, 1.5, 0.12]} material={solidMaterial('#d9c000', 0.5)}>
+        <boxGeometry args={[0.12, 0.18, 0.08]} />
+      </mesh>
+      {/* Radar sensor on the arm */}
+      <mesh position={[1.1, 4.98, 0]} material={sensor}>
+        <sphereGeometry args={[0.1, 10, 8]} />
+      </mesh>
     </group>
   );
 }

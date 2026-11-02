@@ -1,19 +1,43 @@
-import { useState } from 'react';
-import { useGameStore } from '../state/useGameStore';
-import { AccountPanel } from './AccountPanel';
-import { ModeBar, ModeToggle, RoamOptions } from './ModeBar';
-import { SettingsPanel } from './SettingsPanel';
+import { atmo, formatHour } from '../scenes/atmosphere';
+import { useMenuStore } from '../state/useMenuStore';
+import { useWeatherStore } from '../state/useWeatherStore';
+import { Icon } from './icons';
+import { MenuPanel } from './MenuPanel';
+import { ModeBar, ModeToggle } from './ModeBar';
+import { SyncBadge } from './SyncBadge';
+import { WEATHER_ICONS, useClock } from './skyShared';
 import { useIsCompact } from './useMediaQuery';
 
+/** Clock and weather at a glance; tapping it opens the Sky tab. */
+function SkyChip({ compact }: { compact: boolean }) {
+  const hour = useClock();
+  const open = useMenuStore((s) => s.open && s.tab === 'sky');
+  const toggle = useMenuStore((s) => s.toggle);
+  useWeatherStore((s) => s.weather); // re-render when the weather setting changes
+  const icon = atmo.sunHeight < 0 && (atmo.kind === 'clear' || atmo.kind === 'cloudy') ? 'moon' : WEATHER_ICONS[atmo.kind];
+  return (
+    <button
+      onClick={() => toggle('sky')}
+      aria-label="Time and weather"
+      className={`pointer-events-auto flex h-11 items-center gap-1.5 whitespace-nowrap rounded-2xl px-3 tabular-nums text-white backdrop-blur-md transition sm:h-10 sm:rounded-xl ${
+        open ? 'bg-white/25' : 'bg-black/55 active:bg-white/20 sm:hover:bg-black/65'
+      }`}
+    >
+      <Icon name={icon} className="text-base" />
+      <span className={compact ? 'text-xs' : 'text-sm'}>{formatHour(hour)}</span>
+    </button>
+  );
+}
+
 /**
- * Top of the screen. Desktop: mode cluster on the left, account and settings dropdowns on
- * the right. Phone: just the mode toggle and a menu button; everything else lives in a sheet
- * so the map stays visible.
+ * Top of the screen. Left: the Build / Walk switch (plus walk options on desktop). Right: save
+ * status, the clock and one menu button. Everything else (sky, graphics, account) is inside the
+ * menu, so the map stays clear.
  */
 export function TopBar() {
   const compact = useIsCompact();
-  const mode = useGameStore((s) => s.mode);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const menuOpen = useMenuStore((s) => s.open);
+  const toggle = useMenuStore((s) => s.toggle);
 
   const inset = {
     paddingTop: 'calc(var(--safe-top) + 0.5rem)',
@@ -21,52 +45,23 @@ export function TopBar() {
     paddingRight: 'calc(var(--safe-right) + 0.5rem)',
   };
 
-  if (!compact) {
-    return (
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-4">
-        <ModeBar />
-        <div className="flex items-start gap-2">
-          <AccountPanel />
-          <SettingsPanel />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2" style={inset}>
-        <ModeToggle />
-        <button
-          onClick={() => setMenuOpen((v) => !v)}
-          aria-label="Menu"
-          className="pointer-events-auto flex h-13 w-13 items-center justify-center rounded-2xl bg-black/55 text-xl text-white backdrop-blur-md active:bg-white/20"
-        >
-          {menuOpen ? '✕' : '☰'}
-        </button>
-      </div>
-
-      {menuOpen && (
-        <div
-          className="pointer-events-auto absolute inset-x-2 flex max-h-[70dvh] flex-col gap-5 overflow-y-auto rounded-2xl bg-black/80 p-4 text-white backdrop-blur-lg"
-          style={{ top: 'calc(var(--safe-top) + 4.25rem)' }}
-        >
-          {mode === 'roam' && (
-            <section>
-              <h3 className="mb-2 text-xs uppercase tracking-wide text-white/50">Walk options</h3>
-              <RoamOptions stacked />
-            </section>
-          )}
-          <section>
-            <h3 className="mb-2 text-xs uppercase tracking-wide text-white/50">Account</h3>
-            <AccountPanel inline />
-          </section>
-          <section>
-            <h3 className="mb-2 text-xs uppercase tracking-wide text-white/50">Graphics</h3>
-            <SettingsPanel inline />
-          </section>
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 sm:px-4" style={inset}>
+        {compact ? <ModeToggle /> : <ModeBar />}
+        <div className="flex items-start gap-2">
+          <SyncBadge compact={compact} />
+          <SkyChip compact={compact} />
+          <button
+            onClick={() => toggle()}
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            className="pointer-events-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-black/55 text-xl text-white backdrop-blur-md active:bg-white/20 sm:h-10 sm:w-10 sm:rounded-xl sm:hover:bg-black/65"
+          >
+            <Icon name={menuOpen ? 'close' : 'menu'} />
+          </button>
         </div>
-      )}
+      </div>
+      <MenuPanel />
     </>
   );
 }

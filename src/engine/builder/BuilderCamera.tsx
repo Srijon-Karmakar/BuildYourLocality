@@ -2,10 +2,11 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import { useBuilderStore, isDragTool } from '../../state/useBuilderStore';
 import { useGameStore } from '../../state/useGameStore';
+import { heightAt } from '../../terrain/terrain';
 import { viewState, virtualKeys } from '../viewState';
 
 const MIN_DIST = 10;
-const MAX_DIST = 250;
+const MAX_DIST = 520; // far enough to see over a 200-storey (480 m) tower
 const MIN_PITCH = 0.25;
 const MAX_PITCH = 1.5;
 
@@ -152,13 +153,14 @@ export function BuilderCamera() {
     viewState.pitch = Math.min(MAX_PITCH, Math.max(MIN_PITCH, viewState.pitch + axis(['TiltUp'], ['TiltDown']) * 0.9 * delta));
     viewState.dist = clampDist(viewState.dist * Math.exp(axis(['ZoomOut'], ['ZoomIn']) * 1.1 * delta));
 
+    // Look at the ground itself (so mountains don't swallow the camera) and stay above it.
+    const ground = Math.max(0, heightAt(viewState.x, viewState.z));
     const cp = Math.cos(viewState.pitch);
-    camera.position.set(
-      viewState.x + Math.sin(viewState.yaw) * cp * viewState.dist,
-      Math.sin(viewState.pitch) * viewState.dist,
-      viewState.z + Math.cos(viewState.yaw) * cp * viewState.dist,
-    );
-    camera.lookAt(viewState.x, 0, viewState.z);
+    const cx = viewState.x + Math.sin(viewState.yaw) * cp * viewState.dist;
+    const cz = viewState.z + Math.cos(viewState.yaw) * cp * viewState.dist;
+    const cy = Math.max(ground + Math.sin(viewState.pitch) * viewState.dist, heightAt(cx, cz) + 4);
+    camera.position.set(cx, cy, cz);
+    camera.lookAt(viewState.x, ground, viewState.z);
   });
 
   return null;

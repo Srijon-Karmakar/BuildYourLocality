@@ -22,6 +22,12 @@ export const virtualInput = {
   moveY: 0,
   jump: false,
   down: false,
+  /** Held attack button (touch). */
+  attack: false,
+  /** Crouch toggle (touch). */
+  crouch: false,
+  /** Held run button (touch). */
+  sprint: false,
 };
 
 /**

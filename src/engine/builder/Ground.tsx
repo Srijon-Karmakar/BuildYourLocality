@@ -6,6 +6,7 @@ import { CELL } from '../../city/catalog';
 import { getGroundTextures, getGroundVariationTexture } from '../../city/cityTextures';
 import { useGameStore } from '../../state/useGameStore';
 import { viewState } from '../viewState';
+import { useTerrainStore } from '../../terrain/terrain';
 
 /** Cells across the ground plane; large enough that its edge is lost in the fog. */
 const GROUND_CELLS = 334;
@@ -21,6 +22,8 @@ const VARIATION_PLANE_CELLS = VARIATION_CELLS * 21;
  */
 export function Ground() {
   const quality = useGameStore((s) => s.graphics.textureQuality);
+  /** Once terrain exists, nearby ground is drawn (and collided) as terrain chunks instead. */
+  const terrain = useTerrainStore((s) => Object.keys(s.cells).length > 0);
   const mesh = useRef<THREE.Mesh>(null);
   const overlay = useRef<THREE.Mesh>(null);
   const variation = useMemo(() => getGroundVariationTexture(), []);
@@ -46,18 +49,23 @@ export function Ground() {
 
   return (
     <>
-      <mesh ref={mesh} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      {/* Drawn first and without writing depth, so terrain chunks (lakes, valleys) always show on top. */}
+      <mesh ref={mesh} rotation={[-Math.PI / 2, 0, 0]} receiveShadow renderOrder={-0.5}>
         <planeGeometry args={[GROUND_CELLS * CELL, GROUND_CELLS * CELL]} />
-        <meshStandardMaterial map={map} normalMap={normalMap} roughness={1} metalness={0} />
+        <meshStandardMaterial map={map} normalMap={normalMap} roughness={1} metalness={0} depthWrite={false} />
       </mesh>
       {/* Multiplies soft light/dark patches over the grass so its tile does not read as a repeat. */}
-      <mesh ref={overlay} rotation={[-Math.PI / 2, 0, 0]} renderOrder={1}>
-        <planeGeometry args={[VARIATION_PLANE_CELLS * CELL, VARIATION_PLANE_CELLS * CELL]} />
-        <meshBasicMaterial map={variation} blending={THREE.MultiplyBlending} transparent premultipliedAlpha depthWrite={false} toneMapped={false} />
-      </mesh>
-      <RigidBody type="fixed">
-        <CuboidCollider args={[5000, 0.5, 5000]} position={[0, -0.5, 0]} />
-      </RigidBody>
+      {!terrain && (
+        <mesh ref={overlay} rotation={[-Math.PI / 2, 0, 0]} renderOrder={1}>
+          <planeGeometry args={[VARIATION_PLANE_CELLS * CELL, VARIATION_PLANE_CELLS * CELL]} />
+          <meshBasicMaterial map={variation} blending={THREE.MultiplyBlending} transparent premultipliedAlpha depthWrite={false} toneMapped={false} />
+        </mesh>
+      )}
+      {!terrain && (
+        <RigidBody type="fixed">
+          <CuboidCollider args={[5000, 0.5, 5000]} position={[0, -0.5, 0]} />
+        </RigidBody>
+      )}
     </>
   );
 }

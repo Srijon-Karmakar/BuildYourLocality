@@ -1,6 +1,8 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { virtualInput, virtualKeys } from '../engine/viewState';
 import { useBuilderStore } from '../state/useBuilderStore';
+import { combat } from '../sim/combat';
+import { Icon } from './icons';
 import { useGameStore } from '../state/useGameStore';
 import { useTouchStore } from '../state/useTouchStore';
 
@@ -76,6 +78,10 @@ function HoldButton({ onHold, children, className = '', label }: { onHold: (down
 export function WalkControls() {
   const flying = useGameStore((s) => s.flying);
   const toggleFlying = useGameStore((s) => s.toggleFlying);
+  const sub = useGameStore((s) => s.roamSubMode);
+  const [crouched, setCrouched] = useState(false);
+  const [torch, setTorch] = useState(false);
+  const fighting = sub !== 'peaceful';
 
   return (
     <div
@@ -83,23 +89,78 @@ export function WalkControls() {
       style={{ paddingBottom: 'calc(var(--safe-bottom) + 1.25rem)', paddingLeft: 'calc(var(--safe-left) + 1.25rem)', paddingRight: 'calc(var(--safe-right) + 1.25rem)' }}
     >
       <Joystick />
-      <div className="flex flex-col items-center gap-3">
-        <button
-          className={`${pad} h-12 w-12 text-sm ${flying ? 'bg-sky-400/80 text-black' : ''}`}
-          onClick={toggleFlying}
-          aria-label="Toggle flying"
-        >
-          Fly
-        </button>
-        {flying && (
-          <HoldButton label="Descend" className="h-14 w-14 text-xl" onHold={(down) => (virtualInput.down = down)}>
-            ▼
+      {fighting ? (
+        <div className="flex items-end gap-3">
+          <div className="grid grid-cols-2 gap-2">
+            {sub === 'survival' && (
+              <button className={`${pad} h-12 w-12 text-xl`} onClick={() => combat.interact()} aria-label="Hide inside a building">
+                <Icon name="door" />
+              </button>
+            )}
+            <button
+              className={`${pad} h-12 w-12 text-xl ${torch ? 'bg-amber-300/80 text-black' : ''}`}
+              onClick={() => {
+                combat.player.flashlight = !combat.player.flashlight;
+                setTorch(combat.player.flashlight);
+              }}
+              aria-label="Torch"
+            >
+              <Icon name="flashlight" />
+            </button>
+            <button
+              className={`${pad} h-12 w-12 text-xl ${crouched ? 'bg-emerald-400/80 text-black' : ''}`}
+              onClick={() => {
+                virtualInput.crouch = !virtualInput.crouch;
+                setCrouched(virtualInput.crouch);
+              }}
+              aria-label="Crouch"
+            >
+              <Icon name="person" />
+            </button>
+            <HoldButton label="Run" className="h-12 w-12 text-xl" onHold={(down) => (virtualInput.sprint = down)}>
+              <Icon name="run" />
+            </HoldButton>
+          </div>
+          <div className="flex flex-col items-center gap-3">
+            <HoldButton label="Jump" className="h-12 w-12 text-xl" onHold={(down) => (virtualInput.jump = down)}>
+              <Icon name="up" />
+            </HoldButton>
+            <HoldButton label="Attack" className="h-[4.5rem] w-[4.5rem] bg-red-600/60 text-3xl" onHold={(down) => (virtualInput.attack = down)}>
+              <Icon name="swords" />
+            </HoldButton>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-end gap-3">
+          <div className="flex flex-col items-center gap-2">
+            <button
+              className={`${pad} h-12 w-12 text-xl ${torch ? 'bg-amber-300/80 text-black' : ''}`}
+              onClick={() => {
+                combat.player.flashlight = !combat.player.flashlight;
+                setTorch(combat.player.flashlight);
+              }}
+              aria-label="Torch"
+            >
+              <Icon name="flashlight" />
+            </button>
+            <button className={`${pad} h-12 w-12 text-sm ${flying ? 'bg-sky-400/80 text-black' : ''}`} onClick={toggleFlying} aria-label="Toggle flying">
+              Fly
+            </button>
+            {flying ? (
+              <HoldButton label="Descend" className="h-12 w-12 text-xl" onHold={(down) => (virtualInput.down = down)}>
+                <Icon name="down" />
+              </HoldButton>
+            ) : (
+              <HoldButton label="Run" className="h-12 w-12 text-xl" onHold={(down) => (virtualInput.sprint = down)}>
+                <Icon name="run" />
+              </HoldButton>
+            )}
+          </div>
+          <HoldButton label={flying ? 'Ascend' : 'Jump'} className="h-[4.5rem] w-[4.5rem] text-2xl" onHold={(down) => (virtualInput.jump = down)}>
+            <Icon name="up" />
           </HoldButton>
-        )}
-        <HoldButton label={flying ? 'Ascend' : 'Jump'} className="h-20 w-20 text-2xl" onHold={(down) => (virtualInput.jump = down)}>
-          {flying ? '▲' : '⤒'}
-        </HoldButton>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -117,22 +178,22 @@ export function CameraPad() {
       style={{ right: 'calc(var(--safe-right) + 0.5rem)', top: '50%', transform: 'translateY(-50%)' }}
     >
       <HoldButton label="Zoom in" className="h-11 w-11 text-xl" onHold={cameraKey('ZoomIn')}>
-        ＋
+        <Icon name="plus" />
       </HoldButton>
       <HoldButton label="Zoom out" className="h-11 w-11 text-xl" onHold={cameraKey('ZoomOut')}>
-        －
+        <Icon name="minus" />
       </HoldButton>
       <HoldButton label="Turn left" className="h-11 w-11 text-lg" onHold={cameraKey('KeyQ')}>
-        ⟲
+        <Icon name="rotateBack" />
       </HoldButton>
       <HoldButton label="Turn right" className="h-11 w-11 text-lg" onHold={cameraKey('KeyE')}>
-        ⟳
+        <Icon name="rotate" />
       </HoldButton>
       <HoldButton label="Tilt up" className="h-11 w-11 text-base" onHold={cameraKey('TiltUp')}>
-        ⤒
+        <Icon name="up" />
       </HoldButton>
       <HoldButton label="Tilt down" className="h-11 w-11 text-base" onHold={cameraKey('TiltDown')}>
-        ⤓
+        <Icon name="down" />
       </HoldButton>
     </div>
   );
@@ -156,11 +217,11 @@ export function ConfirmBar() {
       style={{ top: 'calc(var(--safe-top) + 4.25rem)' }}
     >
       <button className="h-12 w-12 rounded-full bg-white/15 text-lg active:bg-white/30" onClick={cancel} aria-label="Cancel">
-        ✕
+        <Icon name="close" />
       </button>
       {!isRoad && (
         <button className="h-12 w-12 rounded-full bg-white/15 text-lg active:bg-white/30" onClick={rotate} aria-label="Rotate">
-          ↻
+          <Icon name="rotate" />
         </button>
       )}
       <button
@@ -168,7 +229,7 @@ export function ConfirmBar() {
         disabled={!valid}
         onClick={confirm}
       >
-        {valid ? '✓ Place' : 'Blocked'}
+        {valid ? <><Icon name="check" className="mr-1 inline" />Place</> : 'Blocked'}
       </button>
     </div>
   );

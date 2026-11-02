@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from 'react';
 import {
   BALCONY_MODES,
-  LED_MODES,
   ROOF_EXTRAS,
+  type DoorSide,
+  MAX_LEDS,
   type LedSpec,
   type RoofExtra,
   DOOR_SIDES,
@@ -28,8 +29,11 @@ import {
   type LayoutPreset,
 } from '../city/catalog';
 import { maxDoorOffset } from '../city/models';
+import { Icon } from './icons';
+import { LedEditor } from './LedEditor';
 import { useBuilderStore } from '../state/useBuilderStore';
-import { useCityStore, type Piece } from '../state/useCityStore';
+import { connectedRoads, useCityStore, type Piece } from '../state/useCityStore';
+import { RoadSettings } from './RoadSettings';
 import { useGameStore } from '../state/useGameStore';
 
 type Tab = 'walls' | 'layout' | 'door' | 'roof' | 'extras';
@@ -40,6 +44,9 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'roof', label: 'Roof' },
   { id: 'extras', label: 'Extras' },
 ];
+
+const SHEET_CLASS =
+  'pointer-events-auto absolute inset-x-0 bottom-0 z-10 flex max-h-[58dvh] flex-col gap-3 overflow-y-auto rounded-t-2xl bg-black/80 p-4 pb-[calc(var(--safe-bottom)+1rem)] text-sm text-white backdrop-blur-lg sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-20 sm:max-h-[calc(100vh-7rem)] sm:rounded-xl sm:bg-black/70 sm:pb-4 sm:text-xs';
 
 const swatch = (active: boolean) =>
   `h-9 w-9 rounded-full border-2 transition sm:h-6 sm:w-6 ${active ? 'scale-110 border-white' : 'border-white/20 hover:border-white/60'}`;
@@ -70,6 +77,7 @@ function Stepper({
   min,
   max,
   step = 1,
+  bigStep,
   format,
 }: {
   label: string;
@@ -78,12 +86,20 @@ function Stepper({
   min: number;
   max: number;
   step?: number;
+  /** Optional larger step with its own buttons, for long ranges (e.g. 10 floors at a time). */
+  bigStep?: number;
   format?: (value: number) => string;
 }) {
+  const clamp = (v: number) => Math.min(max, Math.max(min, v));
   return (
     <div className="flex items-center justify-between gap-2">
       <span className="text-white/70">{label}</span>
       <div className="flex items-center gap-1.5">
+        {bigStep && (
+          <button className={chip(false) + ' text-center'} disabled={value <= min} onClick={() => onChange(clamp(value - bigStep))}>
+            −{bigStep}
+          </button>
+        )}
         <button className={chip(false) + ' w-10 text-center sm:w-6'} disabled={value - step < min - 1e-6} onClick={() => onChange(value - step)}>
           −
         </button>
@@ -91,6 +107,11 @@ function Stepper({
         <button className={chip(false) + ' w-10 text-center sm:w-6'} disabled={value + step > max + 1e-6} onClick={() => onChange(value + step)}>
           +
         </button>
+        {bigStep && (
+          <button className={chip(false) + ' text-center'} disabled={value >= max} onClick={() => onChange(clamp(value + bigStep))}>
+            +{bigStep}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -120,9 +141,11 @@ export function BuildingInspector() {
   const piece = useCityStore((s) => (selectedId ? s.pieces[selectedId] : undefined));
   const { updatePiece, removeById, setLot, movePiece } = useCityStore.getState();
   const [tab, setTab] = useState<Tab>('walls');
+  const [ledSel, setLedSel] = useState(0);
   const [note, setNote] = useState<string | null>(null);
 
   if (mode !== 'build' || !piece || !PIECES[piece.type].customisable) return null;
+  if (piece.type === 'road') return <RoadInspector piece={piece} />;
   if (!PIECES[piece.type].paintable) return <PropInspector piece={piece} />;
 
   if (movingId) {
@@ -182,11 +205,37 @@ export function BuildingInspector() {
     width: 0,
     offset: 0,
   };
-  const led = style.led;
+  const leds = style.leds;
+  const ledIndex = Math.min(ledSel, Math.max(0, leds.length - 1));
+  const led: LedSpec | undefined = leds[ledIndex];
   const ledBlock = led ? (style.blocks[led.block] ?? style.blocks[0]) : style.blocks[0];
   const ledBox = blockBox(ledBlock, style.lot);
   const ledWall = led && (led.side === 'front' || led.side === 'back') ? ledBox.w : ledBox.d;
-  const setLed = (change: Partial<LedSpec>) => patch({ led: { ...(led ?? defaultLed), ...change } });
+  const saveLeds = (next: LedSpec[]) => patch({ leds: next, led: null });
+  const setLed = (change: Partial<LedSpec>) => saveLeds(leds.map((l, i) => (i === ledIndex ? { ...l, ...change } : l)));
+  /** A new screen on a side, with the look and size of the selected one (or the default). */
+  const screenFor = (side: DoorSide): LedSpec => ({ ...(led ?? defaultLed), side, offset: 0 });
+  const toggleSide = (side: DoorSide) => {
+    if (leds.some((l) => l.side === side)) {
+      const next = leds.filter((l) => l.side !== side);
+      saveLeds(next);
+      setLedSel(0);
+    } else if (leds.length < MAX_LEDS) {
+      saveLeds([...leds, screenFor(side)]);
+      setLedSel(leds.length);
+    }
+  };
+  const allSides = () => {
+    const missing = DOOR_SIDES.filter((sd) => !leds.some((l) => l.side === sd.id)).map((sd) => screenFor(sd.id));
+    if (missing.length > 0) saveLeds([...leds, ...missing].slice(0, MAX_LEDS));
+  };
+  const LOOK_KEYS = ['block', 'side', 'bottom', 'height', 'width', 'offset'] as const;
+  const matchLook = () => {
+    if (!led) return;
+    const look = { ...led };
+    for (const k of LOOK_KEYS) delete (look as Partial<LedSpec>)[k];
+    saveLeds(leds.map((l) => ({ ...look, block: l.block, side: l.side, bottom: l.bottom, height: l.height, width: l.width, offset: l.offset }) as LedSpec));
+  };
   const toggleExtra = (extra: RoofExtra) =>
     patch({
       roofExtras: style.roofExtras.includes(extra)
@@ -203,7 +252,7 @@ export function BuildingInspector() {
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium">{def.label}</span>
         <button className="flex h-10 w-10 items-center justify-center text-lg text-white/60 hover:text-white sm:h-auto sm:w-auto sm:text-base" onClick={() => select(null)} title="Close (Esc)">
-          ✕
+          <Icon name="close" />
         </button>
       </div>
 
@@ -305,7 +354,7 @@ export function BuildingInspector() {
 
           <div className="flex flex-col gap-1.5 rounded-lg bg-white/5 p-2.5">
             <div className="text-white/55">Block {blockIndex + 1} (highlighted in yellow)</div>
-            <Stepper label="Floors" value={block.floors} min={MIN_FLOORS} max={MAX_FLOORS} onChange={(floors) => editBlock({ floors })} />
+            <Stepper label="Floors" value={block.floors} min={MIN_FLOORS} max={MAX_FLOORS} bigStep={10} onChange={(floors) => editBlock({ floors })} />
             <Stepper label="Position X" value={block.u} min={0} max={lw - block.w} onChange={(u) => editBlock({ u })} format={(v) => `${v * UNIT} m`} />
             <Stepper label="Position Z" value={block.v} min={0} max={ld - block.d} onChange={(v) => editBlock({ v })} format={(v) => `${v * UNIT} m`} />
             <Stepper label="Width" value={block.w} min={1} max={lw - block.u} onChange={(w) => editBlock({ w })} format={(v) => `${v * UNIT} m`} />
@@ -393,21 +442,63 @@ export function BuildingInspector() {
             </div>
           </Section>
 
-          <div className="flex flex-col gap-1.5 rounded-lg bg-white/5 p-2.5">
-            <label className="flex items-center justify-between">
-              <span className="font-medium">LED screen</span>
-              <input type="checkbox" checked={!!led} onChange={(e) => patch({ led: e.target.checked ? defaultLed : null })} />
-            </label>
+          <div className="flex flex-col gap-2 rounded-lg bg-white/5 p-2.5">
+            <div className="flex items-center justify-between">
+              <span className="font-medium">LED screens</span>
+              <span className="text-white/50">{leds.length} / {MAX_LEDS}</span>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {DOOR_SIDES.map((sd) => {
+                const count = leds.filter((l) => l.side === sd.id).length;
+                return (
+                  <button key={sd.id} className={chip(count > 0) + ' text-center'} onClick={() => toggleSide(sd.id)}>
+                    {sd.label}
+                    {count > 1 ? ` ×${count}` : ''}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <button className={chip(false)} disabled={DOOR_SIDES.every((sd) => leds.some((l) => l.side === sd.id))} onClick={allSides}>
+                All four sides
+              </button>
+              <button
+                className={chip(false)}
+                disabled={leds.length >= MAX_LEDS}
+                onClick={() => {
+                  saveLeds([...leds, { ...(led ?? defaultLed), bottom: Math.min(ledBlock.floors - 1, (led?.bottom ?? 0) + (led?.height ?? 1) + 1), offset: 0 }]);
+                  setLedSel(leds.length);
+                }}
+              >
+                + Another here
+              </button>
+              {leds.length > 1 && (
+                <button className={chip(false)} onClick={matchLook}>
+                  Same look everywhere
+                </button>
+              )}
+              {leds.length > 0 && (
+                <button className={chip(false)} onClick={() => saveLeds([])}>
+                  Remove all
+                </button>
+              )}
+            </div>
+            {leds.length > 1 && (
+              <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
+                {leds.map((l, i) => (
+                  <button key={i} className={chip(i === ledIndex) + ' shrink-0 whitespace-nowrap'} onClick={() => setLedSel(i)}>
+                    {i + 1} · {DOOR_SIDES.find((sd) => sd.id === l.side)?.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {led && (
               <>
-                <div className="flex flex-wrap gap-1.5">
-                  {LED_MODES.map((m) => (
-                    <button key={m.id} className={chip(led.mode === m.id)} onClick={() => setLed({ mode: m.id })}>
-                      {m.label}
-                    </button>
-                  ))}
+                <div className="border-t border-white/10 pt-2 text-white/55">
+                  Editing screen {ledIndex + 1} ({DOOR_SIDES.find((sd) => sd.id === led.side)?.label.toLowerCase()})
                 </div>
-                <ColorField label="Screen colour" value={led.color} onChange={(color) => setLed({ color })} />
+                <LedEditor spec={led} onChange={setLed} />
+                <div className="mt-1 border-t border-white/10 pt-2 text-white/55">Where it goes</div>
                 {style.blocks.length > 1 && (
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-white/70">On block</span>
@@ -436,6 +527,15 @@ export function BuildingInspector() {
                   onChange={(width) => setLed({ width })}
                   format={(v) => (v === 0 ? 'Full' : `${v.toFixed(1)} m`)}
                 />
+                <button
+                  className={chip(false) + ' text-red-300'}
+                  onClick={() => {
+                    saveLeds(leds.filter((_, i) => i !== ledIndex));
+                    setLedSel(0);
+                  }}
+                >
+                  Remove this screen
+                </button>
               </>
             )}
           </div>
@@ -540,7 +640,7 @@ function PropInspector({ piece }: { piece: Piece }) {
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium">{def.label}</span>
         <button className="flex h-10 w-10 items-center justify-center text-lg text-white/60 hover:text-white sm:h-auto sm:w-auto sm:text-base" onClick={() => select(null)} title="Close (Esc)">
-          ✕
+          <Icon name="close" />
         </button>
       </div>
       <div className="flex gap-1.5">
@@ -576,14 +676,7 @@ function PropInspector({ piece }: { piece: Piece }) {
 
       {hasLed && (
         <Section title="LED screen">
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {LED_MODES.map((m) => (
-              <button key={m.id} className={chip(led.mode === m.id)} onClick={() => updatePiece(piece.id, { led: { ...led, mode: m.id } })}>
-                {m.label}
-              </button>
-            ))}
-          </div>
-          <ColorField label="Screen colour" value={led.color} onChange={(color) => updatePiece(piece.id, { led: { ...led, color } })} />
+          <LedEditor spec={led} onChange={(change) => updatePiece(piece.id, { led: { ...led, ...change } })} />
         </Section>
       )}
 
@@ -595,6 +688,98 @@ function PropInspector({ piece }: { piece: Piece }) {
         }}
       >
         Delete <span className="ml-1 text-xs opacity-70">Del</span>
+      </button>
+    </div>
+  );
+}
+
+type RoadScope = 'cell' | 'stretch' | 'network';
+
+/** Inspector for a road cell: its settings can be applied to just this cell or to the road it belongs to. */
+function RoadInspector({ piece }: { piece: Piece }) {
+  const { select } = useBuilderStore.getState();
+  const [scope, setScope] = useState<RoadScope>('stretch');
+  const [note, setNote] = useState<string | null>(null);
+
+  /** Places a pair of lights per road in the free cells around this junction. */
+  const addLights = () => {
+    const { pieces, occupancy, place, canPlace } = useCityStore.getState();
+    const isRoad = (x: number, z: number) => pieces[occupancy[`${x},${z}`]]?.type === 'road';
+    const arms = [isRoad(piece.gx, piece.gz - 1), isRoad(piece.gx + 1, piece.gz), isRoad(piece.gx, piece.gz + 1), isRoad(piece.gx - 1, piece.gz)];
+    if (arms.filter(Boolean).length < 3) {
+      setNote('This cell is not a junction yet: it needs roads on at least three sides.');
+      return;
+    }
+    // Diagonal cells: opposite corners serve the same road, so rotate them in pairs.
+    const spots: [number, number, number][] = [
+      [1, -1, 0],
+      [-1, 1, 0],
+      [-1, -1, 1],
+      [1, 1, 1],
+    ];
+    let placed = 0;
+    for (const [dx, dz, rot] of spots) {
+      const gx = piece.gx + dx;
+      const gz = piece.gz + dz;
+      if (!canPlace('trafficlight', gx, gz, rot)) continue;
+      if (place({ type: 'trafficlight', gx, gz, rot, facade: 'brick', roof: 'gravel' })) placed++;
+    }
+    setNote(placed > 0 ? `Added ${placed} traffic light${placed > 1 ? 's' : ''}.` : 'No free cells beside this junction for a traffic light.');
+  };
+
+  const change = (patch: Partial<NonNullable<Piece['road']>>) => {
+    const { pieces, occupancy, updateRoads } = useCityStore.getState();
+    const ids =
+      scope === 'cell' ? [piece.id] : connectedRoads(pieces, occupancy, piece.id, scope === 'stretch');
+    const changed = updateRoads(ids, patch);
+    setNote(changed < ids.length ? `${ids.length - changed} cell(s) kept their style: a building is too close for a wide road.` : null);
+  };
+
+  return (
+    <div className={`${SHEET_CLASS} sm:w-72`}>
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">Road</span>
+        <button className="flex h-10 w-10 items-center justify-center text-lg text-white/60 hover:text-white sm:h-auto sm:w-auto sm:text-base" onClick={() => select(null)} title="Close (Esc)">
+          <Icon name="close" />
+        </button>
+      </div>
+
+      <div>
+        <div className="mb-1.5 text-white/55">Apply changes to</div>
+        <div className="flex flex-wrap gap-1.5">
+          {([
+            ['cell', 'This cell'],
+            ['stretch', 'Whole stretch'],
+            ['network', 'All connected roads'],
+          ] as const).map(([id, label]) => (
+            <button key={id} className={chip(scope === id)} onClick={() => setScope(id)}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {note && <div className="rounded-md bg-amber-500/20 px-2 py-1 text-amber-200">{note}</div>}
+
+      <RoadSettings spec={piece.road ?? {}} onChange={change} />
+
+      <div className="flex flex-col gap-1.5 rounded-lg bg-white/5 p-2.5">
+        <button className={chip(false)} onClick={addLights}>
+          <Icon name="trafficlight" className="mr-1 inline" />Add smart traffic lights at this junction
+        </button>
+        <p className="text-white/50">
+          Needs a junction (3+ roads). Lights read traffic with a radar, extend green while cars keep coming,
+          rest on green when it's quiet, and stop all traffic for people waiting to cross.
+        </p>
+      </div>
+
+      <button
+        className="min-h-12 rounded-xl bg-red-600/90 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-500 active:bg-red-500 sm:min-h-0 sm:rounded-lg"
+        onClick={() => {
+          useCityStore.getState().removeById(piece.id);
+          select(null);
+        }}
+      >
+        Delete road cell <span className="ml-1 text-xs opacity-70">Del</span>
       </button>
     </div>
   );

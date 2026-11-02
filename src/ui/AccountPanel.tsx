@@ -1,14 +1,13 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { loadWorld, saveWorld } from '../lib/worldPersistence';
+import { useState, type FormEvent } from 'react';
 import { isSupabaseConfigured } from '../lib/supabaseClient';
+import { flushSync } from '../lib/sync';
 import { useAuthStore } from '../state/useAuthStore';
 
 const btn = 'min-h-11 rounded-lg px-3 py-1.5 text-white/80 hover:bg-white/10 disabled:opacity-40 sm:min-h-0';
 
-/** Sign-in / save / load. `inline` stacks it for the phone menu sheet instead of using dropdowns. */
+/** Sign-in and sign-out (the city saves itself). `inline` stacks it for the phone menu sheet instead of using dropdowns. */
 export function AccountPanel({ inline = false }: { inline?: boolean }) {
   const session = useAuthStore((s) => s.session);
-  const init = useAuthStore((s) => s.init);
   const signIn = useAuthStore((s) => s.signIn);
   const signUp = useAuthStore((s) => s.signUp);
   const signOut = useAuthStore((s) => s.signOut);
@@ -19,8 +18,6 @@ export function AccountPanel({ inline = false }: { inline?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  useEffect(() => init(), [init]);
-
   const submit = async (e: FormEvent, action: 'in' | 'up') => {
     e.preventDefault();
     setBusy(true);
@@ -30,13 +27,11 @@ export function AccountPanel({ inline = false }: { inline?: boolean }) {
     if (!error) setOpen(false);
   };
 
-  const run = async (label: string, fn: (userId: string) => Promise<string | null>) => {
-    if (!session) return;
+  const logOut = async () => {
     setBusy(true);
-    setMessage(`${label}…`);
-    const error = await fn(session.user.id);
+    await flushSync(); // make sure the last edits are in the account before leaving it
+    await signOut();
     setBusy(false);
-    setMessage(error ?? `${label} done`);
   };
 
   if (!isSupabaseConfigured) {
@@ -53,13 +48,7 @@ export function AccountPanel({ inline = false }: { inline?: boolean }) {
         {session ? (
           <>
             <span className="max-w-40 truncate px-2 text-white/60">{session.user.email}</span>
-            <button className={btn} disabled={busy} onClick={() => run('Saving', saveWorld)}>
-              Save
-            </button>
-            <button className={btn} disabled={busy} onClick={() => run('Loading', loadWorld)}>
-              Load
-            </button>
-            <button className={btn} onClick={() => void signOut()}>
+            <button className={btn} disabled={busy} onClick={() => void logOut()}>
               Sign out
             </button>
           </>

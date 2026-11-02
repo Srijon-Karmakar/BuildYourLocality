@@ -44,7 +44,7 @@ export const WINDOW_STYLES: { id: WindowStyle; label: string }[] = [
 ];
 
 export const MIN_FLOORS = 1;
-export const MAX_FLOORS = 40;
+export const MAX_FLOORS = 200;
 
 export const ROOFS = [
   { id: 'membrane', label: 'White membrane', swatch: '#d9dcdc' },
@@ -84,7 +84,27 @@ export type PieceType =
   | 'billboard'
   | 'kiosk'
   | 'trafficlight'
-  | 'plaza';
+  | 'plaza'
+  // transit
+  | 'rail'
+  | 'station'
+  | 'crossing'
+  | 'metrotrack'
+  | 'metroentrance'
+  // airport
+  | 'runway'
+  | 'taxiway'
+  | 'apron'
+  | 'terminal'
+  | 'hangar'
+  | 'controltower'
+  // services and port
+  | 'parking'
+  | 'taxistand'
+  | 'busdepot'
+  | 'pier'
+  | 'portcrane'
+  | 'containers';
 
 /** Size of one layout unit (a block's width/depth/position step), in world units. */
 export const UNIT = 3;
@@ -98,7 +118,131 @@ export function gableHeightForSpan(span: number): number {
   return Math.min(4, Math.max(1.6, span * 0.3));
 }
 
-export type Category = 'roads' | 'buildings' | 'nature' | 'street';
+export type Category = 'roads' | 'buildings' | 'nature' | 'street' | 'transit' | 'airport' | 'port';
+
+// --- Roads -------------------------------------------------------------------------
+
+export type RoadSurface = 'asphalt' | 'concrete' | 'dirt' | 'cobble';
+export const ROAD_SURFACES: { id: RoadSurface; label: string; swatch: string }[] = [
+  { id: 'asphalt', label: 'Asphalt', swatch: '#3c3f44' },
+  { id: 'concrete', label: 'Concrete', swatch: '#8c8f93' },
+  { id: 'cobble', label: 'Cobblestone', swatch: '#6e6a63' },
+  { id: 'dirt', label: 'Dirt track', swatch: '#7a5b3a' },
+];
+
+export type Pavement = 'none' | 'curb' | 'wide';
+export const PAVEMENTS: { id: Pavement; label: string }[] = [
+  { id: 'none', label: 'None' },
+  { id: 'curb', label: 'Curb' },
+  { id: 'wide', label: 'Wide' },
+];
+
+/** Everything about how one road cell looks and how traffic uses it. */
+export interface RoadSpec {
+  /** Total lanes, 1-6. Three or more makes a wide road that claims the cell on each side. */
+  lanes: number;
+  surface: RoadSurface;
+  pavement: Pavement;
+  /** Index into N, E, S, W of the only direction of travel, or null for two-way. */
+  oneWay: number | null;
+  /** Raised central divider (two-way roads with 3+ lanes). */
+  median: boolean;
+  bikeLanes: boolean;
+  busLanes: boolean;
+  /** Zebra crossings painted across each arm of a junction. */
+  crosswalk: boolean;
+  /** A zebra crossing across this cell of a straight road: cars give way to people on it. */
+  zebra: boolean;
+  /** Street trees along the pavement. */
+  trees: boolean;
+  /** A junction cell with this set becomes a roundabout. */
+  roundabout: boolean;
+  /** Speed limit, km/h. */
+  speed: number;
+}
+
+export const DEFAULT_ROAD: RoadSpec = {
+  lanes: 2,
+  surface: 'asphalt',
+  pavement: 'curb',
+  oneWay: null,
+  median: false,
+  bikeLanes: false,
+  busLanes: false,
+  crosswalk: false,
+  zebra: false,
+  trees: false,
+  roundabout: false,
+  speed: 40,
+};
+
+export const MIN_LANES = 1;
+export const MAX_LANES = 6;
+
+export const resolveRoad = (o?: Partial<RoadSpec>): RoadSpec => ({ ...DEFAULT_ROAD, ...o });
+
+/** Quick-start road types shown in the road palette. */
+export const ROAD_PRESETS: { id: string; label: string; icon: string; spec: Partial<RoadSpec> }[] = [
+  { id: 'street', label: 'Street', icon: 'street', spec: { lanes: 2, pavement: 'curb', speed: 40 } },
+  { id: 'lane', label: 'Lane', icon: 'lane', spec: { lanes: 1, pavement: 'curb', speed: 25 } },
+  { id: 'avenue', label: 'Avenue', icon: 'avenue', spec: { lanes: 4, median: true, pavement: 'wide', crosswalk: true, trees: true, speed: 50 } },
+  { id: 'boulevard', label: 'Boulevard', icon: 'boulevard', spec: { lanes: 6, median: true, pavement: 'wide', crosswalk: true, trees: true, busLanes: true, bikeLanes: true, speed: 50 } },
+  { id: 'highway', label: 'Highway', icon: 'highway', spec: { lanes: 6, median: true, pavement: 'none', surface: 'asphalt', speed: 100 } },
+  { id: 'oneway', label: 'One-way', icon: 'oneway', spec: { lanes: 2, oneWay: 2, pavement: 'curb', speed: 40 } },
+  { id: 'zebra', label: 'Zebra crossing', icon: 'zebra', spec: { zebra: true, pavement: 'curb', speed: 30 } },
+  { id: 'roundabout', label: 'Roundabout', icon: 'roundabout', spec: { lanes: 2, roundabout: true, crosswalk: true, pavement: 'curb', speed: 30 } },
+  { id: 'dirt', label: 'Dirt track', icon: 'dirt', spec: { lanes: 1, surface: 'dirt', pavement: 'none', speed: 20 } },
+];
+
+export interface RoadLayout {
+  /** Cells across including the pavement: 1 (6 m) or 3 (18 m). */
+  cellsWide: 1 | 3;
+  /** Total width in metres, pavements included. */
+  width: number;
+  /** Pavement width each side. */
+  pavement: number;
+  /** Median width (0 if none). */
+  median: number;
+  laneWidth: number;
+  /** Lanes available to a vehicle in one direction. */
+  perDir: number;
+  /** Lane-centre offsets to the right of the direction of travel, in metres. */
+  laneOffsets: number[];
+  /** Speed limit in world units per second. */
+  speedLimit: number;
+}
+
+/** Works out where lanes, pavements and the median sit across a road of this spec. */
+export function roadLayout(spec: RoadSpec): RoadLayout {
+  const lanes = Math.min(MAX_LANES, Math.max(MIN_LANES, Math.round(spec.lanes)));
+  const wide = lanes >= 3;
+  const width = wide ? 18 : 6;
+  const oneWay = spec.oneWay !== null;
+  const median = spec.median && wide && !oneWay ? 1.2 : 0;
+  // Two-way roads always have a lane each way; an odd lane count adds a centre turn lane.
+  const physical = oneWay ? lanes : lanes <= 2 ? 2 : Math.floor(lanes / 2) * 2 + (lanes % 2);
+  const wantedPav = spec.pavement === 'none' ? 0 : spec.pavement === 'curb' ? (wide ? 1.5 : 1) : wide ? 3 : 1.4;
+  const laneWidth = Math.min(3.6, Math.max(2.2, (width - median - 2 * wantedPav) / physical));
+  const pavement = spec.pavement === 'none' ? 0 : Math.max(0, Math.min(wantedPav, (width - median - physical * laneWidth) / 2));
+  const perDir = oneWay ? lanes : Math.max(1, Math.floor(lanes / 2));
+  const laneOffsets: number[] = [];
+  if (oneWay) {
+    for (let i = 0; i < lanes; i++) laneOffsets.push((i - (lanes - 1) / 2) * laneWidth);
+  } else {
+    const start = median / 2 + (lanes > 2 && lanes % 2 ? laneWidth / 2 : 0);
+    for (let i = 0; i < perDir; i++) laneOffsets.push(start + (i + 0.5) * laneWidth);
+  }
+  return {
+    cellsWide: wide ? 3 : 1,
+    width,
+    pavement,
+    median,
+    laneWidth,
+    perDir,
+    laneOffsets,
+    speedLimit: Math.max(2.5, spec.speed / 6),
+  };
+}
 
 // --- Building customisation ------------------------------------------------------
 
@@ -148,20 +292,84 @@ export interface DoorSpec {
   color: string;
 }
 
-export type LedMode = 'wave' | 'ticker' | 'bars' | 'checker' | 'pulse' | 'solid';
-export const LED_MODES: { id: LedMode; label: string }[] = [
-  { id: 'wave', label: 'Colour wave' },
-  { id: 'ticker', label: 'Scrolling text' },
-  { id: 'bars', label: 'Equaliser' },
-  { id: 'checker', label: 'Pixels' },
-  { id: 'pulse', label: 'Pulse' },
-  { id: 'solid', label: 'Solid' },
+export type LedMode =
+  | 'wave'
+  | 'ticker'
+  | 'bars'
+  | 'checker'
+  | 'pulse'
+  | 'solid'
+  | 'text'
+  | 'slides'
+  | 'clock'
+  | 'weather'
+  | 'rainbow'
+  | 'plasma'
+  | 'matrix'
+  | 'stripes'
+  | 'draw';
+
+export const LED_MODES: { id: LedMode; label: string; icon: string }[] = [
+  { id: 'text', label: 'Message', icon: 'led-text' },
+  { id: 'ticker', label: 'Scrolling text', icon: 'led-ticker' },
+  { id: 'slides', label: 'Slideshow', icon: 'led-slides' },
+  { id: 'draw', label: 'Pixel art', icon: 'led-draw' },
+  { id: 'clock', label: 'Clock', icon: 'led-clock' },
+  { id: 'weather', label: 'Weather', icon: 'led-weather' },
+  { id: 'wave', label: 'Colour wave', icon: 'led-wave' },
+  { id: 'rainbow', label: 'Rainbow', icon: 'led-rainbow' },
+  { id: 'plasma', label: 'Plasma', icon: 'led-plasma' },
+  { id: 'matrix', label: 'Matrix rain', icon: 'led-matrix' },
+  { id: 'stripes', label: 'Stripes', icon: 'led-stripes' },
+  { id: 'bars', label: 'Equaliser', icon: 'led-bars' },
+  { id: 'checker', label: 'Pixels', icon: 'led-checker' },
+  { id: 'pulse', label: 'Pulse', icon: 'led-pulse' },
+  { id: 'solid', label: 'Solid', icon: 'led-solid' },
 ];
 
-/** A big LED screen mounted on one wall of a building. */
+export type LedDetail = 'low' | 'medium' | 'high';
+export type LedDots = 'square' | 'round' | 'smooth';
+export type LedFont = 'bold' | 'mono' | 'serif' | 'round' | 'pixel';
+export type LedScroll = 'none' | 'left' | 'right' | 'up' | 'down';
+export type LedBezel = 'none' | 'thin' | 'thick';
+
+/** Pixel-art canvas size (columns x rows) for the "Pixel art" mode. */
+export const LED_ART_W = 32;
+export const LED_ART_H = 16;
+/** Palette for pixel art: index 0 is "off", F is "the screen colour". */
+export const LED_ART_PALETTE = ['#000000', '#ffffff', '#ff3b30', '#ff9500', '#ffd60a', '#34c759', '#00d1b2', '#32d4ff', '#2f6bff', '#6b4cff', '#bf5af2', '#ff4fa3', '#8e5a3c', '#8e8e93', '#3a3a3c', '#35e0ff'];
+
+/** A big LED screen mounted on one wall of a building (or on a billboard / bus stop). */
 export interface LedSpec {
   mode: LedMode;
   color: string;
+  /** Message for the text, scrolling text and slideshow modes. Slides are separated by "|". */
+  text?: string;
+  /** Second colour (gradients, stripes, alternating slides). Defaults to the main colour. */
+  color2?: string;
+  /** Colour of the unlit pixels. */
+  bg?: string;
+  /** Animation speed, 0.25 to 3 (1 = normal). */
+  speed?: number;
+  /** Glow strength, 0.4 to 3 (1 = normal). */
+  brightness?: number;
+  /** Pixel density: low is chunky and cheap, high is fine and sharp. */
+  detail?: LedDetail;
+  /** How each pixel looks. */
+  dots?: LedDots;
+  font?: LedFont;
+  /** Text height as a share of the screen height, 0.3 to 0.95. */
+  textSize?: number;
+  scroll?: LedScroll;
+  /** Frame around the screen. */
+  bezel?: LedBezel;
+  frame?: string;
+  /** Switch on only after dark. */
+  power?: 'always' | 'night';
+  /** Soft light spilling around the screen at night. */
+  glow?: boolean;
+  /** Pixel art, one hex digit per pixel (see LED_ART_PALETTE), row by row. */
+  pixels?: string;
   /** Block index and wall it is mounted on. */
   block: number;
   side: DoorSide;
@@ -173,6 +381,48 @@ export interface LedSpec {
   /** Metres along the wall from its centre. */
   offset: number;
 }
+
+/** A LedSpec with every optional look setting filled in. */
+export type ResolvedLed = LedSpec &
+  Required<Pick<LedSpec, 'text' | 'color2' | 'bg' | 'speed' | 'brightness' | 'detail' | 'dots' | 'font' | 'textSize' | 'scroll' | 'bezel' | 'frame' | 'power' | 'glow' | 'pixels'>>;
+
+export const LED_DEFAULT_TEXT = 'APNAGALI CITY  *  OPEN 24/7  *  WELCOME';
+
+export function resolveLed(spec: LedSpec): ResolvedLed {
+  return {
+    ...spec,
+    text: spec.text ?? LED_DEFAULT_TEXT,
+    color2: spec.color2 ?? spec.color,
+    bg: spec.bg ?? '#000000',
+    speed: spec.speed ?? 1,
+    brightness: spec.brightness ?? 1,
+    detail: spec.detail ?? 'medium',
+    dots: spec.dots ?? 'square',
+    font: spec.font ?? 'bold',
+    textSize: spec.textSize ?? 0.62,
+    scroll: spec.scroll ?? (spec.mode === 'ticker' ? 'left' : 'none'),
+    bezel: spec.bezel ?? 'thin',
+    frame: spec.frame ?? '#1c1f24',
+    power: spec.power ?? 'always',
+    glow: spec.glow ?? false,
+    pixels: spec.pixels ?? '',
+  };
+}
+
+/** One-tap looks for the LED editor: they set the content and style together; placement is untouched. */
+export const LED_PRESETS: { id: string; label: string; icon: string; spec: Partial<LedSpec> }[] = [
+  { id: 'neon', label: 'Neon sign', icon: 'look-neon', spec: { mode: 'text', text: 'OPEN', color: '#ff2fd0', color2: '#ff2fd0', bg: '#12020f', dots: 'smooth', detail: 'high', font: 'round', textSize: 0.7, scroll: 'none', glow: true, brightness: 1.4 } },
+  { id: 'stocks', label: 'News ticker', icon: 'look-news', spec: { mode: 'ticker', text: 'BREAKING  *  NEW PARK OPENS DOWNTOWN  *  TRAFFIC LIGHT UPGRADE COMPLETE  *  ', color: '#ffb000', bg: '#000000', dots: 'square', detail: 'medium', font: 'mono', textSize: 0.7, scroll: 'left', speed: 1.2 } },
+  { id: 'cinema', label: 'Cinema', icon: 'look-cinema', spec: { mode: 'slides', text: 'NOW SHOWING|MIDNIGHT CITY|8 PM  10 PM', color: '#ffe066', color2: '#ff6b6b', bg: '#0a0614', dots: 'round', detail: 'medium', font: 'serif', textSize: 0.55, glow: true } },
+  { id: 'clock', label: 'City clock', icon: 'led-clock', spec: { mode: 'clock', color: '#35e0ff', bg: '#00060a', dots: 'round', detail: 'medium', font: 'mono', textSize: 0.7 } },
+  { id: 'weather', label: 'Weather', icon: 'led-weather', spec: { mode: 'weather', color: '#ffe066', color2: '#8fd3ff', bg: '#000814', dots: 'round', detail: 'medium', textSize: 0.5 } },
+  { id: 'retro', label: 'Retro arcade', icon: 'look-retro', spec: { mode: 'matrix', color: '#4dff7a', bg: '#000a02', dots: 'square', detail: 'low', speed: 1 } },
+  { id: 'rainbow', label: 'Rainbow wall', icon: 'led-rainbow', spec: { mode: 'rainbow', dots: 'smooth', detail: 'high', bg: '#000000', speed: 1 } },
+  { id: 'club', label: 'Club lights', icon: 'look-club', spec: { mode: 'plasma', color: '#ff2fd0', color2: '#35e0ff', bg: '#05000f', dots: 'round', detail: 'medium', speed: 1.5, glow: true, power: 'night' } },
+];
+
+/** Most screens one building can carry (all four sides, a couple of rows each). */
+export const MAX_LEDS = 8;
 
 export type RoofExtra = 'plant' | 'antenna' | 'solar' | 'garden' | 'helipad';
 export const ROOF_EXTRAS: { id: RoofExtra; label: string }[] = [
@@ -209,10 +459,15 @@ export interface StyleOverrides {
   door?: Partial<DoorSpec>;
   /** Colour of plinth, parapet and canopy trim. */
   trim?: string;
+  /** Older saves and props: a single screen. `leds` takes over when present. */
   led?: LedSpec | null;
+  /** Screens on the building, one or more per side. */
+  leds?: LedSpec[];
   roofExtras?: RoofExtra[];
   balconies?: BalconyMode;
   sign?: SignSpec | null;
+  /** Roads: lanes, surface, pavements, markings and rules (merged over DEFAULT_ROAD). */
+  road?: Partial<RoadSpec>;
   /** Props: main colour (foliage, paint, water, ...) and size multiplier. */
   accent?: string;
   scale?: number;
@@ -226,7 +481,9 @@ export interface BuildingStyle {
   windows: WindowStyle;
   door: DoorSpec;
   trim: string;
+  /** The first screen (props use just this one). */
   led: LedSpec | null;
+  leds: LedSpec[];
   roofExtras: RoofExtra[];
   balconies: BalconyMode;
   sign: SignSpec | null;
@@ -269,6 +526,9 @@ const bld = (
   canopy = true,
 ): PieceDef => ({ label, category: 'buildings', footprint, floors, roof, paintable: true, customisable: true, look, door, canopy });
 
+/** An airport building: customisable like any other, but listed under Airport. */
+const airportBuilding = (...args: Parameters<typeof bld>): PieceDef => ({ ...bld(...args), category: 'airport' });
+
 const prop = (label: string, category: Category, collider?: [number, number, number]): PieceDef => ({
   label,
   category,
@@ -280,8 +540,20 @@ const prop = (label: string, category: Category, collider?: [number, number, num
   collider,
 });
 
+/** Rail, station, crossing and metro pieces: fixed-look pieces that connect into networks. */
+const transit = (label: string, collider?: [number, number, number]): PieceDef => ({
+  label,
+  category: 'transit',
+  footprint: [1, 1],
+  floors: 0,
+  roof: 'none',
+  paintable: false,
+  customisable: false,
+  collider,
+});
+
 export const PIECES: Record<PieceType, PieceDef> = {
-  road: { label: 'Road', category: 'roads', footprint: [1, 1], floors: 0, roof: 'none', paintable: false, customisable: false },
+  road: { label: 'Road', category: 'roads', footprint: [1, 1], floors: 0, roof: 'none', paintable: false, customisable: true },
 
   house: bld('House', [1, 1], 2, 'gable', { facade: 'plaster', roof: 'slate' }, 'single', false),
   villa: bld('Modern villa', [2, 1], 2, 'flat', { facade: 'ceramic', roof: 'membrane', style: { windows: 'tall', roofExtras: ['solar'], balconies: 'front', trim: '#2c3036' } }),
@@ -316,6 +588,33 @@ export const PIECES: Record<PieceType, PieceDef> = {
   kiosk: prop('Kiosk', 'street', [2.4, 2.6, 2.4]),
   trafficlight: prop('Traffic light', 'street', [0.4, 5, 0.4]),
   plaza: prop('Plaza', 'street'),
+
+  rail: transit('Rail track'),
+  station: transit('Station'),
+  crossing: transit('Level crossing'),
+  metrotrack: transit('Metro line'),
+  metroentrance: transit('Metro entrance', [3.4, 3.2, 3.4]),
+
+  runway: { ...transit('Runway'), category: 'airport' },
+  taxiway: { ...transit('Taxiway'), category: 'airport' },
+  apron: { ...transit('Apron / stand'), category: 'airport' },
+  terminal: airportBuilding('Terminal', [3, 2], 3, 'flat', {
+    facade: 'glass',
+    roof: 'membrane',
+    style: { roofExtras: ['plant', 'solar'], sign: { text: 'AIRPORT', color: '#35e0ff' }, balconies: 'none' },
+  }),
+  hangar: airportBuilding('Hangar', [3, 2], 2, 'flat', { facade: 'metal', roof: 'membrane', style: { windows: 'none', roofExtras: ['plant'] } }, 'garage', false),
+  parking: { ...transit('Parking lot'), footprint: [2, 2] },
+  taxistand: transit('Taxi stand', [2.6, 3, 1.4]),
+  busdepot: { ...bld('Bus depot', [3, 2], 1, 'flat', { facade: 'concrete', roof: 'membrane', style: { windows: 'none', roofExtras: ['plant', 'solar'], sign: { text: 'BUS DEPOT', color: '#f2b134' } } }, 'garage', false), category: 'transit' },
+  pier: { ...transit('Pier'), category: 'port' },
+  portcrane: { ...transit('Port crane', [3.6, 14, 3.6]), category: 'port' },
+  containers: { ...transit('Containers', [5.2, 5.5, 5.2]), category: 'port' },
+  controltower: airportBuilding('Control tower', [1, 1], 9, 'flat', {
+    facade: 'concrete',
+    roof: 'membrane',
+    style: { windows: 'ribbon', roofExtras: ['antenna'], tint: '#d7d9dc' },
+  }),
 };
 
 export const CATEGORIES: { id: Category; label: string }[] = [
@@ -323,9 +622,28 @@ export const CATEGORIES: { id: Category; label: string }[] = [
   { id: 'buildings', label: 'Buildings' },
   { id: 'nature', label: 'Nature' },
   { id: 'street', label: 'Street' },
+  { id: 'transit', label: 'Transit' },
+  { id: 'airport', label: 'Airport' },
+  { id: 'port', label: 'Port' },
 ];
 
 export const PIECE_TYPES = Object.keys(PIECES) as PieceType[];
+
+/** Pieces that sit on the ground like a road: level land, or water (as a bridge). */
+export const ROAD_LIKE: PieceType[] = ['road', 'rail', 'crossing', 'metrotrack', 'pier'];
+
+const BIT = { N: 1, E: 2, S: 4, W: 8 } as const;
+
+/**
+ * Which sides of a level crossing carry the road and which the railway. An even turn runs the
+ * road north-south and the rail east-west; an odd turn swaps them.
+ */
+export function crossingArms(rot: number, family: 'road' | 'rail'): number {
+  const roadNS = rot % 2 === 0;
+  const ns = BIT.N | BIT.S;
+  const ew = BIT.E | BIT.W;
+  return family === 'road' ? (roadNS ? ns : ew) : roadNS ? ew : ns;
+}
 
 /** Footprint after `rot` quarter-turns (odd rotations swap width and depth). */
 export function rotatedFootprint(def: PieceDef, rot: number, lot?: [number, number]): [number, number] {
@@ -373,7 +691,8 @@ export function resolveStyle(type: PieceType, o: StyleOverrides): BuildingStyle 
     windows: o.windows ?? 'punched',
     door,
     trim: o.trim ?? DEFAULT_TRIM,
-    led: o.led ?? null,
+    led: (o.leds ?? (o.led ? [o.led] : []))[0] ?? null,
+    leds: o.leds ?? (o.led ? [o.led] : []),
     roofExtras: o.roofExtras ?? (def.roof === 'flat' ? ['plant'] : []),
     balconies: o.balconies ?? 'none',
     sign: o.sign ?? null,
