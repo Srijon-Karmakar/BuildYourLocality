@@ -116,12 +116,9 @@ class PlayerEngine {
     squealBand.type = 'bandpass';
     squealBand.frequency.value = 1500;
     squealBand.Q.value = 4;
-    const squealNoise = ctx.createGain();
-    squealNoise.gain.value = 0.9;
     noiseLoop(g, 'white').connect(squealBand);
     this.squealOsc.connect(squealBand);
     squealBand.connect(this.squeal);
-    void squealNoise;
     this.squeal.connect(g.buses.vehicles);
     this.squealOsc.start();
 

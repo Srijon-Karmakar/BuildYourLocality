@@ -4,6 +4,7 @@ import { combat, SURVIVAL_HOURS, WEAPONS, WEAPON_ORDER, type Stealth, type Toast
 import { REVIVE_COST } from '../lib/rewards';
 import { reviveWithAd, reviveWithTokens } from '../lib/wallet';
 import { useGameStore } from '../state/useGameStore';
+import { useVehicleSnap } from './VehicleHud';
 import { useWalletStore } from '../state/useWalletStore';
 import { Icon } from './icons';
 import { useIsCompact, useIsTouch } from './useMediaQuery';
@@ -243,6 +244,7 @@ function Tip({ icon, children }: { icon: string; children: ReactNode }) {
 
 /** Health, cash, weapons, stealth and the day count, plus the screens for starting, winning and losing. */
 export function CombatHud() {
+  const driving = useVehicleSnap().active;
   const mode = useGameStore((s) => s.mode);
   const sub = useGameStore((s) => s.roamSubMode);
   const compact = useIsCompact();
@@ -271,7 +273,7 @@ export function CombatHud() {
 
       <StatusStrip s={s} survival={survival} />
       <Toasts toasts={s.toasts} />
-      {!s.shelter && s.alive && <WeaponBar s={s} compact={compact} />}
+      {!s.shelter && s.alive && !driving && <WeaponBar s={s} compact={compact} />}
 
       {/* Prompt to hide in a building. */}
       {s.nearDoor && !s.shelter && s.alive && !s.intro && s.outcome === 'none' && !touch && (

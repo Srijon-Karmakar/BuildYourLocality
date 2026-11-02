@@ -29,7 +29,7 @@ function Viewmodel() {
     const r = root.current;
     if (!r) return;
     const p = combat.player;
-    const show = useGameStore.getState().mode === 'roam' && combat.active && p.alive && !p.shelter;
+    const show = useGameStore.getState().mode === 'roam' && combat.active && p.alive && !p.shelter && !vehicle.active;
     r.visible = show;
     if (!show) return;
 

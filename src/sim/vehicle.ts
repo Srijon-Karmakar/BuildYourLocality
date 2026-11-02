@@ -284,7 +284,9 @@ class Vehicle {
     // --- Move, sliding along whatever is in the way ---
     const nx = car.x + this.vx * dt;
     const nz = car.z + this.vz * dt;
-    if (!this.hits(nx, nz, car.heading)) {
+    // A car that finds itself inside something (a building went up on top of it) may drive out of it.
+    const trapped = this.hits(car.x, car.z, car.heading);
+    if (trapped || !this.hits(nx, nz, car.heading)) {
       car.x = nx;
       car.z = nz;
     } else if (!this.hits(nx, car.z, car.heading)) {
