@@ -13,6 +13,7 @@ import {
   GiUzi,
   GiWinchesterRifle,
   GiCrossbow,
+  GiMissileLauncher,
 } from 'react-icons/gi';
 import {
   LuActivity,
@@ -154,6 +155,12 @@ import {
   LuSignpost,
   LuTrees,
   LuAudioLines,
+  LuSpline,
+  LuWaypoints,
+  LuCableCar,
+  LuMilestone,
+  LuArrowUpRight,
+  LuCircleDot,
 } from 'react-icons/lu';
 
 /**
@@ -161,6 +168,18 @@ import {
  * name; the UI draws it with <Icon name="..." />. One place to swap or restyle any icon.
  */
 const ICONS: Record<string, IconType> = {
+  // bridges
+  span: LuSpline,
+  'span-road': LuSpline,
+  'span-arches': LuMilestone,
+  'span-arch': LuSpline,
+  'span-truss': LuWaypoints,
+  'span-suspension': LuCableCar,
+  'span-cable': LuCableCar,
+  'span-rail': LuTrainTrack,
+  'span-foot': LuFootprints,
+  'span-loop': LuCircleDot,
+  'span-slip': LuArrowUpRight,
   // build palette: roads and buildings
   road: LuRoute,
   house: LuHouse,
@@ -359,6 +378,7 @@ const ICONS: Record<string, IconType> = {
   smg: GiUzi,
   rifle: GiWinchesterRifle,
   crossbow: GiCrossbow,
+  bomber: GiMissileLauncher,
   peaceful: LuHandMetal,
   normal: GiPunch,
   survival: GiMonsterGrasp,

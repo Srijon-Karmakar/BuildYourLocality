@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { BRUSHES, brushOf, type BrushId } from '../terrain/terrain';
 import { DEFAULT_FOREST, type ForestBrush } from '../city/forest';
 import { WALL_STYLES, wallStyleOf, type WallSpec, type WallStyleId } from '../city/walls';
+import { DEFAULT_SPAN, SPAN_PRESETS, type SpanSpec } from '../city/spans';
 import { ROAD_PRESETS, type FacadeId, type PieceType, type RoadSpec, type RoofId } from '../city/catalog';
 
 /** `select` opens a building in the inspector; `bulldoze` deletes what you click or drag over. */
@@ -25,6 +26,15 @@ interface BuilderState {
   wall: WallSpec;
   setWall: (patch: Partial<WallSpec>) => void;
   applyWallStyle: (id: WallStyleId) => void;
+  /** Bridge tool: the design of the bridge about to be built, the preset it came from, and the waypoints placed so far (world metres). */
+  span: SpanSpec;
+  spanPreset: string;
+  spanDraft: [number, number][];
+  setSpan: (patch: Partial<SpanSpec>) => void;
+  applySpanPreset: (id: string) => void;
+  addSpanPoint: (point: [number, number]) => void;
+  popSpanPoint: () => void;
+  clearSpanDraft: () => void;
   /** Forest tool: how wide, how dense and which trees. */
   forest: ForestBrush;
   setForest: (patch: Partial<ForestBrush>) => void;
@@ -74,6 +84,17 @@ export const useBuilderStore = create<BuilderState>((set) => ({
   wall: { ...WALL_STYLES[0].defaults },
   setWall: (patch) => set((state) => ({ wall: { ...state.wall, ...patch } })),
   applyWallStyle: (id) => set({ wall: { ...wallStyleOf(id).defaults } }),
+  span: { ...DEFAULT_SPAN, ...SPAN_PRESETS[0].spec },
+  spanPreset: SPAN_PRESETS[0].id,
+  spanDraft: [],
+  setSpan: (patch) => set((state) => ({ span: { ...state.span, ...patch } })),
+  applySpanPreset: (id) => {
+    const preset = SPAN_PRESETS.find((p) => p.id === id);
+    if (preset) set({ span: { ...DEFAULT_SPAN, ...preset.spec }, spanPreset: id, spanDraft: [] });
+  },
+  addSpanPoint: (point) => set((state) => ({ spanDraft: [...state.spanDraft, point] })),
+  popSpanPoint: () => set((state) => ({ spanDraft: state.spanDraft.slice(0, -1) })),
+  clearSpanDraft: () => set({ spanDraft: [] }),
   forest: DEFAULT_FOREST,
   setForest: (patch) => set((state) => ({ forest: { ...state.forest, ...patch } })),
   selectedId: null,
@@ -83,7 +104,7 @@ export const useBuilderStore = create<BuilderState>((set) => ({
   movingId: null,
   hand: false,
   setHand: (hand) => set({ hand }),
-  setTool: (tool) => set({ tool }),
+  setTool: (tool) => set((state) => ({ tool, spanDraft: tool === 'span' ? state.spanDraft : [] })),
   rotate: () => set((state) => ({ rotation: (state.rotation + 1) % 4 })),
   setFacade: (facade) => set({ facade }),
   setRoof: (roof) => set({ roof }),

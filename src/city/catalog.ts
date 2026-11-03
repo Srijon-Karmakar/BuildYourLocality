@@ -1,5 +1,6 @@
 import type { TreeSpec } from './trees';
 import type { WallSpec } from './walls';
+import type { SpanSpec } from './spans';
 
 /** Edge length of one city grid cell, in world units (1 unit is about 1 metre). */
 export const CELL = 6;
@@ -96,6 +97,7 @@ export type PieceType =
   | 'skyscraper'
   // nature
   | 'wall'
+  | 'span'
   | 'tree'
   | 'pine'
   | 'birch'
@@ -151,7 +153,7 @@ export function gableHeightForSpan(span: number): number {
   return Math.min(4, Math.max(1.6, span * 0.3));
 }
 
-export type Category = 'roads' | 'buildings' | 'nature' | 'walls' | 'street' | 'transit' | 'airport' | 'port';
+export type Category = 'roads' | 'bridges' | 'buildings' | 'nature' | 'walls' | 'street' | 'transit' | 'airport' | 'port';
 
 // --- Roads -------------------------------------------------------------------------
 
@@ -648,6 +650,8 @@ export interface StyleOverrides {
   tree?: Partial<TreeSpec>;
   /** Walls and fences: style, size, colours, caps, posts and openings. */
   wall?: Partial<WallSpec>;
+  /** Bridges, overpasses and viaducts: path, deck, supports and look. */
+  span?: Partial<SpanSpec>;
 }
 
 export interface BuildingStyle {
@@ -756,6 +760,7 @@ export const PIECES: Record<PieceType, PieceDef> = {
   }),
 
   wall: prop('Wall', 'walls'),
+  span: { label: 'Bridge', category: 'bridges', footprint: [1, 1], floors: 0, roof: 'none', paintable: false, customisable: true },
   tree: prop('Tree', 'nature', [0.8, 3, 0.8]),
   pine: prop('Pine', 'nature', [0.8, 3, 0.8]),
   birch: prop('Birch', 'nature', [0.8, 3, 0.8]),
@@ -809,6 +814,7 @@ export const PIECES: Record<PieceType, PieceDef> = {
 
 export const CATEGORIES: { id: Category; label: string }[] = [
   { id: 'roads', label: 'Roads' },
+  { id: 'bridges', label: 'Bridges' },
   { id: 'buildings', label: 'Buildings' },
   { id: 'nature', label: 'Nature' },
   { id: 'walls', label: 'Walls' },

@@ -1,4 +1,5 @@
 import { atmo } from '../scenes/atmosphere';
+import { blast } from './blast';
 import { cellKey } from '../state/useCityStore';
 import { useGameStore } from '../state/useGameStore';
 import { useWalletStore } from '../state/useWalletStore';
@@ -14,8 +15,8 @@ import { cellCentre, cellOf, isWalkable } from './world';
 
 // --- Weapons ---------------------------------------------------------------------------------
 
-export type WeaponId = 'fists' | 'bat' | 'pistol' | 'shotgun' | 'taser' | 'revolver' | 'smg' | 'rifle' | 'crossbow';
-export type AmmoKind = 'bullets' | 'shells' | 'charges' | 'bolts';
+export type WeaponId = 'fists' | 'bat' | 'pistol' | 'shotgun' | 'taser' | 'revolver' | 'smg' | 'rifle' | 'crossbow' | 'bomber';
+export type AmmoKind = 'bullets' | 'shells' | 'charges' | 'bolts' | 'bombs';
 
 export interface WeaponDef {
   id: WeaponId;
@@ -47,14 +48,18 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   revolver: { id: 'revolver', label: 'Revolver', icon: 'revolver', melee: false, damage: 48, range: 70, cooldown: 0.65, ammo: 'bullets', pellets: 1, spread: 0.008, knock: 7, stun: 0.5, noise: 62 },
   smg: { id: 'smg', label: 'SMG', icon: 'smg', melee: false, damage: 11, range: 42, cooldown: 0.09, ammo: 'bullets', pellets: 1, spread: 0.045, knock: 1.5, stun: 0.1, noise: 56 },
   rifle: { id: 'rifle', label: 'Rifle', icon: 'rifle', melee: false, damage: 70, range: 120, cooldown: 0.95, ammo: 'bullets', pellets: 1, spread: 0.002, knock: 9, stun: 0.7, noise: 75 },
+  bomber: { id: 'bomber', label: 'Bomber', icon: 'bomber', melee: false, damage: 160, range: 90, cooldown: 1.7, ammo: 'bombs', pellets: 1, spread: 0, knock: 16, stun: 3, noise: 120 },
   crossbow: { id: 'crossbow', label: 'Crossbow', icon: 'crossbow', melee: false, damage: 55, range: 65, cooldown: 1.3, ammo: 'bolts', pellets: 1, spread: 0.004, knock: 4, stun: 0.6, noise: 6 },
 };
-export const WEAPON_ORDER: WeaponId[] = ['fists', 'bat', 'pistol', 'revolver', 'smg', 'shotgun', 'rifle', 'crossbow', 'taser'];
+export const WEAPON_ORDER: WeaponId[] = ['fists', 'bat', 'pistol', 'revolver', 'smg', 'shotgun', 'rifle', 'crossbow', 'taser', 'bomber'];
 
 /** Guns that are bought with tokens: the reward id is the weapon id. They come with ammo at the start of every walk. */
 export const UNLOCKABLE_WEAPONS: Partial<Record<WeaponId, number>> = { shotgun: 12, revolver: 18, smg: 60, rifle: 20, crossbow: 12 };
 
-const AMMO_PER_PICKUP: Record<AmmoKind, number> = { bullets: 12, shells: 6, charges: 2, bolts: 4 };
+const AMMO_PER_PICKUP: Record<AmmoKind, number> = { bullets: 12, shells: 6, charges: 2, bolts: 4, bombs: 2 };
+/** The bomber starts every walk with this many bombs, and slowly builds more (a bomb every so many seconds) up to the same number. */
+const BOMB_STOCK = 6;
+const BOMB_REFILL_S = 20;
 
 // --- Entities ---------------------------------------------------------------------------------
 
@@ -252,6 +257,11 @@ class Combat {
   /** Walk mode with danger switched on (normal or monster). */
   active = false;
   subMode: 'peaceful' | 'normal' | 'survival' = 'peaceful';
+  /**
+   * Peaceful walking: nothing fights back and the danger systems stay off, but weapons can still be
+   * found on the street and used, so every mode lets you collect and carry guns.
+   */
+  arms = false;
   monsters: Monster[] = [];
   loot: Loot[] = [];
   tracers: Tracer[] = [];
@@ -265,11 +275,18 @@ class Combat {
   readonly player: PlayerState = {
     hp: 100,
     maxHp: 100,
-    cash: 200,
+    // Street cash is the account's money, so what you find while walking is kept for good.
+    get cash() {
+      return useWalletStore.getState().money;
+    },
+    set cash(value: number) {
+      const next = Math.max(0, Math.round(value));
+      useWalletStore.setState((s) => ({ money: next, pendingDelta: s.pendingDelta + (next - s.money) }));
+    },
     alive: true,
     weapon: 'fists',
-    owned: { fists: true, bat: true, pistol: false, shotgun: false, taser: false, revolver: false, smg: false, rifle: false, crossbow: false },
-    ammo: { bullets: 0, shells: 0, charges: 0, bolts: 0 },
+    owned: { fists: true, bat: true, pistol: false, shotgun: false, taser: false, revolver: false, smg: false, rifle: false, crossbow: false, bomber: false },
+    ammo: { bullets: 0, shells: 0, charges: 0, bolts: 0, bombs: 0 },
     cooldown: 0,
     swing: 0,
     swingHand: 0,
@@ -314,6 +331,7 @@ class Combat {
   private spawnTimer = 5;
   private lootTimer = 4;
   private chargeTimer = 0;
+  private bombTimer = 0;
   private robberTimer = 12;
   private lastShotAt = -99;
   private pathBudget = 0;
@@ -328,6 +346,12 @@ class Combat {
   /** Called every frame: notices when walk mode / the danger level changes. */
   private sync() {
     const { mode, roamSubMode } = useGameStore.getState();
+    const wantArms = mode === 'roam' && roamSubMode === 'peaceful';
+    if (wantArms !== this.arms) {
+      this.arms = wantArms;
+      if (wantArms) this.beginArms();
+      else if (!(mode === 'roam')) this.stop();
+    }
     const wantActive = mode === 'roam' && roamSubMode !== 'peaceful';
     const sub = wantActive ? roamSubMode : 'peaceful';
     if (wantActive === this.active && sub === this.subMode) return;
@@ -350,18 +374,8 @@ class Combat {
     p.hurt = 0;
     p.shelter = null;
     p.alarm = 0;
-    p.cash = Math.max(p.cash, 200);
     p.weapon = 'fists';
-    p.owned = { fists: true, bat: true, pistol: this.subMode === 'survival', shotgun: false, taser: this.subMode === 'survival', revolver: false, smg: false, rifle: false, crossbow: false };
-    p.ammo = { bullets: this.subMode === 'survival' ? 16 : 0, shells: 0, charges: this.subMode === 'survival' ? 3 : 0, bolts: 0 };
-    // Loadout bought with tokens (lib/rewards.ts).
-    const unlocks = useWalletStore.getState().unlocks;
-    for (const id of Object.keys(UNLOCKABLE_WEAPONS) as WeaponId[]) {
-      if (!unlocks.includes(id)) continue;
-      p.owned[id] = true;
-      p.ammo[WEAPONS[id].ammo!] += UNLOCKABLE_WEAPONS[id] ?? 0;
-    }
-    if (unlocks.includes('wallet')) p.cash = Math.max(p.cash, 500);
+    this.giveLoadout(this.subMode === 'survival');
     p.kills = 0;
     p.knockouts = 0;
     this.monsters = [];
@@ -374,8 +388,35 @@ class Combat {
       this.startRun();
     } else {
       this.endRun();
-      this.toast('Watch your back: muggers and angry locals about. Press 1-5 to switch weapons.', 'warn');
+      this.toast('Watch your back: muggers and angry locals about. Press 1-9 to switch weapons.', 'warn');
     }
+  }
+
+  /** The weapons a walk starts with: the basics, plus whatever was bought with tokens (lib/rewards.ts). */
+  private giveLoadout(survival: boolean) {
+    const p = this.player;
+    p.weapon = 'fists';
+    p.owned = { fists: true, bat: true, pistol: survival, shotgun: false, taser: survival, revolver: false, smg: false, rifle: false, crossbow: false, bomber: true };
+    p.ammo = { bullets: survival ? 16 : 0, shells: 0, charges: survival ? 3 : 0, bolts: 0, bombs: BOMB_STOCK };
+    const unlocks = useWalletStore.getState().unlocks;
+    for (const id of Object.keys(UNLOCKABLE_WEAPONS) as WeaponId[]) {
+      if (!unlocks.includes(id)) continue;
+      p.owned[id] = true;
+      p.ammo[WEAPONS[id].ammo!] += UNLOCKABLE_WEAPONS[id] ?? 0;
+    }
+  }
+
+  /** Starts a peaceful walk with weapons: the loadout, and loot to find. No danger. */
+  private beginArms() {
+    const p = this.player;
+    p.hp = p.maxHp;
+    p.alive = true;
+    p.hurt = 0;
+    p.shelter = null;
+    this.giveLoadout(false);
+    this.loot = [];
+    this.lootTimer = 3;
+    this.toast('Weapons turn up on the streets here too. Nobody fights back in peaceful mode.', 'good');
   }
 
   private stop() {
@@ -470,7 +511,10 @@ class Combat {
     this.toasts = this.toasts.filter((t) => t.life > 0);
     for (const tr of this.tracers) tr.life -= dt;
     this.tracers = this.tracers.filter((t) => t.life > 0);
-    if (!this.active) return;
+    if (!this.active) {
+      if (this.arms) this.updateArms(dt);
+      return;
+    }
 
     const p = this.player;
     const moved = Math.hypot(px - this.lastX, pz - this.lastZ) / Math.max(dt, 1e-3);
@@ -495,6 +539,8 @@ class Combat {
       }
     }
 
+    this.refillBombs(dt);
+
     if (!p.alive) {
       p.deathTimer -= dt;
       if (p.deathTimer <= 0 && !this.run.active) this.respawnPlayer();
@@ -509,6 +555,29 @@ class Combat {
     this.updateShelter(dt);
     if (this.subMode === 'normal') this.updateCrime(dt);
     this.updateAlerts();
+  }
+
+  /** The weapons side of a peaceful walk: recover from swings and pick up what lies about. */
+  private updateArms(dt: number) {
+    const p = this.player;
+    this.refillBombs(dt);
+    p.cooldown = Math.max(0, p.cooldown - dt);
+    p.swing = Math.max(0, p.swing - dt * 3.2);
+    p.hitMarker = Math.max(0, p.hitMarker - dt * 5);
+    p.burstTimer = Math.max(0, p.burstTimer - dt);
+    if (p.burstTimer <= 0) p.noiseBurst = 0;
+    this.updateLoot(dt);
+  }
+
+  /** Bombs are built up again while you walk about: one every few seconds, up to a full stock. */
+  private refillBombs(dt: number) {
+    const p = this.player;
+    if (!p.owned.bomber || p.ammo.bombs >= BOMB_STOCK) return;
+    this.bombTimer += dt;
+    if (this.bombTimer > BOMB_REFILL_S) {
+      this.bombTimer = 0;
+      p.ammo.bombs++;
+    }
   }
 
   // --- Stealth -------------------------------------------------------------------------------
@@ -1364,7 +1433,7 @@ class Combat {
   /** Fires / swings the current weapon along the camera ray. Returns true if it went off. */
   attack(): boolean {
     const p = this.player;
-    if (!this.active || !p.alive || p.shelter || p.cooldown > 0 || this.run.intro || this.run.outcome !== 'none' || this.driving) return false;
+    if ((!this.active && !this.arms) || !p.alive || p.shelter || p.cooldown > 0 || this.run.intro || this.run.outcome !== 'none' || this.driving) return false;
     const w = WEAPONS[p.weapon];
     if (w.ammo && p.ammo[w.ammo] <= 0) {
       p.cooldown = 0.3;
@@ -1398,6 +1467,13 @@ class Combat {
       for (const m of this.monsters) if (m.state !== 'dying' && m.y < 3.5) consider('monster', m, m.x, m.z);
       for (const ped of sim.peds) if (this.targetablePed(ped)) consider('ped', ped, ped.x, ped.z);
       if (found.v) this.hit(found.v.kind, found.v.ref, w, fx, fz, w.damage);
+      return true;
+    }
+
+    // The bomber lobs a bomb that goes off where it lands (see sim/blast.ts).
+    if (w.id === 'bomber') {
+      playSfx('bomb_launch', 1);
+      blast.launch(a.x + a.dx * 0.8, a.y - 0.15 + a.dy * 0.8, a.z + a.dz * 0.8, a.dx, a.dy, a.dz);
       return true;
     }
 
@@ -1513,7 +1589,48 @@ class Combat {
       return;
     }
     const ped = ref as Ped;
+    if (!this.active) {
+      // Peaceful: nobody is hurt, but they jump out of the way.
+      ped.knockX += fx * Math.min(w.knock, 3);
+      ped.knockZ += fz * Math.min(w.knock, 3);
+      this.flee(ped, 'scared');
+      return;
+    }
     this.hurtPed(ped, damage, fx, fz, w.knock, w.stun, true);
+  }
+
+  /**
+   * An explosion's shock reaches whoever is near it: monsters and people are hurt and thrown back,
+   * and so is the player. Called by the blast simulation when the wave arrives, not when the bomb lands.
+   */
+  blastDamage(x: number, z: number, radius: number, power: number) {
+    const p = this.player;
+    const reach = radius * 1.1;
+    for (const m of this.monsters) {
+      if (m.state === 'dying') continue;
+      const d = Math.hypot(m.x - x, m.z - z);
+      if (d > reach) continue;
+      const fall = 1 - d / reach;
+      const l = d || 1;
+      this.hit('monster', m, WEAPONS.bomber, (m.x - x) / l, (m.z - z) / l, (30 + 170 * fall * fall) * power);
+    }
+    for (const ped of sim.peds) {
+      if (ped.state === 'inside' || ped.state === 'entering' || ped.state === 'down') continue;
+      const d = Math.hypot(ped.x - x, ped.z - z);
+      if (d > reach) continue;
+      const fall = 1 - d / reach;
+      const l = d || 1;
+      this.hurtPed(ped, (20 + 140 * fall) * power, (ped.x - x) / l, (ped.z - z) / l, 6 + 12 * fall, 2.5, true);
+    }
+    // Only a real fight can hurt you: peaceful walks stay safe.
+    const dp = Math.hypot(this.px - x, this.pz - z);
+    if (this.active && p.alive && !p.shelter && dp < radius * 0.9) {
+      const fall = 1 - dp / (radius * 0.9);
+      const l = dp || 1;
+      p.pushX += ((this.px - x) / l) * 9 * fall;
+      p.pushZ += ((this.pz - z) / l) * 9 * fall;
+      this.damagePlayer((6 + 70 * fall * fall) * power, x, z);
+    }
   }
 
   /** A person takes a hit: they fight back, run, or go down. Witnesses react too. */
@@ -1775,7 +1892,8 @@ class Combat {
         ped.swing = Math.max(ped.swing, 0.6);
         if (ped.timer <= 0) {
           if (nearPlayer < 2.6 && p.alive && !p.shelter) {
-            const take = Math.min(p.cash, Math.max(25, Math.round(p.cash * range(0.3, 0.55))));
+            // Robbers take a small slice, so one bad moment never wipes out a balance.
+            const take = Math.min(p.cash, Math.max(25, Math.round(Math.min(p.cash * range(0.1, 0.2), 150))));
             p.cash -= take;
             ped.stolen = take;
             this.toast(take > 0 ? `You were robbed! -$${take}. Chase the thief!` : 'A thief tried to rob you but you had nothing.', 'bad');
@@ -1978,7 +2096,7 @@ class Combat {
         atmo.rateOverride = 0;
         playSfx('lose');
       } else {
-        const lost = Math.round(p.cash * 0.4);
+        const lost = Math.min(Math.round(p.cash * 0.1), 250);
         p.cash -= lost;
         this.toast(`You were knocked out and lost $${lost}.`, 'bad');
         playSfx('lose', 0.6);

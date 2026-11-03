@@ -174,10 +174,11 @@ export function enableNightWindows(material: THREE.MeshStandardMaterial) {
           vec4 emissiveColor = texture2D( emissiveMap, vEmissiveMapUv );
           vec2 tile = floor(vEmissiveMapUv) + floor(vNightPos.xz * 0.5) * 7.0 + floor(vNightPos.y * 0.01) * 3.0;
           float h = nightHash(tile);
-          float lit = step(h, uNight * 0.8);
+          // Most windows stay dark: at the very most about a quarter of them are lit, and not all equally bright.
+          float lit = step(h, uNight * 0.26) * (0.55 + 0.45 * fract(h * 31.7));
           float cool = step(0.82, fract(h * 9.7));
           vec3 warm = mix(vec3(1.0, 0.8, 0.5), vec3(0.75, 0.88, 1.0), cool);
-          totalEmissiveRadiance *= emissiveColor.rgb * warm * lit * 2.2;
+          totalEmissiveRadiance *= emissiveColor.rgb * warm * lit * 1.5;
         #endif
         `,
       );

@@ -1,5 +1,6 @@
 import { CELL } from '../city/catalog';
 import { wallColliders } from '../city/WallModel';
+import { spanSurfaceAt } from '../city/spanSurface';
 import { resolveWall } from '../city/walls';
 import { useCityStore, type Piece } from '../state/useCityStore';
 import { WATER_LEVEL, hasTerrain, heightAt } from '../terrain/terrain';
@@ -86,14 +87,14 @@ function wallsAt(pieces: Record<string, Piece>): Map<string, Box[]> {
 
 const cellOf = (v: number) => Math.floor(v / CELL);
 
-function solidAt(x: number, z: number): boolean {
+function solidAt(x: number, z: number, y = 0): boolean {
   const gx = cellOf(x);
   const gz = cellOf(z);
   const key = `${gx},${gz}`;
   const world = sim.world;
   if (world.blocked.has(key)) return true;
   // Deep water stops a car, but a bridge (road) carries it across.
-  if (hasTerrain() && !world.roads.has(key) && heightAt(x, z) < WATER_LEVEL - 0.6) return true;
+  if (hasTerrain() && !world.roads.has(key) && heightAt(x, z) < WATER_LEVEL - 0.6 && spanSurfaceAt(x, z, y) === null) return true;
   const boxes = wallsAt(useCityStore.getState().pieces).get(key);
   if (boxes) for (const b of boxes) if (x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1) return true;
   return false;
@@ -217,7 +218,7 @@ class Vehicle {
     for (const lx of [-spec.halfWidth, 0, spec.halfWidth]) {
       for (const lz of [-spec.halfLength, 0, spec.halfLength]) {
         if (lx === 0 && lz === 0) continue;
-        if (solidAt(x - cz * lx + sx * lz, z + sx * lx + cz * lz)) return true;
+        if (solidAt(x - cz * lx + sx * lz, z + sx * lx + cz * lz, this.car?.y ?? 0)) return true;
       }
     }
     return false;
@@ -345,11 +346,22 @@ class Vehicle {
 
     // --- Where the car stands (height and tilt on uneven ground) and how fast it is going ---
     car.speed = Math.hypot(this.vx, this.vz) * (this.forward >= 0 ? 1 : -1);
+    const prevY = car.y ?? 0;
     if (hasTerrain()) {
       const front = heightAt(car.x + nf.x * 1.8, car.z + nf.z * 1.8);
       const back = heightAt(car.x - nf.x * 1.8, car.z - nf.z * 1.8);
       car.y = Math.max(0, (front + back) / 2);
       car.pitch = -Math.atan2(front - back, 3.6);
+    }
+    // On a bridge the deck is the ground.
+    const deck = spanSurfaceAt(car.x, car.z, prevY);
+    if (deck !== null) {
+      const ahead = spanSurfaceAt(car.x + nf.x * 1.8, car.z + nf.z * 1.8, deck) ?? deck;
+      const behind = spanSurfaceAt(car.x - nf.x * 1.8, car.z - nf.z * 1.8, deck) ?? deck;
+      car.y = Math.max(deck, car.y ?? 0);
+      car.pitch = -Math.atan2(ahead - behind, 3.6);
+    } else if (!hasTerrain()) {
+      car.y = 0;
     }
     this.horn = input.horn;
     this.shake = Math.max(0, this.shake - dt * 2.2);

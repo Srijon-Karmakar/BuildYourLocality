@@ -34,6 +34,7 @@ import {
 } from '../city/catalog';
 import { type Piece } from '../state/useCityStore';
 import { TREE_SHAPES, type TreeSpec } from '../city/trees';
+import { MAX_SPAN_POINTS, SPAN_KINDS, SPAN_RAILINGS, SPAN_STRUCTURES, SPAN_SUPPORTS, type SpanSpec } from '../city/spans';
 import { WALL_CAPS, WALL_OPENINGS, WALL_POSTS, WALL_STYLES, type WallSpec } from '../city/walls';
 import { COVERS, MAX_HEIGHT, MIN_HEIGHT, type TerrainCell } from '../terrain/terrain';
 import { supabase } from './supabaseClient';
@@ -169,11 +170,6 @@ export async function fetchExtraSlots(userId: string): Promise<number | null> {
   const { data, error } = await supabase.from('player_limits').select('extra_worlds').eq('user_id', userId).maybeSingle();
   if (error) return null;
   return data ? Math.max(0, Number(data.extra_worlds) || 0) : 0;
-}
-
-export async function saveExtraSlots(userId: string, extra: number): Promise<string | null> {
-  const { error } = await supabase.from('player_limits').upsert({ user_id: userId, extra_worlds: extra }, { onConflict: 'user_id' });
-  return error ? friendly(error) : null;
 }
 
 const isPiece = (value: unknown): value is Piece => {
@@ -368,6 +364,40 @@ function sanitizeWall(wall: unknown): Partial<WallSpec> | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** A bridge's saved design, with every value brought back within what the game can build. */
+function sanitizeSpan(span: unknown): Partial<SpanSpec> | undefined {
+  if (!span || typeof span !== 'object') return undefined;
+  const raw = span as Partial<SpanSpec>;
+  const out: Partial<SpanSpec> = {};
+  if (Array.isArray(raw.pts)) {
+    const pts = raw.pts
+      .filter((p): p is [number, number] => Array.isArray(p) && p.length === 2 && p.every((v) => typeof v === 'number' && Number.isFinite(v)))
+      .slice(0, MAX_SPAN_POINTS)
+      .map(([x, z]): [number, number] => [Math.max(-2000, Math.min(2000, x)), Math.max(-2000, Math.min(2000, z))]);
+    if (pts.length >= 2) out.pts = pts;
+  }
+  if (SPAN_KINDS.some((k) => k.id === raw.kind)) out.kind = raw.kind;
+  if (SPAN_STRUCTURES.some((k) => k.id === raw.structure)) out.structure = raw.structure;
+  if (SPAN_SUPPORTS.some((k) => k.id === raw.support)) out.support = raw.support;
+  if (SPAN_RAILINGS.some((k) => k.id === raw.railing)) out.railing = raw.railing;
+  for (const flag of ['smooth', 'rampA', 'rampB', 'lights'] as const) if (typeof raw[flag] === 'boolean') out[flag] = raw[flag];
+  const num = (v: unknown, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : undefined);
+  const set = (key: 'height' | 'ramp' | 'width' | 'thickness' | 'frameH' | 'spacing' | 'pillar', min: number, max: number) => {
+    const v = num(raw[key], min, max);
+    if (v !== undefined) out[key] = v;
+  };
+  set('height', 1, 80);
+  set('ramp', 0, 400);
+  set('width', 1.5, 12);
+  set('thickness', 0.3, 4);
+  set('frameH', 3, 90);
+  set('spacing', 6, 120);
+  set('pillar', 0.4, 6);
+  if (typeof raw.lanes === 'number') out.lanes = clampInt(raw.lanes, 1, 6, 2);
+  for (const key of ['deck', 'surface', 'frame', 'support_colour'] as const) if (isHex(raw[key])) out[key] = raw[key];
+  return out;
+}
+
 function sanitizeSign(sign: unknown): SignSpec | undefined {
   if (!sign || typeof sign !== 'object') return undefined;
   const raw = sign as Partial<SignSpec>;
@@ -429,7 +459,9 @@ function sanitize(p: Piece): Piece {
   if (tree) next.tree = tree;
   const wall = sanitizeWall(p.wall);
   if (wall) next.wall = wall;
-  if (typeof p.scale === 'number' && Number.isFinite(p.scale)) next.scale = Math.min(2, Math.max(0.5, p.scale));
+  const span = p.type === 'span' ? sanitizeSpan(p.span) : undefined;
+  if (span) next.span = span;
+  if (typeof p.scale === 'number' && Number.isFinite(p.scale)) next.scale = Math.min(3, Math.max(0.5, p.scale));
   if (WINDOW_STYLES.some((w) => w.id === p.windows)) next.windows = p.windows;
   return next;
 }
@@ -466,23 +498,34 @@ export async function fetchWorld(
 }
 
 export interface WalletRow {
-  tokens: number;
+  money: number;
   unlocks: string[];
+  extraWorlds: number;
 }
 
-/** The player's tokens and unlocks, or null when they could not be read. */
-export async function fetchWallet(userId: string): Promise<WalletRow | null> {
-  const { data, error } = await supabase.from('player_limits').select('tokens, unlocks').eq('user_id', userId).maybeSingle();
-  if (error) return null;
+/**
+ * The wallet lives on the server: players can read it but only these functions change it, and
+ * each one applies the rules (prices, daily limits, the starting bonus). Every one resolves to the
+ * wallet as it is afterwards, or an error message.
+ */
+export type WalletCall = 'wallet_ensure' | 'wallet_earn_ad' | 'wallet_earn_walk' | 'wallet_lose' | 'wallet_buy' | 'redeem_money_code';
+
+export async function callWallet(fn: WalletCall, args: Record<string, unknown> = {}): Promise<{ wallet: WalletRow | null; added?: number; error: string | null }> {
+  const { data, error } = await supabase.rpc(fn, args);
+  if (error) return { wallet: null, error: error.message };
+  const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+  if (!row) return { wallet: null, error: 'The wallet did not answer.' };
+  // The redeem function reports { added, balance } and leaves the unlocks alone.
+  const money = Number(row.out_money ?? row.balance);
   return {
-    tokens: Math.max(0, Math.floor(Number(data?.tokens) || 0)),
-    unlocks: Array.isArray(data?.unlocks) ? data.unlocks.filter((u: unknown): u is string => typeof u === 'string') : [],
+    wallet: {
+      money: Number.isFinite(money) ? Math.max(0, Math.floor(money)) : 0,
+      unlocks: Array.isArray(row.out_unlocks) ? row.out_unlocks.filter((u: unknown): u is string => typeof u === 'string') : [],
+      extraWorlds: Math.max(0, Math.floor(Number(row.out_extra) || 0)),
+    },
+    added: row.added === undefined ? undefined : Number(row.added) || 0,
+    error: null,
   };
-}
-
-export async function saveWallet(userId: string, wallet: WalletRow): Promise<string | null> {
-  const { error } = await supabase.from('player_limits').upsert({ user_id: userId, tokens: wallet.tokens, unlocks: wallet.unlocks }, { onConflict: 'user_id' });
-  return error?.message ?? null;
 }
 
 // --- Community and co-op ----------------------------------------------------------------------

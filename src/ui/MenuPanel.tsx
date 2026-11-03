@@ -5,13 +5,13 @@ import { Icon } from './icons';
 import { RoamOptions } from './ModeBar';
 import { SettingsPanel } from './SettingsPanel';
 import { SkyPanel } from './SkyPanel';
-import { RewardsPanel } from './RewardsPanel';
+import { MoneyPanel } from './MoneyPanel';
 import { WorldsPanel } from './WorldsPanel';
 
 const TABS: { id: MenuTab; label: string; icon: string }[] = [
   { id: 'sky', label: 'Sky', icon: 'sky' },
   { id: 'worlds', label: 'Worlds', icon: 'worlds' },
-  { id: 'rewards', label: 'Rewards', icon: 'coins' },
+  { id: 'money', label: 'Money', icon: 'coins' },
   { id: 'graphics', label: 'Graphics', icon: 'sliders' },
 ];
 
@@ -58,7 +58,7 @@ export function MenuPanel() {
         <div className="overflow-y-auto p-3 pt-2 sm:p-4 sm:pt-2.5">
           {active === 'sky' && <SkyPanel />}
           {active === 'worlds' && <WorldsPanel />}
-          {active === 'rewards' && <RewardsPanel />}
+          {active === 'money' && <MoneyPanel />}
           {active === 'graphics' && <SettingsPanel />}
           {active === 'walk' && <RoamOptions stacked />}
         </div>

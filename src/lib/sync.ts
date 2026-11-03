@@ -22,7 +22,6 @@ import {
   removeMember,
   renameWorldRow,
   requestWorldJoin,
-  saveExtraSlots,
   setWorldPublicBuild,
   setWorldVisibility,
   type WorldPatch,
@@ -798,19 +797,18 @@ export async function deleteWorld(id: string): Promise<string | null> {
   }
 }
 
-/** Adds one world slot (called once an ad has been watched). Resolves to an error message (or null). */
-export async function grantWorldSlot(): Promise<string | null> {
-  const before = useWorldsStore.getState().extraSlots;
-  const next = before + 1;
+/** Adds one world slot on this device (guests; a signed-in player's slots come from the server). */
+export function grantGuestWorldSlot() {
+  const next = useWorldsStore.getState().extraSlots + 1;
   useWorldsStore.setState({ extraSlots: next });
   writeSlots(scopeOf(), next);
-  if (!identity) return null;
-  const error = await saveExtraSlots(identity, next);
-  if (error) {
-    useWorldsStore.setState({ extraSlots: before });
-    writeSlots(scopeOf(), before);
-  }
-  return error;
+}
+
+/** Shows the slot count the server reports. */
+export function setServerWorldSlots(slots: number) {
+  if (!identity || slots === useWorldsStore.getState().extraSlots) return;
+  useWorldsStore.setState({ extraSlots: slots });
+  writeSlots(identity, slots);
 }
 
 // --- Community and co-op ----------------------------------------------------------------------

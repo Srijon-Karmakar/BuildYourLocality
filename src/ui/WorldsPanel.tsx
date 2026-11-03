@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { rewardById, TOKENS_PER_AD } from '../lib/rewards';
-import { adBlockedReason, buyReward, watchAdForTokens } from '../lib/wallet';
+import { useMoneyFormat } from '../lib/currency';
+import { rewardById, MONEY_PER_AD } from '../lib/rewards';
+import { adBlockedReason, buyReward, watchAdForMoney } from '../lib/wallet';
 import { useWalletStore } from '../state/useWalletStore';
 import { createWorld, deleteWorld, leaveVisit, openWorld, renameWorld } from '../lib/sync';
 import { useAuthStore } from '../state/useAuthStore';
@@ -177,7 +178,8 @@ function MyWorlds() {
   const busy = useWorldsStore((s) => s.busy);
   const signedIn = useAuthStore((s) => !!s.session);
   const [message, setMessage] = useState<string | null>(null);
-  const tokens = useWalletStore((s) => s.tokens);
+  const fmt = useMoneyFormat();
+  const money = useWalletStore((s) => s.money);
   const watching = useWalletStore((s) => s.watching);
 
   const [choosing, setChoosing] = useState(false);
@@ -199,7 +201,7 @@ function MyWorlds() {
 
   const slotCost = rewardById('slot')?.cost ?? 20;
   const unlock = async () => setMessage(await buyReward('slot'));
-  const earn = async () => setMessage(await watchAdForTokens());
+  const earn = async () => setMessage(await watchAdForMoney());
 
   return (
     <div className="flex flex-col gap-3 text-xs text-white sm:text-sm">
@@ -221,7 +223,7 @@ function MyWorlds() {
       {full ? (
         <div className="flex flex-col gap-1.5">
           <button
-            disabled={busy || tokens < slotCost}
+            disabled={busy || money < slotCost}
             onClick={() => void unlock()}
             className="flex min-h-10 items-center justify-center gap-2 rounded-full bg-white px-4 text-sm font-medium text-black active:bg-white/80 disabled:bg-white/15 disabled:text-white/45 sm:min-h-0 sm:py-2"
           >
@@ -238,9 +240,9 @@ function MyWorlds() {
             className="flex min-h-10 items-center justify-center gap-2 rounded-full bg-amber-400 px-4 text-sm font-medium text-black active:bg-amber-300 disabled:opacity-45 sm:min-h-0 sm:py-2"
           >
             <Icon name="watchad" />
-            {watching ? 'Ad playing…' : `Watch an ad: +${TOKENS_PER_AD} tokens`}
+            {watching ? 'Ad playing…' : `Watch an ad: +${fmt(MONEY_PER_AD)}`}
           </button>
-          <span className="text-center text-[11px] text-white/45">You have {tokens} tokens.</span>
+          <span className="text-center text-[11px] text-white/45">You have {fmt(money)}.</span>
         </div>
       ) : choosing ? (
         <form

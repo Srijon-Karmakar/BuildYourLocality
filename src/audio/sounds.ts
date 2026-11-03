@@ -10,7 +10,8 @@ export type Sfx =
   | 'step_grass' | 'step_road' | 'step_stone' | 'land' | 'jump' | 'splash' | 'breath' | 'heartbeat' | 'flash_click'
   | 'click' | 'place' | 'place_soft' | 'delete' | 'select' | 'undo' | 'error' | 'token' | 'menu' | 'money'
   | 'car_door' | 'car_start' | 'car_horn' | 'car_crash' | 'car_skid' | 'car_hit'
-  | 'hammer' | 'saw' | 'drill' | 'thunder' | 'roar' | 'rex_roar' | 'raptor' | 'fire' | 'chat';
+  | 'hammer' | 'saw' | 'drill' | 'thunder' | 'roar' | 'rex_roar' | 'raptor' | 'fire' | 'chat'
+  | 'bomb_launch' | 'explosion' | 'collapse' | 'tree_fall';
 
 interface NoiseLayer {
   kind: 'n';
@@ -191,6 +192,37 @@ const RECIPES: Record<Sfx, Recipe> = {
   hammer: { vary: 0.12, reverb: 0.2, cooldown: 0.1, layers: [t({ from: 420, to: 240, dur: 0.07, gain: 0.3 }), n({ dur: 0.04, gain: 0.4, filter: { type: 'bandpass', f: 2600, q: 1.2 } }), t({ from: 1300, to: 1000, dur: 0.18, gain: 0.06, fm: { ratio: 2.4, depth: 60 } })] },
   saw: { vary: 0.1, cooldown: 0.2, layers: [n({ dur: 0.5, gain: 0.12, filter: { type: 'bandpass', f: 2100, q: 1.2 }, am: { rate: 22, depth: 0.7 } }), t({ from: 300, to: 330, dur: 0.5, gain: 0.04, wave: 'sawtooth' })] },
   drill: { vary: 0.1, cooldown: 0.3, layers: [t({ from: 180, to: 210, dur: 0.65, gain: 0.06, wave: 'sawtooth', am: { rate: 8, depth: 0.5 } }), n({ dur: 0.65, gain: 0.1, filter: { type: 'bandpass', f: 1500, q: 1 }, am: { rate: 30, depth: 0.6 } })] },
+
+  // --- Bombs ---
+  bomb_launch: {
+    vary: 0.08,
+    reverb: 0.5,
+    layers: [t({ from: 120, to: 40, dur: 0.28, gain: 0.8 }), n({ color: 'brown', dur: 0.3, gain: 0.7, filter: { type: 'lowpass', f: 900, to: 200 } }), n({ dur: 0.12, gain: 0.5, filter: { type: 'bandpass', f: 1200, to: 400, q: 0.8 } })],
+  },
+  explosion: {
+    vary: 0.06,
+    reverb: 1,
+    cooldown: 0.05,
+    layers: [
+      n({ dur: 0.12, gain: 0.9, atk: 0.001, filter: { type: 'highpass', f: 1600 } }),
+      t({ from: 85, to: 22, dur: 1.1, gain: 1 }),
+      n({ color: 'brown', dur: 1.6, gain: 1, atk: 0.01, filter: { type: 'lowpass', f: 900, to: 90 } }),
+      n({ color: 'pink', at: 0.08, dur: 1.2, gain: 0.45, filter: { type: 'lowpass', f: 1400, to: 150 } }),
+      n({ color: 'brown', at: 0.5, dur: 1.8, gain: 0.5, atk: 0.2, filter: { type: 'lowpass', f: 260, to: 55 } }),
+    ],
+  },
+  collapse: {
+    vary: 0.1,
+    reverb: 0.9,
+    cooldown: 0.2,
+    layers: [n({ color: 'brown', dur: 2.2, gain: 0.9, atk: 0.25, filter: { type: 'lowpass', f: 420, to: 70 }, am: { rate: 11, depth: 0.5 } }), n({ dur: 1.5, gain: 0.3, atk: 0.1, filter: { type: 'bandpass', f: 1700, q: 0.8 }, am: { rate: 23, depth: 0.8 } }), t({ from: 55, to: 28, dur: 1.8, gain: 0.5 })],
+  },
+  tree_fall: {
+    vary: 0.15,
+    reverb: 0.35,
+    cooldown: 0.08,
+    layers: [n({ color: 'pink', dur: 0.5, gain: 0.5, atk: 0.1, filter: { type: 'bandpass', f: 1400, to: 500, q: 0.7 }, am: { rate: 30, depth: 0.7 } }), n({ color: 'brown', at: 0.45, dur: 0.3, gain: 0.7, filter: { type: 'lowpass', f: 300 } }), t({ from: 90, to: 44, at: 0.45, dur: 0.25, gain: 0.5 })],
+  },
 
   // --- Vehicles (one-shots; engines are continuous, see vehicleAudio) ---
   car_door: { vary: 0.08, reverb: 0.2, layers: [n({ color: 'brown', dur: 0.14, gain: 0.7, filter: { type: 'lowpass', f: 420 } }), t({ from: 112, to: 62, dur: 0.16, gain: 0.5 }), n({ dur: 0.04, at: 0.012, gain: 0.2, filter: { type: 'highpass', f: 2600 } }), n({ dur: 0.03, at: 0.1, gain: 0.07, filter: { type: 'bandpass', f: 3200, q: 3 } })] },

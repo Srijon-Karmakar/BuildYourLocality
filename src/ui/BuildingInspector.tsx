@@ -35,6 +35,8 @@ import { maxDoorOffset } from '../city/models';
 import { Icon } from './icons';
 import { SidePanel } from './SidePanel';
 import { WallEditor } from './WallEditor';
+import { SpanEditor } from './SpanEditor';
+import { pathLength, resolveSpan } from '../city/spans';
 import { resolveWall, wallStyleOf } from '../city/walls';
 import { FLOWER_SWATCHES, GRASS_SWATCHES, LEAF_SWATCHES, TREE_SHAPES, TRUNK_SWATCHES, resolveTree, seedFromId, type TreeSpec } from '../city/trees';
 import { LedEditor } from './LedEditor';
@@ -157,6 +159,7 @@ function SingleInspector() {
   if (mode !== 'build' || !piece || !PIECES[piece.type].customisable) return null;
   if (piece.type === 'road') return <RoadInspector piece={piece} />;
   if (piece.type === 'wall') return <WallInspector piece={piece} />;
+  if (piece.type === 'span') return <SpanInspector piece={piece} />;
   if (!PIECES[piece.type].paintable) return <PropInspector piece={piece} />;
 
   if (movingId) {
@@ -837,7 +840,7 @@ function PropInspector({ piece }: { piece: Piece }) {
         label="Size"
         value={Math.round((piece.scale ?? 1) * 10) / 10}
         min={0.5}
-        max={2}
+        max={3}
         step={0.1}
         onChange={(scale) => updatePiece(piece.id, { scale })}
         format={(v) => `${Math.round(v * 100)}%`}
@@ -954,6 +957,36 @@ export function BuildingInspector() {
   const count = useBuilderStore((s) => s.selectedIds.length);
   if (mode !== 'build') return null;
   return count > 1 ? <MultiInspector /> : <SingleInspector />;
+}
+
+/** A placed bridge: every setting except its path, plus doing the same to every bridge at once. */
+function SpanInspector({ piece }: { piece: Piece }) {
+  const { select } = useBuilderStore.getState();
+  const { updatePiece, updateMany, removeById, pieces } = useCityStore.getState();
+  const spec = resolveSpan(piece.span);
+  const spans = Object.values(pieces).filter((p) => p.type === 'span');
+  return (
+    <SidePanel id="inspector" side="right" title="Bridge" onClose={() => select(null)} className={GROUP_CLASS}>
+      <p className="text-white/60">
+        {Math.round(pathLength(spec.pts))} m long, {spec.pts.length} points.
+      </p>
+      <SpanEditor spec={spec} onChange={(change) => updatePiece(piece.id, { span: { ...piece.span, ...change } })} />
+      <div className="flex flex-wrap gap-1.5">
+        <button className={chip(false)} disabled={spans.length < 2} onClick={() => updateMany(spans.map((p) => p.id), (p) => ({ span: { ...piece.span, pts: resolveSpan(p.span).pts } }))}>
+          Copy this look to all {spans.length} bridges
+        </button>
+      </div>
+      <button
+        className="min-h-10 rounded-xl bg-red-600/90 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-500 active:bg-red-500 sm:min-h-0 sm:rounded-lg"
+        onClick={() => {
+          removeById(piece.id);
+          select(null);
+        }}
+      >
+        Remove this bridge <span className="ml-1 text-xs opacity-70">Del</span>
+      </button>
+    </SidePanel>
+  );
 }
 
 /** A placed wall: all its settings, plus doing the same to every wall at once. */
@@ -1174,7 +1207,7 @@ function MultiInspector() {
               <Icon name="shuffle" className="mr-1 inline" />
               New pattern for each
             </button>
-            <button className={chip(false)} onClick={() => editPlants((p) => ({ scale: Math.min(2, (p.scale ?? 1) + 0.1) }))}>
+            <button className={chip(false)} onClick={() => editPlants((p) => ({ scale: Math.min(3, (p.scale ?? 1) + 0.1) }))}>
               Bigger
             </button>
             <button className={chip(false)} onClick={() => editPlants((p) => ({ scale: Math.max(0.5, (p.scale ?? 1) - 0.1) }))}>

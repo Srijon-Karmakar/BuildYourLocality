@@ -277,3 +277,215 @@ grant execute on function public.request_world_join(uuid, text) to authenticated
 grant execute on function public.resolve_world_request(uuid, uuid, boolean) to authenticated;
 grant execute on function public.regenerate_join_code(uuid) to authenticated;
 grant execute on function public.apply_world_patch(uuid, jsonb, text[], jsonb, text[]) to authenticated;
+
+-- =====================================================================================
+-- Money (replaces tokens) and developer redeem codes
+--   * money is the one balance: ads, walks, purchases and codes add to it.
+--   * redeem codes are checked here on the server and are never in the game files.
+--     Only a SHA-256 hash of each code is stored, so reading this table does not reveal a code.
+--
+-- To make a developer code, run this once in the SQL editor (change YOUR-SECRET-CODE and the amount):
+--   insert into public.redeem_codes (code_hash, amount, note)
+--   values (encode(extensions.digest(lower('YOUR-SECRET-CODE'), 'sha256'), 'hex'), 1000000, 'developer code');
+-- Every redeem adds `amount`, so redeeming again and again gives as much money as you want.
+-- To retire a code: delete from public.redeem_codes where note = 'developer code';
+-- =====================================================================================
+
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'player_limits' and column_name = 'money') then
+    alter table public.player_limits add column money bigint not null default 0 check (money >= 0);
+    -- One time only: balances that were tokens carry over as money.
+    update public.player_limits set money = tokens where tokens > 0;
+  end if;
+end $$;
+
+create table if not exists public.redeem_codes (
+  code_hash text primary key,
+  amount    bigint not null default 1000000 check (amount > 0),
+  note      text
+);
+alter table public.redeem_codes enable row level security; -- no policies: players can never read the table
+
+create table if not exists public.redeem_attempts (
+  user_id uuid not null references auth.users (id) on delete cascade,
+  at      timestamptz not null default now()
+);
+create index if not exists redeem_attempts_idx on public.redeem_attempts (user_id, at desc);
+alter table public.redeem_attempts enable row level security;
+
+-- Redeems a code: adds its amount to the caller's money. A wrong code adds nothing (and counts
+-- against a limit of 5 wrong tries per 15 minutes, so codes cannot be guessed).
+create or replace function public.redeem_money_code(p_code text) returns table (added bigint, balance bigint)
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  h     text;
+  amt   bigint;
+  fails integer;
+  bal   bigint;
+begin
+  if auth.uid() is null then raise exception 'Sign in first.'; end if;
+  delete from public.redeem_attempts where at < now() - interval '1 day';
+  select count(*) into fails from public.redeem_attempts where user_id = auth.uid() and at > now() - interval '15 minutes';
+  if fails >= 5 then raise exception 'Too many wrong codes. Try again in a few minutes.'; end if;
+
+  h := encode(digest(lower(trim(coalesce(p_code, ''))), 'sha256'), 'hex');
+  select c.amount into amt from public.redeem_codes c where c.code_hash = h;
+  if amt is null then
+    insert into public.redeem_attempts (user_id) values (auth.uid());
+    select coalesce((select money from public.player_limits where user_id = auth.uid()), 0) into bal;
+    return query select 0::bigint, bal;
+    return;
+  end if;
+
+  insert into public.player_limits (user_id, money) values (auth.uid(), amt)
+    on conflict (user_id) do update set money = public.player_limits.money + amt
+    returning money into bal;
+  return query select amt, bal;
+end;
+$$;
+
+grant execute on function public.redeem_money_code(text) to authenticated;
+
+-- =====================================================================================
+-- Server-owned wallet: players can no longer write their own money, unlocks or world slots.
+--   * Every change goes through the wallet_* functions below, which run on the server and apply
+--     the rules (prices, daily limits, the starting bonus). Editing the browser's storage or
+--     calling the database directly cannot raise a balance.
+--   * The only way to add money without playing is a redeem code (redeem_money_code) or, later,
+--     a verified payment written by a server function with the service role.
+-- Keep the prices below in sync with src/lib/rewards.ts.
+-- =====================================================================================
+
+alter table public.player_limits add column if not exists bonus_claimed boolean     not null default false;
+alter table public.player_limits add column if not exists day           date;
+alter table public.player_limits add column if not exists ads_today     integer     not null default 0;
+alter table public.player_limits add column if not exists walk_today    bigint      not null default 0;
+alter table public.player_limits add column if not exists last_ad_at    timestamptz;
+
+-- Players read their row (money, unlocks, slots) but can no longer write it.
+drop policy if exists "owner can insert own limits" on public.player_limits;
+drop policy if exists "owner can update own limits" on public.player_limits;
+revoke insert, update, delete on public.player_limits from anon, authenticated;
+
+create table if not exists public.shop_items (
+  id         text primary key,
+  cost       bigint  not null check (cost >= 0),
+  repeatable boolean not null default false
+);
+alter table public.shop_items enable row level security; -- no policies: only the functions read it
+
+insert into public.shop_items (id, cost, repeatable) values
+  ('slot', 20, true),
+  ('revive', 15, true),
+  ('shotgun', 40, false),
+  ('revolver', 30, false),
+  ('smg', 60, false),
+  ('rifle', 80, false),
+  ('crossbow', 50, false)
+on conflict (id) do update set cost = excluded.cost, repeatable = excluded.repeatable;
+
+-- Internal: a player's wallet as returned to the game. Not callable by players.
+create or replace function public._wallet_out(uid uuid) returns table (out_money bigint, out_unlocks text[], out_extra integer)
+language sql stable security definer set search_path = public as $$
+  select money, unlocks, extra_worlds from public.player_limits where user_id = uid;
+$$;
+revoke all on function public._wallet_out(uuid) from public, anon, authenticated;
+
+-- Opens the wallet: makes it on first use and gives the one-time starting bonus of 100.
+create or replace function public.wallet_ensure() returns table (out_money bigint, out_unlocks text[], out_extra integer)
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'Sign in first.'; end if;
+  insert into public.player_limits (user_id) values (uid) on conflict (user_id) do nothing;
+  update public.player_limits set money = money + 100, bonus_claimed = true where user_id = uid and not bonus_claimed;
+  return query select * from public._wallet_out(uid);
+end;
+$$;
+
+-- A finished rewarded ad: +10, at most 20 a day and one every 20 seconds.
+create or replace function public.wallet_earn_ad() returns table (out_money bigint, out_unlocks text[], out_extra integer)
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); r public.player_limits;
+begin
+  if uid is null then raise exception 'Sign in first.'; end if;
+  insert into public.player_limits (user_id) values (uid) on conflict (user_id) do nothing;
+  select * into r from public.player_limits where user_id = uid for update;
+  if r.day is distinct from current_date then
+    update public.player_limits set day = current_date, ads_today = 0, walk_today = 0 where user_id = uid;
+    r.ads_today := 0;
+  end if;
+  if r.ads_today >= 20 then raise exception 'That is all the ads for today. Come back tomorrow.'; end if;
+  if r.last_ad_at is not null and r.last_ad_at > now() - interval '20 seconds' then raise exception 'Wait a moment before the next ad.'; end if;
+  update public.player_limits set money = money + 10, ads_today = ads_today + 1, last_ad_at = now() where user_id = uid;
+  return query select * from public._wallet_out(uid);
+end;
+$$;
+
+-- Money found while walking. The game cannot prove what was picked up, so this is capped:
+-- 1,000 per report and 10,000 per day. Anything above the cap is simply not paid.
+create or replace function public.wallet_earn_walk(p_amount bigint) returns table (out_money bigint, out_unlocks text[], out_extra integer)
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); r public.player_limits; grant_amt bigint;
+begin
+  if uid is null then raise exception 'Sign in first.'; end if;
+  insert into public.player_limits (user_id) values (uid) on conflict (user_id) do nothing;
+  select * into r from public.player_limits where user_id = uid for update;
+  if r.day is distinct from current_date then
+    update public.player_limits set day = current_date, ads_today = 0, walk_today = 0 where user_id = uid;
+    r.walk_today := 0;
+  end if;
+  grant_amt := least(greatest(coalesce(p_amount, 0), 0), 1000, greatest(10000 - r.walk_today, 0));
+  if grant_amt > 0 then
+    update public.player_limits set money = money + grant_amt, walk_today = walk_today + grant_amt where user_id = uid;
+  end if;
+  return query select * from public._wallet_out(uid);
+end;
+$$;
+
+-- Money lost while walking (robbed, knocked out). Never below zero.
+create or replace function public.wallet_lose(p_amount bigint) returns table (out_money bigint, out_unlocks text[], out_extra integer)
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'Sign in first.'; end if;
+  insert into public.player_limits (user_id) values (uid) on conflict (user_id) do nothing;
+  update public.player_limits set money = greatest(0, money - least(greatest(coalesce(p_amount, 0), 0), 1000)) where user_id = uid;
+  return query select * from public._wallet_out(uid);
+end;
+$$;
+
+-- Buys something from shop_items: takes the price, then adds the unlock or the world slot.
+create or replace function public.wallet_buy(p_item text) returns table (out_money bigint, out_unlocks text[], out_extra integer)
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); r public.player_limits; item public.shop_items;
+begin
+  if uid is null then raise exception 'Sign in first.'; end if;
+  select * into item from public.shop_items where id = p_item;
+  if item.id is null then raise exception 'Unknown item.'; end if;
+  insert into public.player_limits (user_id) values (uid) on conflict (user_id) do nothing;
+  select * into r from public.player_limits where user_id = uid for update;
+  if not item.repeatable and p_item = any (r.unlocks) then raise exception 'You already own this.'; end if;
+  if r.money < item.cost then raise exception 'You need % more.', item.cost - r.money; end if;
+  if p_item = 'slot' then
+    update public.player_limits set money = money - item.cost, extra_worlds = least(extra_worlds + 1, 100) where user_id = uid;
+  elsif p_item = 'revive' then
+    update public.player_limits set money = money - item.cost where user_id = uid;
+  else
+    update public.player_limits set money = money - item.cost, unlocks = array_append(unlocks, p_item) where user_id = uid;
+  end if;
+  return query select * from public._wallet_out(uid);
+end;
+$$;
+
+revoke all on function public.wallet_ensure() from public, anon;
+revoke all on function public.wallet_earn_ad() from public, anon;
+revoke all on function public.wallet_earn_walk(bigint) from public, anon;
+revoke all on function public.wallet_lose(bigint) from public, anon;
+revoke all on function public.wallet_buy(text) from public, anon;
+grant execute on function public.wallet_ensure() to authenticated;
+grant execute on function public.wallet_earn_ad() to authenticated;
+grant execute on function public.wallet_earn_walk(bigint) to authenticated;
+grant execute on function public.wallet_lose(bigint) to authenticated;
+grant execute on function public.wallet_buy(text) to authenticated;

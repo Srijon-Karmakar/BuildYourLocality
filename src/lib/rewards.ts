@@ -1,14 +1,14 @@
 /**
- * What ads earn and what tokens buy. Change the numbers here; the UI reads everything from this file.
+ * What ads earn and what money buys. Change the numbers here; the UI reads everything from this file.
  */
 
-/** Tokens a finished rewarded ad is worth. */
-export const TOKENS_PER_AD = 10;
+/** Money a finished rewarded ad is worth. */
+export const MONEY_PER_AD = 10;
 /** Ads one device can watch per day, so the loop stays a bonus instead of a chore. */
 export const MAX_ADS_PER_DAY = 20;
 /** Minimum gap between two ads, in seconds. */
 export const AD_COOLDOWN_S = 20;
-/** Tokens that bring a player back after a knock-out (watching an ad does it for free). */
+/** Money that brings a player back after a knock-out (watching an ad does it for free). */
 export const REVIVE_COST = 15;
 
 export interface RewardDef {
@@ -29,7 +29,6 @@ export const REWARDS: RewardDef[] = [
   { id: 'smg', label: 'Submachine gun', desc: 'Sprays bullets fast. Start every walk with it and 60 rounds.', icon: 'smg', cost: 60 },
   { id: 'rifle', label: 'Hunting rifle', desc: 'Long range, hard-hitting. Start every walk with it and 20 rounds.', icon: 'rifle', cost: 80 },
   { id: 'crossbow', label: 'Crossbow', desc: 'Almost silent, so nobody hears you. Start every walk with it and 12 bolts.', icon: 'crossbow', cost: 50 },
-  { id: 'wallet', label: 'Deep pockets', desc: 'Start every walk with $500 instead of $200.', icon: 'money', cost: 25 },
 ];
 
 export const rewardById = (id: string) => REWARDS.find((r) => r.id === id);

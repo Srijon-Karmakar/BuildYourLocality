@@ -2,7 +2,8 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { atmo, formatHour } from '../scenes/atmosphere';
 import { combat, SURVIVAL_HOURS, UNLOCKABLE_WEAPONS, WEAPONS, WEAPON_ORDER, type Stealth, type Toast, type WeaponId } from '../sim/combat';
 import { REVIVE_COST } from '../lib/rewards';
-import { reviveWithAd, reviveWithTokens } from '../lib/wallet';
+import { useMoneyFormat } from '../lib/currency';
+import { reviveWithAd, reviveWithMoney } from '../lib/wallet';
 import { useGameStore } from '../state/useGameStore';
 import { useVehicleSnap } from './VehicleHud';
 import { useWalletStore } from '../state/useWalletStore';
@@ -102,6 +103,7 @@ function Bar({ value, tone }: { value: number; tone: string }) {
 }
 
 function StatusStrip({ s, survival }: { s: Snapshot; survival: boolean }) {
+  const fmt = useMoneyFormat();
   const view = STEALTH_VIEW[s.stealth];
   return (
     <div
@@ -112,7 +114,7 @@ function StatusStrip({ s, survival }: { s: Snapshot; survival: boolean }) {
         <Icon name="heart" className="text-rose-400" />
         <Bar value={s.hp / s.maxHp} tone={s.hp / s.maxHp > 0.35 ? 'bg-rose-500' : 'bg-red-600 animate-pulse'} />
         <span className="w-8 text-right text-xs tabular-nums">{Math.ceil(s.hp)}</span>
-        <span className="ml-1 text-sm font-medium text-emerald-300 tabular-nums">${s.cash}</span>
+        <span className="ml-1 text-sm font-medium text-emerald-300 tabular-nums">{fmt(s.cash)}</span>
       </div>
       {s.stamina < 0.98 && (
         <div className={`flex w-full max-w-[11rem] items-center gap-2 px-3 py-1.5 ${card}`}>
@@ -174,7 +176,7 @@ function WeaponBar({ s, compact }: { s: Snapshot; compact: boolean }) {
       {WEAPON_ORDER.map((id, i) => {
         const w = WEAPONS[id];
         const owned = s.owned[id];
-        // Guns bought with tokens only appear once you carry them.
+        // Guns bought with money only appear once you carry them.
         if (!owned && id in UNLOCKABLE_WEAPONS) return null;
         const n = s.ammoOf[id];
         return (
@@ -182,14 +184,14 @@ function WeaponBar({ s, compact }: { s: Snapshot; compact: boolean }) {
             key={id}
             disabled={!owned}
             onClick={() => combat.selectWeapon(id)}
-            title={`${w.label} (${i + 1})`}
+            title={`${w.label} (${(i + 1) % 10})`}
             className={`flex h-11 w-11 flex-col items-center justify-center rounded-xl text-xl transition ${
               s.weapon === id ? 'bg-white text-black' : owned ? 'bg-white/10 hover:bg-white/20' : 'bg-white/5 opacity-30'
             }`}
           >
             <Icon name={w.icon} />
             <span className="text-[10px] leading-none tabular-nums opacity-80">
-              <span className="mr-0.5 opacity-60">{i + 1}</span>
+              <span className="mr-0.5 opacity-60">{(i + 1) % 10}</span>
               {owned ? (n === null ? '' : n) : ''}
             </span>
           </button>
@@ -199,9 +201,10 @@ function WeaponBar({ s, compact }: { s: Snapshot; compact: boolean }) {
   );
 }
 
-/** Get back up where you fell: watch an ad, or spend tokens. */
+/** Get back up where you fell: watch an ad, or spend money. */
 function ReviveOptions() {
-  const tokens = useWalletStore((s) => s.tokens);
+  const fmt = useMoneyFormat();
+  const money = useWalletStore((s) => s.money);
   const watching = useWalletStore((s) => s.watching);
   const [message, setMessage] = useState<string | null>(null);
   return (
@@ -215,13 +218,13 @@ function ReviveOptions() {
         {watching ? 'Ad playing…' : 'Watch an ad to get back up'}
       </button>
       <button
-        disabled={tokens < REVIVE_COST}
+        disabled={money < REVIVE_COST}
         className={secondary + ' flex w-full items-center justify-center gap-2 disabled:opacity-40'}
-        onClick={() => setMessage(reviveWithTokens())}
+        onClick={async () => setMessage(await reviveWithMoney())}
       >
         <Icon name="coins" />
-        Get back up for {REVIVE_COST} tokens
-        <span className="text-white/50">({tokens})</span>
+        Get back up for {fmt(REVIVE_COST)}
+        <span className="text-white/50">({fmt(money)})</span>
       </button>
       {message && <p className="text-xs text-amber-300">{message}</p>}
     </div>
@@ -251,9 +254,24 @@ export function CombatHud() {
   const sub = useGameStore((s) => s.roamSubMode);
   const compact = useIsCompact();
   const touch = useIsTouch();
+  const fmt = useMoneyFormat();
   const s = useSnapshot();
 
-  if (mode !== 'roam' || sub === 'peaceful') return null;
+  if (mode !== 'roam') return null;
+  // Peaceful walks have no danger to show, only the weapons and the finds.
+  if (sub === 'peaceful') {
+    return (
+      <>
+        {s.hitMarker > 0.05 && !touch && (
+          <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl text-red-500" style={{ opacity: s.hitMarker }}>
+            <Icon name="close" />
+          </div>
+        )}
+        <Toasts toasts={s.toasts} />
+        {!driving && <WeaponBar s={s} compact={compact} />}
+      </>
+    );
+  }
   const survival = sub === 'survival';
   const days = Math.round(SURVIVAL_HOURS / 24);
 
@@ -353,6 +371,7 @@ export function CombatHud() {
               <Tip icon="flashlight">
                 <b>Torch</b> ({touch ? 'button' : 'L'}) lights the dark but makes you easy to spot.
               </Tip>
+              <Tip icon="bomber">The bomber (0) lobs a bomb: it flattens buildings, uproots trees and leaves craters. Fires spread downwind and rain puts them out. Stay clear of the blast.</Tip>
               <Tip icon="pistol">Gunfire is loud. A taser stuns without a sound. Dragons can be shot down.</Tip>
             </ul>
             <button className={primary} onClick={() => combat.beginRun()}>
@@ -384,7 +403,7 @@ export function CombatHud() {
             <Icon name="sunrise" size={56} />
             <h2 className="text-2xl font-bold">You survived {days} days!</h2>
             <p className="text-sm text-white/80">
-              {s.kills} creature{s.kills === 1 ? '' : 's'} downed, ${s.cash} in your pocket.
+              {s.kills} creature{s.kills === 1 ? '' : 's'} downed, {fmt(s.cash)} in your account.
             </p>
             <div className="flex gap-2">
               <button className={primary} onClick={() => combat.retry()}>

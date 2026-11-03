@@ -1,3 +1,4 @@
+import { CurrencyPicker } from './CurrencyPicker';
 import { useState } from 'react';
 import { SoundSettings } from './SoundSettings';
 import { construction, useConstructionStore } from '../sim/construction';
@@ -75,6 +76,9 @@ export function SettingsPanel() {
       <Toggle label="Walking sway" hint="Camera bob while you walk" checked={graphics.headBob} onChange={(headBob) => setGraphics({ headBob })} />
       <div className="border-t border-white/10 pt-3">
         <SoundSettings />
+      </div>
+      <div className="border-t border-white/10 pt-3">
+        <CurrencyPicker />
       </div>
       <Toggle label="Show FPS" checked={graphics.showFps} onChange={(showFps) => setGraphics({ showFps })} />
 

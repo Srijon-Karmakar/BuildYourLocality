@@ -9,13 +9,13 @@ export interface ForestBrush {
   density: number;
   /** Kinds of tree to mix. */
   species: PieceType[];
-  /** 0 = every tree full size, 1 = anything from small to large. */
+  /** 0 = every tree full size, 1 = anything from small to very tall. */
   sizeVariety: number;
   /** Plant new trees, or take them away. */
   mode: 'plant' | 'clear';
 }
 
-export const DEFAULT_FOREST: ForestBrush = { radius: 4, density: 0.6, species: ['tree', 'pine', 'birch'], sizeVariety: 0.5, mode: 'plant' };
+export const DEFAULT_FOREST: ForestBrush = { radius: 4, density: 0.6, species: ['tree', 'pine', 'birch'], sizeVariety: 0.8, mode: 'plant' };
 
 /** Closest two trees may stand, in metres, so the forest looks natural and not like a single clump. */
 const SPACING = 2.1;
@@ -66,7 +66,12 @@ export function plantForest(x: number, z: number, brush: ForestBrush, dragging: 
       roof: 'gravel',
       offset: [Math.round((px - (gx + 0.5) * CELL) * 10) / 10, Math.round((pz - (gz + 0.5) * CELL) * 10) / 10],
     };
-    if (brush.sizeVariety > 0) piece.scale = Math.round((1 + (Math.random() - 0.5) * brush.sizeVariety * 1.1) * 100) / 100;
+    if (brush.sizeVariety > 0) {
+      // Trees: most are mid-size, a good share tower over the rest (0.7x - 2.8x before the variety slider).
+      // Grass and flowers keep a gentle spread.
+      const raw = isGrass(type) ? 1 + (Math.random() - 0.5) * 1.1 : 0.7 + 2.1 * Math.random() ** 1.6;
+      piece.scale = Math.round(Math.min(3, Math.max(0.5, 1 + (raw - 1) * brush.sizeVariety)) * 100) / 100;
+    }
     planted.push(piece);
     taken.push([px, pz, mine]);
   }

@@ -22,6 +22,10 @@ import { PieceModel, RoadModel } from '../../city/models';
 import { isDragTool, useBuilderStore, type BuilderTool } from '../../state/useBuilderStore';
 import { clearForest, plantForest } from '../../city/forest';
 import { WallModel } from '../../city/WallModel';
+import { SpanHighlight, SpanModel } from '../../city/SpanModel';
+import { spanNear } from '../../city/spanSurface';
+import { MAX_SPAN_LENGTH, SPAN_PRESETS, pathLength } from '../../city/spans';
+import { MIN_SPAN_LENGTH, commitSpanDraft, placeTemplate, snapSpanPoint, templatePoints } from '../../city/spanTool';
 import { edgeCentre, edgeNear, resolveWall, type Edge } from '../../city/walls';
 import { roadMaskAt, topIdAt, useCityStore, wallNear, type Piece } from '../../state/useCityStore';
 import { useGameStore } from '../../state/useGameStore';
@@ -48,7 +52,7 @@ interface Hover {
 }
 
 const isPlaceTool = (tool: BuilderTool): tool is PieceType =>
-  tool !== 'bulldoze' && tool !== 'paint' && tool !== 'select' && tool !== 'move' && tool !== 'terrain' && tool !== 'forest' && tool !== 'wall';
+  tool !== 'bulldoze' && tool !== 'paint' && tool !== 'select' && tool !== 'move' && tool !== 'terrain' && tool !== 'forest' && tool !== 'wall' && tool !== 'span';
 
 /** Turns a model translucent and tints it green (can place) or red (blocked). */
 function ghostify(root: THREE.Object3D, valid: boolean) {
@@ -92,6 +96,7 @@ function pieceHeight(piece: Piece): number {
 
 /** Translucent box over a piece's footprint, used to show what a tool would act on. */
 function PieceHighlight({ piece, color, opacity }: { piece: Piece; color: string; opacity: number }) {
+  if (piece.type === 'span') return <SpanHighlight piece={piece} color={color} opacity={opacity} />;
   if (piece.type === 'wall') {
     const c = edgeCentre({ gx: piece.gx, gz: piece.gz, rot: piece.rot as 0 | 1 }, CELL);
     const spec = resolveWall(piece.wall);
@@ -222,6 +227,9 @@ export function CityBuilder() {
   const brushRadius = useBuilderStore((s) => s.brushRadius);
   const forestRadius = useBuilderStore((s) => s.forest.radius);
   const wall = useBuilderStore((s) => s.wall);
+  const spanBrush = useBuilderStore((s) => s.span);
+  const spanDraft = useBuilderStore((s) => s.spanDraft);
+  const spanPreset = useBuilderStore((s) => s.spanPreset);
   const selectedId = useBuilderStore((s) => s.selectedId);
   const selectedIds = useBuilderStore((s) => s.selectedIds);
   const selectedBlock = useBuilderStore((s) => s.selectedBlock);
@@ -262,8 +270,20 @@ export function CityBuilder() {
     const cellId = city.occupancy[`${h.hx},${h.hz}`];
     // A wall runs along a cell edge, so clicking beside it (within a metre or so) means the wall.
     const wallHit = b.tool === 'select' || b.tool === 'bulldoze' ? wallNear(city.pieces, h.px, h.pz, 1.3) : undefined;
-    const topId = wallHit?.id ?? topIdAt(city.pieces, city.occupancy, h.hx, h.hz);
-    if (b.tool === 'wall') {
+    // A bridge is picked by its deck, which can pass over a road or a building.
+    const spanHit = !wallHit && (b.tool === 'select' || b.tool === 'bulldoze') ? spanNear(h.px, h.pz, 1) : undefined;
+    const topId = wallHit?.id ?? spanHit?.id ?? topIdAt(city.pieces, city.occupancy, h.hx, h.hz);
+    if (b.tool === 'span') {
+      const [sx, sz] = snapSpanPoint(h.px, h.pz);
+      if (SPAN_PRESETS.find((p) => p.id === b.spanPreset)?.template) placeTemplate(h.px, h.pz, b.rotation);
+      else {
+        const last = b.spanDraft[b.spanDraft.length - 1];
+        // Clicking the last point again finishes the bridge.
+        if (last && Math.hypot(last[0] - sx, last[1] - sz) < 4) {
+          if (b.spanDraft.length >= 2) commitSpanDraft();
+        } else b.addSpanPoint([sx, sz]);
+      }
+    } else if (b.tool === 'wall') {
       // Drawing over an existing wall restyles it; elsewhere a new one goes up.
       const existing = Object.values(city.pieces).find((p) => p.type === 'wall' && p.gx === h.edge.gx && p.gz === h.edge.gz && p.rot === h.edge.rot);
       if (existing) city.updatePiece(existing.id, { wall: { ...b.wall } });
@@ -289,6 +309,7 @@ export function CityBuilder() {
     } else if (b.tool === 'bulldoze') {
       if (topId && topId === b.selectedId) b.select(null);
       if (wallHit) city.removeById(wallHit.id);
+      else if (spanHit) city.removeById(spanHit.id);
       else city.removeAt(h.hx, h.hz);
     } else if (b.tool === 'paint') {
       const target = cellId ? city.pieces[cellId] : undefined;
@@ -444,7 +465,7 @@ export function CityBuilder() {
       if (!point) return;
       const b = useBuilderStore.getState();
       const h = hoverFromPoint(point.x, point.z);
-      if (b.tool === 'select') {
+      if (b.tool === 'select' || b.tool === 'span') {
         apply(h);
         return;
       }
@@ -473,6 +494,22 @@ export function CityBuilder() {
         city.redo();
         return;
       }
+      // Drawing a bridge: Enter builds it, Backspace takes back a point, Escape drops the lot.
+      if (b.tool === 'span' && b.spanDraft.length > 0) {
+        if (e.code === 'Enter') {
+          commitSpanDraft();
+          return;
+        }
+        if (e.code === 'Backspace') {
+          e.preventDefault();
+          b.popSpanPoint();
+          return;
+        }
+        if (e.code === 'Escape') {
+          b.clearSpanDraft();
+          return;
+        }
+      }
       if (e.code === 'KeyR' && !e.repeat) b.rotate();
       if (e.code === 'Escape') {
         if (b.movingId) b.cancelMove();
@@ -491,7 +528,7 @@ export function CityBuilder() {
           b.select(null);
         } else if (hoverRef.current) {
           const hovered = hoverRef.current;
-          const wall = wallNear(city.pieces, hovered.px, hovered.pz, 1.3);
+          const wall = wallNear(city.pieces, hovered.px, hovered.pz, 1.3) ?? spanNear(hovered.px, hovered.pz, 1);
           const id = wall?.id ?? topIdAt(city.pieces, city.occupancy, hovered.hx, hovered.hz);
           if (id && id === b.selectedId) b.select(null);
           if (wall) city.removeById(wall.id);
@@ -611,8 +648,51 @@ export function CityBuilder() {
     );
   }
 
+  // The bridge being drawn: the points so far plus the one under the cursor, or a ready-made ramp at the cursor.
+  let spanGhost = null;
+  if (hover && tool === 'span') {
+    const [sx, sz] = snapSpanPoint(hover.px, hover.pz);
+    const preset = SPAN_PRESETS.find((p) => p.id === spanPreset);
+    let pts: [number, number][] | null = null;
+    if (preset?.template) pts = templatePoints(hover.px, hover.pz, rotation);
+    else if (spanDraft.length > 0) {
+      const last = spanDraft[spanDraft.length - 1];
+      pts = last[0] === sx && last[1] === sz ? spanDraft : [...spanDraft, [sx, sz]];
+    }
+    if (pts && pts.length >= 2) {
+      const gx = Math.floor(pts[0][0] / CELL);
+      const gz = Math.floor(pts[0][1] / CELL);
+      const rel = pts.map(([x, z]): [number, number] => [x - (gx + 0.5) * CELL, z - (gz + 0.5) * CELL]);
+      const length = pathLength(pts);
+      const ok = length >= MIN_SPAN_LENGTH && length <= MAX_SPAN_LENGTH && pts.length <= 40;
+      const { pts: _unused, ...brush } = spanBrush;
+      void _unused;
+      spanGhost = (
+        <group ref={ghostRef} position={[(gx + 0.5) * CELL, 0.02, (gz + 0.5) * CELL]} userData={{ ok }}>
+          <SpanModel spec={{ ...brush, pts: rel }} gx={gx} gz={gz} />
+        </group>
+      );
+    } else {
+      spanGhost = (
+        <mesh position={[sx, 0.4, sz]}>
+          <cylinderGeometry args={[0.7, 0.7, 0.8, 16]} />
+          <meshBasicMaterial color="#22ff77" transparent opacity={0.8} />
+        </mesh>
+      );
+    }
+  }
+  const spanMarkers =
+    tool === 'span'
+      ? spanDraft.map(([x, z], i) => (
+          <mesh key={i} position={[x, 0.6, z]}>
+            <sphereGeometry args={[0.7, 12, 8]} />
+            <meshBasicMaterial color="#ffd23f" depthTest={false} />
+          </mesh>
+        ))
+      : null;
+
   const gridAt = touchGhost ? shown : hover;
-  const hoveredWall = hover && (tool === 'select' || tool === 'bulldoze') ? wallNear(pieces, hover.px, hover.pz, 1.3) : undefined;
+  const hoveredWall = hover && (tool === 'select' || tool === 'bulldoze') ? (wallNear(pieces, hover.px, hover.pz, 1.3) ?? spanNear(hover.px, hover.pz, 1)) : undefined;
   const target = hoveredWall ?? (hover ? pieces[topIdAt(pieces, occupancy, hover.hx, hover.hz) ?? ''] : undefined);
   const selected = selectedId ? pieces[selectedId] : undefined;
   const targetable =
@@ -627,6 +707,8 @@ export function CityBuilder() {
       {hover && tool === 'forest' && <BrushRing x={hover.px} z={hover.pz} radius={forestRadius * CELL} />}
       {ghost}
       {wallGhost}
+      {spanGhost}
+      {spanMarkers}
       {selectedIds.length > 1 && selectedIds.map((id) => (pieces[id] ? <PieceHighlight key={id} piece={pieces[id]} color="#ffd23f" opacity={0.22} /> : null))}
       {selectedIds.length <= 1 && selected && <PieceHighlight piece={selected} color="#ffffff" opacity={0.16} />}
       {marquee && (

@@ -216,6 +216,7 @@ export function buildWorld(pieces: Piece[]): SimWorld {
   const doorCandidates: { piece: Piece; x: number; z: number; outX: number; outZ: number }[] = [];
 
   for (const piece of pieces) {
+    if (piece.type === 'span') continue; // bridges are driven and walked on by position, not as grid cells
     const def = PIECES[piece.type];
     const cells = footprintCells(piece.type, piece.gx, piece.gz, piece.rot, piece.lot);
     const [w, d] = pieceFootprint(piece);

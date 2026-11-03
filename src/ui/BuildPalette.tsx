@@ -14,6 +14,8 @@ import { useCityStore } from '../state/useCityStore';
 import { useGameStore } from '../state/useGameStore';
 import { BRUSHES, type BrushId } from '../terrain/terrain';
 import { WALL_STYLES, type WallStyleId } from '../city/walls';
+import { SPAN_PRESETS } from '../city/spans';
+import { SpanSettings } from './SpanSettings';
 import { WallSettings } from './WallSettings';
 import { RoadSettings } from './RoadSettings';
 import { ForestSettings } from './ForestSettings';
@@ -35,6 +37,8 @@ interface Item {
   brush?: BrushId;
   /** Wall items share the 'wall' tool and differ by material. */
   wallStyle?: WallStyleId;
+  /** Bridge items share the 'span' tool and differ by preset. */
+  spanPreset?: string;
 }
 
 const ICON_BY_TOOL: Partial<Record<BuilderTool, string>> = {
@@ -44,6 +48,7 @@ const ICON_BY_TOOL: Partial<Record<BuilderTool, string>> = {
 const ITEMS: Record<Tab, Item[]> = {
   terrain: BRUSHES.map((b) => ({ id: 'terrain' as const, label: b.label, icon: b.icon, brush: b.id })),
   roads: [],
+  bridges: SPAN_PRESETS.map((p) => ({ id: 'span' as const, label: p.label, icon: p.icon, spanPreset: p.id })),
   buildings: [],
   nature: [],
   walls: WALL_STYLES.map((s) => ({ id: 'wall' as const, label: s.label, icon: s.icon, wallStyle: s.id })),
@@ -57,7 +62,7 @@ const ITEMS: Record<Tab, Item[]> = {
     { id: 'bulldoze', label: 'Delete' },
   ],
 };
-for (const type of PIECE_TYPES) ITEMS[PIECES[type].category].push({ id: type, label: PIECES[type].label });
+for (const type of PIECE_TYPES) if (type !== 'span') ITEMS[PIECES[type].category].push({ id: type, label: PIECES[type].label });
 ITEMS.nature.push({ id: 'forest', label: 'Forest brush', icon: 'woods' });
 
 const swatchClass = (active: boolean) =>
@@ -103,13 +108,14 @@ function ControlsHint({ touch }: { touch: boolean }) {
 /** The tool dock: scrollable item row, category tabs, undo/redo, plus the material picker. */
 export function BuildPalette() {
   const mode = useGameStore((s) => s.mode);
-  const { tool, brush, facade, roof, selectedId, multiSelect, setMultiSelect, roadSpec, roadPreset, setTool, setBrush, setFacade, setRoof, setRoadSpec, applyRoadPreset, wall, applyWallStyle, hand, setHand } = useBuilderStore();
+  const { tool, brush, facade, roof, selectedId, multiSelect, setMultiSelect, roadSpec, roadPreset, setTool, setBrush, setFacade, setRoof, setRoadSpec, applyRoadPreset, wall, applyWallStyle, spanPreset, applySpanPreset, hand, setHand } = useBuilderStore();
   const activate = (item: Item) => {
     setTool(item.id);
     if (item.brush) setBrush(item.brush);
     if (item.wallStyle) applyWallStyle(item.wallStyle);
+    if (item.spanPreset) applySpanPreset(item.spanPreset);
   };
-  const isActive = (item: Item) => tool === item.id && (!item.brush || brush === item.brush) && (!item.wallStyle || wall.style === item.wallStyle);
+  const isActive = (item: Item) => tool === item.id && (!item.brush || brush === item.brush) && (!item.wallStyle || wall.style === item.wallStyle) && (!item.spanPreset || spanPreset === item.spanPreset);
   const [tab, setTab] = useState<Tab>('roads');
   const [materialsOpen, setMaterialsOpen] = useState(false);
   const undo = useCityStore((s) => s.undo);
@@ -132,6 +138,7 @@ export function BuildPalette() {
         setTool(item.id);
         if (item.brush) setBrush(item.brush);
         if (item.wallStyle) useBuilderStore.getState().applyWallStyle(item.wallStyle);
+        if (item.spanPreset) useBuilderStore.getState().applySpanPreset(item.spanPreset);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -150,11 +157,14 @@ export function BuildPalette() {
   const terrainTool = tool === 'terrain';
   const forestTool = tool === 'forest';
   const wallTool = tool === 'wall';
-  const showMaterials = roadTool || terrainTool || forestTool || wallTool || tool === 'paint' || (tool in PIECES && PIECES[tool as PieceType].paintable);
+  const spanTool = tool === 'span';
+  const showMaterials = roadTool || terrainTool || forestTool || wallTool || spanTool || tool === 'paint' || (tool in PIECES && PIECES[tool as PieceType].paintable);
   const presetChip = (active: boolean) =>
     `col-span-4 rounded-md px-2 py-2 text-xs transition sm:py-1 ${active ? 'bg-white text-black' : 'bg-white/10 text-white/80 hover:bg-white/20'}`;
 
-  const materials = wallTool ? (
+  const materials = spanTool ? (
+    <SpanSettings />
+  ) : wallTool ? (
     <WallSettings />
   ) : forestTool ? (
     <ForestSettings />
@@ -198,8 +208,8 @@ export function BuildPalette() {
         <SidePanel
           id="materials"
           side="left"
-          title={roadTool ? 'Road options' : terrainTool ? 'Terrain' : forestTool ? 'Forest brush' : wallTool ? 'Wall options' : 'Materials'}
-          className={`pointer-events-auto absolute left-4 top-1/2 flex max-h-[80vh] flex-col gap-2 ${roadTool || terrainTool || forestTool || wallTool ? 'w-64' : ''} -translate-y-1/2 overflow-y-auto rounded-2xl p-3 ${glass}`}
+          title={spanTool ? 'Bridge options' : roadTool ? 'Road options' : terrainTool ? 'Terrain' : forestTool ? 'Forest brush' : wallTool ? 'Wall options' : 'Materials'}
+          className={`pointer-events-auto absolute left-4 top-1/2 flex max-h-[80vh] flex-col gap-2 ${roadTool || terrainTool || forestTool || wallTool || spanTool ? 'w-64' : ''} -translate-y-1/2 overflow-y-auto rounded-2xl p-3 ${glass}`}
         >
           {materials}
         </SidePanel>

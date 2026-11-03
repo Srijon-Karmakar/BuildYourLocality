@@ -20,7 +20,7 @@ const FIRST_BAKE_BUDGET_MS = 40;
 const SCAN_FRAMES = 4;
 
 /** Pieces whose parts move on their own (barrier arms, crane boom) stay live, as ordinary meshes. */
-const MOVING = new Set<Piece['type']>(['crossing', 'portcrane']);
+const MOVING = new Set<Piece['type']>(['crossing', 'portcrane', 'span']);
 
 const chunkOf = (gx: number, gz: number) => `${Math.floor(gx / CHUNK_CELLS)},${Math.floor(gz / CHUNK_CELLS)}`;
 

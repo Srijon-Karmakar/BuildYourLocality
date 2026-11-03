@@ -48,7 +48,7 @@ export interface Piece extends StyleOverrides {
 export const cellKey = (gx: number, gz: number) => `${gx},${gz}`;
 
 /** Overlays and walls stand over or beside other things instead of taking their cell. */
-export const claimsCell = (type: PieceType) => !isOverlay(type) && type !== 'wall';
+export const claimsCell = (type: PieceType) => !isOverlay(type) && type !== 'wall' && type !== 'span';
 
 const overlayCache = new WeakMap<Record<string, Piece>, Map<string, string[]>>();
 
@@ -224,6 +224,7 @@ export type PiecePatch = Partial<
     | 'bands'
     | 'tree'
     | 'wall'
+    | 'span'
     | 'sign'
     | 'accent'
     | 'scale'
@@ -310,6 +311,8 @@ export const useCityStore = create<CityState>((set, get) => {
     canPlace: (type, gx, gz, rot, lot, ignoreId, road) => {
       const { occupancy, pieces } = get();
       const cells = footprintCells(type, gx, gz, rot, lot);
+      // A bridge stands over whatever is below it.
+      if (type === 'span') return true;
       if (type === 'wall') {
         // One wall to an edge (placing again restyles it), and never in water.
         const edge = Object.values(pieces).some((p) => p.type === 'wall' && p.gx === gx && p.gz === gz && p.rot === rot && p.id !== ignoreId);
@@ -357,7 +360,7 @@ export const useCityStore = create<CityState>((set, get) => {
         return { ...history, pieces: { ...state.pieces, [id]: placed }, occupancy };
       });
       // Building clears any trees on the plot.
-      useTerrainStore.getState().clearCover(footprintCells(piece.type, piece.gx, piece.gz, piece.rot, piece.lot));
+      if (piece.type !== 'span') useTerrainStore.getState().clearCover(footprintCells(piece.type, piece.gx, piece.gz, piece.rot, piece.lot));
       const placed = get().pieces[id];
       if (placed) for (const listener of placeListeners) listener(placed);
       return true;

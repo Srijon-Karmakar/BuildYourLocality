@@ -16,7 +16,7 @@ const flashMaterial = new THREE.MeshBasicMaterial({ color: '#ffd27a', transparen
 const boltMaterial = new THREE.MeshBasicMaterial({ color: '#7de3ff', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
 
 /** How far in front of the camera each gun's muzzle is, for the flash. */
-const MUZZLE_Z: Partial<Record<WeaponId, number>> = { shotgun: -0.95, rifle: -1.15, smg: -0.7, revolver: -0.55 };
+const MUZZLE_Z: Partial<Record<WeaponId, number>> = { shotgun: -0.95, rifle: -1.15, smg: -0.7, revolver: -0.55, bomber: -1.0 };
 
 /** The weapon held in front of the camera, with a swing / recoil animation. */
 function Viewmodel() {
@@ -32,7 +32,7 @@ function Viewmodel() {
     const r = root.current;
     if (!r) return;
     const p = combat.player;
-    const show = useGameStore.getState().mode === 'roam' && combat.active && p.alive && !p.shelter && !vehicle.active;
+    const show = useGameStore.getState().mode === 'roam' && (combat.active || combat.arms) && p.alive && !p.shelter && !vehicle.active;
     r.visible = show;
     if (!show) return;
 
@@ -202,6 +202,23 @@ function Viewmodel() {
           <boxGeometry args={[0.06, 0.14, 0.07]} />
         </mesh>
       </group>
+      <group ref={setRef('bomber')}>
+        <mesh position={[0, 0.02, -0.4]} rotation={[Math.PI / 2, 0, 0]} material={darkSteel}>
+          <cylinderGeometry args={[0.075, 0.09, 0.95, 14]} />
+        </mesh>
+        <mesh position={[0, 0.02, -0.9]} rotation={[Math.PI / 2, 0, 0]} material={steel}>
+          <cylinderGeometry args={[0.095, 0.075, 0.12, 14]} />
+        </mesh>
+        <mesh position={[0, 0.02, -0.05]} rotation={[Math.PI / 2, 0, 0]} material={steel}>
+          <cylinderGeometry args={[0.11, 0.11, 0.1, 14]} />
+        </mesh>
+        <mesh position={[0, -0.12, -0.2]} rotation={[0.25, 0, 0]} material={grip}>
+          <boxGeometry args={[0.06, 0.2, 0.07]} />
+        </mesh>
+        <mesh position={[0, 0.14, -0.35]} material={taserBody}>
+          <boxGeometry args={[0.03, 0.05, 0.3]} />
+        </mesh>
+      </group>
       <group ref={setRef('taser')}>
         <mesh position={[0, 0, -0.12]} material={taserBody}>
           <boxGeometry args={[0.09, 0.1, 0.3]} />
@@ -285,8 +302,8 @@ export function CombatController() {
     const typing = (e: Event) => e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
     const onKeyDown = (e: KeyboardEvent) => {
       if (typing(e) || useGameStore.getState().mode !== 'roam') return;
-      const digit = /^Digit([1-9])$/.exec(e.code);
-      if (digit) combat.selectWeapon(WEAPON_ORDER[Number(digit[1]) - 1]);
+      const digit = /^Digit([0-9])$/.exec(e.code);
+      if (digit) combat.selectWeapon(WEAPON_ORDER[(Number(digit[1]) + 9) % 10]);
       if (e.code === 'KeyC' || e.code === 'ControlLeft') crouchKey.current = true;
       if (e.code === 'KeyE' && !e.repeat) {
         if (vehicle.active) vehicle.exit();
@@ -332,7 +349,7 @@ export function CombatController() {
     camera.getWorldDirection(dir);
     combat.aim = { x: camera.position.x, y: camera.position.y, z: camera.position.z, dx: dir.x, dy: dir.y, dz: dir.z };
     combat.setCrouch(crouchKey.current || virtualInput.crouch);
-    if ((attackHeld.current || virtualInput.attack) && combat.active) combat.attack();
+    if ((attackHeld.current || virtualInput.attack) && (combat.active || combat.arms)) combat.attack();
   });
 
   return (

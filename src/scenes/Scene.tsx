@@ -24,7 +24,9 @@ import { warmTextures } from '../city/cityTextures';
 import { atmo } from './atmosphere';
 import { NightLights } from './NightLights';
 import { VehicleController } from '../engine/player/VehicleController';
+import { BlastLayer } from './BlastLayer';
 import { vehicle } from '../sim/vehicle';
+import { blast } from '../sim/blast';
 import { AudioDirector } from '../audio/AudioDirector';
 import { NightBloom } from './NightBloom';
 import { ProgramWarmup } from './ProgramWarmup';
@@ -54,7 +56,7 @@ function DevHooks() {
   const three = useThree();
   useEffect(() => {
     if (!import.meta.env.DEV) return;
-    Object.assign(window, { __apna: { vehicle, three, sim, combat, construction, city: useCityStore, game: useGameStore, builder: useBuilderStore, weather: useWeatherStore, terrain: useTerrainStore, viewState } });
+    Object.assign(window, { __apna: { vehicle, three, sim, combat, construction, city: useCityStore, game: useGameStore, builder: useBuilderStore, weather: useWeatherStore, terrain: useTerrainStore, viewState, blast } });
   }, [three]);
   return null;
 }
@@ -223,6 +225,7 @@ export function Scene() {
       <Vegetation />
       <SimLayer />
       <VehicleController bodyRef={playerBodyRef} />
+      <BlastLayer />
       <AudioDirector />
       <Precipitation />
       <NightLights />

@@ -32,6 +32,8 @@ import { darkMetalMaterial, glassDoorMaterial, metalMaterial, plinthMaterial, sl
 import { registerWet } from './nightLights';
 import { PropModel } from './props';
 import { WallModel, wallColliders } from './WallModel';
+import { SpanModel, SpanView } from './SpanModel';
+import type { SpanSpec } from './spans';
 import { resolveWall, type WallSpec } from './walls';
 import { seedFromId as seedOfId, type TreeSpec } from './trees';
 import {
@@ -340,6 +342,7 @@ export function PieceModel({
   accent,
   tree,
   wall,
+  span,
   scale = 1,
   rot = 0,
   road,
@@ -354,6 +357,8 @@ export function PieceModel({
   accent?: string;
   tree?: Partial<TreeSpec>;
   wall?: Partial<WallSpec>;
+  /** Bridges: the design (the group it sits in is at the anchor cell's centre). */
+  span?: Partial<SpanSpec>;
   scale?: number;
   /** Quarter-turns of the piece (traffic lights use it to choose which road they serve). */
   rot?: number;
@@ -364,6 +369,7 @@ export function PieceModel({
   gz?: number;
 }): ReactNode {
   if (type === 'wall') return <WallModel spec={resolveWall(wall)} />;
+  if (type === 'span') return <SpanModel spec={span} gx={gx ?? 0} gz={gz ?? 0} />;
   if (type === 'road') {
     return gx === undefined || gz === undefined ? <RoadModel mask={0} road={road} /> : <ConnectedRoad gx={gx} gz={gz} road={road} />;
   }
@@ -407,6 +413,7 @@ export function PieceModel({
 
 /** A placed piece: its model plus (for solid pieces) fixed colliders for roam mode. */
 export const PieceView = memo(function PieceView({ piece }: { piece: Piece }) {
+  if (piece.type === 'span') return <SpanView piece={piece} />;
   const [w, d] = pieceFootprint(piece);
   const isWall = piece.type === 'wall';
   // A wall stands on a grid edge, not in the middle of its cell.

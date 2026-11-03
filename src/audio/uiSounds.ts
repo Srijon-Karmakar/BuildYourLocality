@@ -7,7 +7,7 @@ import { useWalletStore } from '../state/useWalletStore';
 import { playSfx } from './sounds';
 
 /**
- * The sounds of building and menus: pieces going down, coming away, picks, undo, the menu and tokens.
+ * The sounds of building and menus: pieces going down, coming away, picks, undo, the menu and money.
  * Everything is derived from changes in the stores, so no tool has to know about sound.
  */
 export function startUiSounds(): () => void {
@@ -52,8 +52,8 @@ export function startUiSounds(): () => void {
 
   stops.push(
     useWalletStore.subscribe((state, prev) => {
-      if (state.tokens > prev.tokens) playSfx('token');
-      else if (state.tokens < prev.tokens) playSfx('money');
+      if (state.money > prev.money) playSfx('token');
+      else if (state.money < prev.money) playSfx('money');
     }),
   );
 

@@ -108,6 +108,8 @@ interface TerrainState {
   future: Cells[];
   /** Applies a brush at a world position. Returns true if anything changed. */
   paint: (brush: BrushDef, wx: number, wz: number, radius: number, magnitude: number) => boolean;
+  /** Blasts a crater (a bowl with a low rim) and strips forest cover from it. No undo step. Returns how many cells of woodland were stripped. */
+  crater: (wx: number, wz: number, radiusCells: number, depth: number) => number;
   /** Removes tree/sand/rock cover from these cells (used when something is built there). */
   clearCover: (cells: string[]) => void;
   clear: () => void;
@@ -198,6 +200,41 @@ export const useTerrainStore = create<TerrainState>((set, get) => {
       const history = record();
       set((s) => ({ ...history, cells: next, version: s.version + 1 }));
       return true;
+    },
+
+    crater: (wx, wz, radius, depth) => {
+      const cells = get().cells;
+      const next: Cells = { ...cells };
+      let changed = false;
+      let woods = 0;
+      const cx = wx / CELL - 0.5;
+      const cz = wz / CELL - 0.5;
+      const reach = Math.ceil(radius) + 1;
+      for (let gx = Math.floor(cx) - reach; gx <= Math.floor(cx) + reach; gx++) {
+        for (let gz = Math.floor(cz) - reach; gz <= Math.floor(cz) + reach; gz++) {
+          const d = Math.hypot(gx - cx, gz - cz) / radius;
+          if (d >= 1 || lockProvider(gx, gz)) continue;
+          const key = cellKey(gx, gz);
+          const cur = next[key] ?? {};
+          const h = cur.h ?? 0;
+          // A bowl in the middle, and the earth thrown up into a low rim round it.
+          const bowl = d < 0.78 ? -depth * smooth(1 - d / 0.78) : depth * 0.5 * Math.sin(((d - 0.78) / 0.22) * Math.PI);
+          // The bowl never digs down to the water table, or the crater would fill like a pond: it stays just above the water line.
+          const floor = h >= WATER_LEVEL + 0.1 ? WATER_LEVEL + 0.1 : MIN_HEIGHT;
+          const nh = Math.round(Math.max(floor, Math.min(MAX_HEIGHT, h + bowl)) * 20) / 20;
+          let cover = cur.cover;
+          if (cover === 'forest' || cover === 'jungle') {
+            cover = undefined;
+            woods++;
+          }
+          if (nh === h && cover === cur.cover) continue;
+          changed = true;
+          if (Math.abs(nh) < 0.02 && !cover) delete next[key];
+          else next[key] = { ...(Math.abs(nh) >= 0.02 ? { h: nh } : {}), ...(cover ? { cover } : {}) };
+        }
+      }
+      if (changed) set((s) => ({ cells: next, version: s.version + 1 }));
+      return woods;
     },
 
     clearCover: (keys) => {
