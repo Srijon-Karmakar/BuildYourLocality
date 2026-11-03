@@ -219,8 +219,9 @@ export const useTerrainStore = create<TerrainState>((set, get) => {
           const h = cur.h ?? 0;
           // A bowl in the middle, and the earth thrown up into a low rim round it.
           const bowl = d < 0.78 ? -depth * smooth(1 - d / 0.78) : depth * 0.5 * Math.sin(((d - 0.78) / 0.22) * Math.PI);
-          // The bowl never digs down to the water table, or the crater would fill like a pond: it stays just above the water line.
-          const floor = h >= WATER_LEVEL + 0.1 ? WATER_LEVEL + 0.1 : MIN_HEIGHT;
+          // The first blast on a spot digs down to the water table and stops, leaving a dry hole. Blasting the same spot again
+          // digs below it, and the hole floods.
+          const floor = h > WATER_LEVEL + 0.12 ? WATER_LEVEL + 0.05 : MIN_HEIGHT;
           const nh = Math.round(Math.max(floor, Math.min(MAX_HEIGHT, h + bowl)) * 20) / 20;
           let cover = cur.cover;
           if (cover === 'forest' || cover === 'jungle') {

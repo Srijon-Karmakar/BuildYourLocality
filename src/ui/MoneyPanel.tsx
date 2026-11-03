@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { MONEY_PACKS, PAYMENTS_ENABLED, buyMoneyPack } from '../lib/payments';
-import { AD_COOLDOWN_S, MAX_ADS_PER_DAY, MONEY_PER_AD, REWARDS } from '../lib/rewards';
+import { AD_COOLDOWN_S, MAX_ADS_PER_DAY, MONEY_PER_AD } from '../lib/rewards';
 import { useMoneyFormat } from '../lib/currency';
-import { adBlockedReason, buyReward, redeemCode, watchAdForMoney } from '../lib/wallet';
+import { adBlockedReason, redeemCode, watchAdForMoney } from '../lib/wallet';
 import { combat } from '../sim/combat';
 import { useAuthStore } from '../state/useAuthStore';
+import { useShopStore } from '../state/useShopStore';
 import { useWalletStore } from '../state/useWalletStore';
 import { CurrencyPicker } from './CurrencyPicker';
 import { Icon } from './icons';
@@ -18,7 +19,6 @@ const heading = 'text-[11px] uppercase tracking-wider text-white/45';
 export function MoneyPanel() {
   const fmt = useMoneyFormat();
   const money = useWalletStore((s) => s.money);
-  const unlocks = useWalletStore((s) => s.unlocks);
   const adsToday = useWalletStore((s) => s.adsToday);
   const watching = useWalletStore((s) => s.watching);
   const signedIn = useAuthStore((s) => !!s.session);
@@ -92,38 +92,13 @@ export function MoneyPanel() {
         {!PAYMENTS_ENABLED && <p className="text-[11px] text-white/45">Real-money purchases are not open yet.</p>}
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <span className={heading}>Spend</span>
-        <ul className="flex flex-col gap-1.5">
-          {REWARDS.map((r) => {
-            const owned = !r.repeatable && unlocks.includes(r.id);
-            return (
-              <li key={r.id} className="flex items-center gap-3 rounded-2xl bg-white/5 p-2.5">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-lg">
-                  <Icon name={r.icon} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium">{r.label}</span>
-                  <span className="block text-[11px] leading-snug text-white/50">{r.desc}</span>
-                </span>
-                {owned ? (
-                  <span className="flex items-center gap-1 text-xs text-emerald-300">
-                    <Icon name="check" /> Owned
-                  </span>
-                ) : (
-                  <button
-                    disabled={money < r.cost}
-                    onClick={async () => setMessage(await buyReward(r.id))}
-                    className="flex shrink-0 items-center gap-1 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-black active:bg-white/80 disabled:bg-white/15 disabled:text-white/40"
-                  >
-                    {fmt(r.cost)}
-                  </button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </div>
+      <button
+        onClick={() => useShopStore.getState().show()}
+        className="flex min-h-10 items-center justify-center gap-2 rounded-full bg-white px-4 text-sm font-semibold text-black active:bg-white/80 sm:min-h-0 sm:py-2"
+      >
+        <Icon name="kiosk" />
+        Open the shop
+      </button>
 
       <form
         className="flex flex-col gap-1.5"

@@ -109,6 +109,27 @@ export function spanSurfaceAt(x: number, z: number, refY: number, margin = 1.8):
   return best;
 }
 
+/** Every bridge whose deck passes within `reach` metres of a ground point: how far from its edge, and where on it that is. */
+export function spansNear(x: number, z: number, reach: number): { piece: Piece; distance: number; x: number; y: number; z: number }[] {
+  const out: { piece: Piece; distance: number; x: number; y: number; z: number }[] = [];
+  for (const r of spans()) {
+    const hit = nearest(r, x, z, reach);
+    if (!hit) continue;
+    // Walk back to the point on the path itself.
+    let best = r.path.samples[0];
+    let bestD = Infinity;
+    for (const s of r.path.samples) {
+      const d = Math.hypot(s.x + r.ax - x, s.z + r.az - z);
+      if (d < bestD) {
+        bestD = d;
+        best = s;
+      }
+    }
+    out.push({ piece: r.piece, distance: Math.max(0, hit.distance - r.half), x: best.x + r.ax, y: best.y, z: best.z + r.az });
+  }
+  return out;
+}
+
 /** The bridge whose deck passes within `reach` metres of a ground point, for picking it in build mode. */
 export function spanNear(x: number, z: number, reach: number): Piece | undefined {
   const all = spans();

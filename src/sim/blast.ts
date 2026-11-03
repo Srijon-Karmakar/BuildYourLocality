@@ -1,5 +1,6 @@
 import { CELL, FACADES, FLOOR_H, PIECES, isTreeType, GRASS_TYPES, pieceFootprint, resolveStyle, type Block, type PieceType } from '../city/catalog';
-import { spanSurfaceAt } from '../city/spanSurface';
+import { spanSurfaceAt, spansNear } from '../city/spanSurface';
+import { pathLength, resolveSpan } from '../city/spans';
 import { seedFromId, type TreeSpec } from '../city/trees';
 import { atmo } from '../scenes/atmosphere';
 import { cellKey, overlaysNear, useCityStore, type Piece } from '../state/useCityStore';
@@ -23,6 +24,10 @@ const GRAVITY = 12;
 const MUZZLE_SPEED = 36;
 /** Metres a bomb's blast reaches. */
 const BLAST_RADIUS = 22;
+/** A rocket is quicker and flatter than a lobbed bomb, and its blast is a little smaller. */
+const ROCKET_SPEED = 75;
+const ROCKET_GRAVITY = 1.5;
+const ROCKET_RADIUS = 15;
 /** How fast the shock wave travels, m/s. */
 const SHOCK_SPEED = 95;
 const MAX_BOMBS = 6;
@@ -35,6 +40,8 @@ const MAX_FALLING = 36;
 /** Seconds a scorch mark lasts in dry weather. */
 const SCAR_LIFE = 170;
 const RUBBLE_LIFE = 150;
+/** Structural damage one bomb does to something right beside it. Every building and bridge has a toughness (see `toughness`), and damage adds up from bomb to bomb. */
+const HIT_DAMAGE = 115;
 
 export interface Bomb {
   x: number;
@@ -44,6 +51,8 @@ export interface Bomb {
   vy: number;
   vz: number;
   age: number;
+  /** A rocket flies flat and fast; a bomb is lobbed. */
+  rocket?: boolean;
 }
 
 /** A soft round particle: smoke, dust, flame or ember. */
@@ -182,14 +191,17 @@ class BlastSim {
   time = 0;
   private nextId = 1;
   private events: { t: number; run: () => void }[] = [];
+  /** Damage taken so far by the buildings and bridges that have been hit, and how many floors they had left after the last hit. */
+  private wear = new Map<string, { dmg: number; hp: number; total0: number; keep: number; blocks: Block[] }>();
 
   get busy(): boolean {
     return this.bombs.length > 0 || this.puffs.length > 0 || this.fires.length > 0 || this.waves.length > 0 || this.events.length > 0;
   }
 
-  launch(x: number, y: number, z: number, dx: number, dy: number, dz: number) {
+  launch(x: number, y: number, z: number, dx: number, dy: number, dz: number, rocket = false) {
     if (this.bombs.length >= MAX_BOMBS) return;
-    this.bombs.push({ x, y, z, vx: dx * MUZZLE_SPEED, vy: dy * MUZZLE_SPEED + 2.5, vz: dz * MUZZLE_SPEED, age: 0 });
+    if (rocket) this.bombs.push({ x, y, z, vx: dx * ROCKET_SPEED, vy: dy * ROCKET_SPEED, vz: dz * ROCKET_SPEED, age: 0, rocket: true });
+    else this.bombs.push({ x, y, z, vx: dx * MUZZLE_SPEED, vy: dy * MUZZLE_SPEED + 2.5, vz: dz * MUZZLE_SPEED, age: 0 });
   }
 
   private at(delay: number, run: () => void) {
@@ -210,7 +222,7 @@ class BlastSim {
       let boom = false;
       for (let s = 0; s < steps && !boom; s++) {
         b.age += h;
-        b.vy -= GRAVITY * h;
+        b.vy -= (b.rocket ? ROCKET_GRAVITY : GRAVITY) * h;
         b.x += b.vx * h;
         b.y += b.vy * h;
         b.z += b.vz * h;
@@ -220,7 +232,7 @@ class BlastSim {
       if (Math.random() < 0.7) this.puff(b.x, b.y, b.z, rnd(-0.3, 0.3), rnd(0, 0.4), rnd(-0.3, 0.3), 0.9, 0.35, 1.1, 0.5, 0.5, 0.5, 0.45, false, 0.2);
       if (boom) {
         this.bombs.splice(i, 1);
-        this.detonate(b.x, b.y, b.z);
+        this.detonate(b.x, b.y, b.z, b.rocket ? ROCKET_RADIUS : BLAST_RADIUS);
       }
     }
 
@@ -278,8 +290,7 @@ class BlastSim {
 
   // --- The explosion --------------------------------------------------------------------------
 
-  private detonate(x: number, y: number, z: number) {
-    const R = BLAST_RADIUS;
+  private detonate(x: number, y: number, z: number, R = BLAST_RADIUS) {
     playSfx('explosion', 1, { x, y, z });
     const away = Math.hypot(sim.player.x - x, sim.player.z - z);
     this.shake = Math.max(this.shake, clamp(1 - away / 80, 0, 1));
@@ -289,6 +300,8 @@ class BlastSim {
     const ground = hasTerrain() ? Math.max(heightAt(x, z), 0) : 0;
     const surface = y - ground < 4;
     const editable = !useWorldsStore.getState().readOnly;
+    /** A bigger blast hits harder as well as further. */
+    const power = (R / BLAST_RADIUS) ** 1.5;
 
     // People and creatures feel it as the wave reaches them.
     this.at(0.12, () => combat.blastDamage(x, z, R, 1));
@@ -296,12 +309,26 @@ class BlastSim {
     // A scorch mark, whatever it landed on.
     if (surface) this.scar(x, z, R * 0.8, 0.85);
 
+    // Afterburn: the ground inside the blast keeps burning in patches for a good while, smoking and glowing,
+    // and goes out sooner in rain. Nothing outside the blast radius is touched.
+    if (surface) {
+      this.at(0.7, () => {
+        const patches = Math.round(4 + R * 0.25);
+        for (let i = 0; i < patches; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const d = Math.sqrt(Math.random()) * R * 0.7;
+          this.ignite(x + Math.cos(a) * d, z + Math.sin(a) * d, rnd(1.2, 3), rnd(12, 30), 'ground');
+        }
+      });
+    }
+
     if (!editable) return;
 
-    // The ground: a crater with a rim, and woodland torn out of it.
+    // The ground: a crater with a rim, and woodland torn out of it. It is dug once what stood there has gone
+    // (ground under buildings and roads is held level), and each bomb on the same spot digs deeper.
     if (surface) {
-      this.at(0.1, () => {
-        const woods = useTerrainStore.getState().crater(x, z, 2.3, 1.7);
+      this.at(0.5, () => {
+        const woods = useTerrainStore.getState().crater(x, z, (R / CELL) * 0.7, 2.9 * (R / BLAST_RADIUS));
         for (let i = 0; i < Math.min(26, woods * 4); i++) {
           const a = Math.random() * Math.PI * 2;
           const d = rnd(2, R * 0.9);
@@ -316,7 +343,19 @@ class BlastSim {
     let felled = 0;
     for (const piece of Object.values(city.pieces)) {
       const def = PIECES[piece.type];
-      if (piece.type === 'span' || piece.type === 'road') continue;
+      if (piece.type === 'span') continue;
+      // Roads, rails and runways break up near the middle of the blast (the crater then opens beneath them).
+      if (!def.paintable && (piece.type === 'road' || def.category === 'roads' || def.category === 'transit' || def.category === 'airport' || def.category === 'port')) {
+        const rx = (piece.gx + 0.5) * CELL;
+        const rz = (piece.gz + 0.5) * CELL;
+        const rd = Math.hypot(rx - x, rz - z);
+        if (rd < R * 0.55) {
+          const bucket = buckets[Math.min(3, Math.floor((rd / R) * 4))];
+          bucket.remove.push(piece.id);
+          bucket.fx.push(() => this.shatter(rx, rz, 2, 1.2, 5, { x: (rx - x) / (rd || 1), z: (rz - z) / (rd || 1) }));
+        }
+        continue;
+      }
       const tree = isTreeType(piece.type);
       if (!tree && def.category !== 'buildings' && !def.paintable && piece.type !== 'wall' && def.category !== 'street' && def.category !== 'nature') continue;
 
@@ -328,7 +367,7 @@ class BlastSim {
         const z1 = (piece.gz + d) * CELL;
         const dist = Math.hypot(Math.max(x0 - x, 0, x - x1), Math.max(z0 - z, 0, z - z1));
         if (dist >= R) continue;
-        this.building(piece, dist, x, z, buckets[Math.min(3, Math.floor((dist / R) * 4))]);
+        this.building(piece, dist, x, z, buckets[Math.min(3, Math.floor((dist / R) * 4))], R, power);
         continue;
       }
       const px = piece.type === 'wall' ? (piece.rot === 0 ? (piece.gx + 0.5) * CELL : piece.gx * CELL) : (piece.gx + 0.5) * CELL + (piece.offset?.[0] ?? 0);
@@ -358,6 +397,31 @@ class BlastSim {
       }
     }
 
+    // Bridges: worn down by each blast near them, and gone when they have taken all they can.
+    for (const hit of spansNear(x, z, R)) {
+      const key = hit.piece.id;
+      const spec = resolveSpan(hit.piece.span);
+      let rec = this.wear.get(key);
+      if (!rec) {
+        rec = { dmg: 0, hp: 320 + pathLength(spec.pts) * 1.2, total0: 1, keep: 1, blocks: [] };
+        this.wear.set(key, rec);
+      }
+      rec.dmg += HIT_DAMAGE * power * Math.max(0, 1 - hit.distance / R) ** 1.1;
+      const bucket = buckets[Math.min(3, Math.floor((hit.distance / R) * 4))];
+      const gy = Math.max(0, hasTerrain() ? heightAt(hit.x, hit.z) : 0);
+      if (rec.dmg >= rec.hp) {
+        this.wear.delete(key);
+        bucket.remove.push(key);
+        bucket.fx.push(() => {
+          this.shatter(hit.x, hit.z, 10, Math.max(2, hit.y - gy), 40);
+          this.dust(hit.x, gy, hit.z, 3, Math.max(2, hit.y - gy));
+          playSfx('collapse', 0.9, { x: hit.x, z: hit.z });
+        });
+      } else {
+        bucket.fx.push(() => this.shatter(hit.x, hit.z, 4, Math.max(1.5, hit.y - gy), 8));
+      }
+    }
+
     buckets.forEach((bucket, i) => {
       if (bucket.remove.length === 0 && bucket.patch.size === 0 && bucket.fx.length === 0) return;
       this.at(0.14 + ((i + 0.5) * R) / 4 / SHOCK_SPEED, () => {
@@ -370,21 +434,31 @@ class BlastSim {
   }
 
   /** Works out what a blast does to one building: nothing much, a few storeys, or the lot. */
-  private building(piece: Piece, dist: number, bx: number, bz: number, bucket: { remove: string[]; patch: Map<string, Partial<Piece>>; fx: (() => void)[] }) {
-    const R = BLAST_RADIUS;
+  private building(piece: Piece, dist: number, bx: number, bz: number, bucket: { remove: string[]; patch: Map<string, Partial<Piece>>; fx: (() => void)[] }, R: number, power: number) {
     const style = resolveStyle(piece.type, piece);
     const total = this.floorsOf(style.blocks);
     const frac = 1 - dist / R;
+    // Every building has a toughness, and damage builds up: a shed gives in to one bomb, a skyscraper takes a whole stock.
+    let rec = this.wear.get(piece.id);
+    if (!rec || rec.keep !== total) {
+      rec = { dmg: 0, hp: this.toughness(piece, total), total0: total, keep: total, blocks: style.blocks };
+      this.wear.set(piece.id, rec);
+    }
+    rec.dmg += HIT_DAMAGE * power * Math.max(0, frac) ** 1.1;
+    const worn = Math.min(1, rec.dmg / rec.hp);
     const [w, d] = pieceFootprint(piece);
     const cx = (piece.gx + w / 2) * CELL;
     const cz = (piece.gz + d / 2) * CELL;
     const away = Math.hypot(cx - bx, cz - bz) || 1;
     const dir = { x: (cx - bx) / away, z: (cz - bz) / away };
     const reach = Math.max(w, d) * CELL;
-    const lost = total * Math.min(1.3, frac * 1.6);
-    const destroy = lost >= total - 0.5 || (total <= 2 && frac > 0.3);
+    // The top floors come away as the damage mounts, measured against what the building was before the first hit.
+    const keepNow = Math.max(1, Math.ceil(rec.total0 * (1 - worn)));
+    const lost = total - keepNow;
+    const destroy = rec.dmg >= rec.hp;
 
     if (destroy) {
+      this.wear.delete(piece.id);
       bucket.remove.push(piece.id);
       bucket.fx.push(() => this.collapse(piece, cx, cz, w * CELL, d * CELL, total, dir));
       return;
@@ -392,12 +466,14 @@ class BlastSim {
     const floorsLost = Math.floor(lost);
     if (floorsLost >= 1) {
       const keep = total - floorsLost;
-      const blocks = this.cutBlocks(style.blocks, keep);
+      const blocks = this.cutBlocks(rec.blocks, keep);
       if (blocks.length === 0) {
+        this.wear.delete(piece.id);
         bucket.remove.push(piece.id);
         bucket.fx.push(() => this.collapse(piece, cx, cz, w * CELL, d * CELL, total, dir));
         return;
       }
+      rec.keep = keep;
       bucket.patch.set(piece.id, { blocks });
       bucket.fx.push(() => {
         this.shatter(cx, cz, reach * 0.4, keep * FLOOR_H, 10 + floorsLost * 3, dir);
@@ -412,6 +488,12 @@ class BlastSim {
         if (Math.random() < 0.3 * flammableRoof(piece.roof)) this.ignite(cx, cz, 2.5, rnd(8, 14), 'building', piece.id, total * FLOOR_H);
       });
     }
+  }
+
+  /** How much punishment a building takes before it comes down: more for tall buildings and for big ones. */
+  private toughness(piece: Piece, floors: number): number {
+    const [w, d] = pieceFootprint(piece);
+    return Math.min(2500, 60 + 14 * floors * Math.sqrt(w * d));
   }
 
   /** The blocks of a building with everything above `keep` floors sliced off (crowns go with the top). */

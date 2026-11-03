@@ -15,8 +15,8 @@ import { cellCentre, cellOf, isWalkable } from './world';
 
 // --- Weapons ---------------------------------------------------------------------------------
 
-export type WeaponId = 'fists' | 'bat' | 'pistol' | 'shotgun' | 'taser' | 'revolver' | 'smg' | 'rifle' | 'crossbow' | 'bomber';
-export type AmmoKind = 'bullets' | 'shells' | 'charges' | 'bolts' | 'bombs';
+export type WeaponId = 'fists' | 'bat' | 'pistol' | 'shotgun' | 'taser' | 'revolver' | 'smg' | 'rifle' | 'crossbow' | 'bomber' | 'rocket';
+export type AmmoKind = 'bullets' | 'shells' | 'charges' | 'bolts' | 'bombs' | 'rockets';
 
 export interface WeaponDef {
   id: WeaponId;
@@ -48,17 +48,18 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   revolver: { id: 'revolver', label: 'Revolver', icon: 'revolver', melee: false, damage: 48, range: 70, cooldown: 0.65, ammo: 'bullets', pellets: 1, spread: 0.008, knock: 7, stun: 0.5, noise: 62 },
   smg: { id: 'smg', label: 'SMG', icon: 'smg', melee: false, damage: 11, range: 42, cooldown: 0.09, ammo: 'bullets', pellets: 1, spread: 0.045, knock: 1.5, stun: 0.1, noise: 56 },
   rifle: { id: 'rifle', label: 'Rifle', icon: 'rifle', melee: false, damage: 70, range: 120, cooldown: 0.95, ammo: 'bullets', pellets: 1, spread: 0.002, knock: 9, stun: 0.7, noise: 75 },
+  rocket: { id: 'rocket', label: 'Rocket launcher', icon: 'rocket', melee: false, damage: 140, range: 140, cooldown: 2.0, ammo: 'rockets', pellets: 1, spread: 0, knock: 14, stun: 3, noise: 115 },
   bomber: { id: 'bomber', label: 'Bomber', icon: 'bomber', melee: false, damage: 160, range: 90, cooldown: 1.7, ammo: 'bombs', pellets: 1, spread: 0, knock: 16, stun: 3, noise: 120 },
   crossbow: { id: 'crossbow', label: 'Crossbow', icon: 'crossbow', melee: false, damage: 55, range: 65, cooldown: 1.3, ammo: 'bolts', pellets: 1, spread: 0.004, knock: 4, stun: 0.6, noise: 6 },
 };
-export const WEAPON_ORDER: WeaponId[] = ['fists', 'bat', 'pistol', 'revolver', 'smg', 'shotgun', 'rifle', 'crossbow', 'taser', 'bomber'];
+export const WEAPON_ORDER: WeaponId[] = ['fists', 'bat', 'pistol', 'revolver', 'smg', 'shotgun', 'rifle', 'crossbow', 'taser', 'bomber', 'rocket'];
 
 /** Guns that are bought with tokens: the reward id is the weapon id. They come with ammo at the start of every walk. */
-export const UNLOCKABLE_WEAPONS: Partial<Record<WeaponId, number>> = { shotgun: 12, revolver: 18, smg: 60, rifle: 20, crossbow: 12 };
+export const UNLOCKABLE_WEAPONS: Partial<Record<WeaponId, number>> = { rocket: 4, shotgun: 12, revolver: 18, smg: 60, rifle: 20, crossbow: 12 };
 
-const AMMO_PER_PICKUP: Record<AmmoKind, number> = { bullets: 12, shells: 6, charges: 2, bolts: 4, bombs: 2 };
+const AMMO_PER_PICKUP: Record<AmmoKind, number> = { bullets: 12, shells: 6, charges: 2, bolts: 4, bombs: 3, rockets: 2 };
 /** The bomber starts every walk with this many bombs, and slowly builds more (a bomb every so many seconds) up to the same number. */
-const BOMB_STOCK = 6;
+const BOMB_STOCK = 10;
 const BOMB_REFILL_S = 20;
 
 // --- Entities ---------------------------------------------------------------------------------
@@ -285,8 +286,8 @@ class Combat {
     },
     alive: true,
     weapon: 'fists',
-    owned: { fists: true, bat: true, pistol: false, shotgun: false, taser: false, revolver: false, smg: false, rifle: false, crossbow: false, bomber: false },
-    ammo: { bullets: 0, shells: 0, charges: 0, bolts: 0, bombs: 0 },
+    owned: { fists: true, bat: true, pistol: false, shotgun: false, taser: false, revolver: false, smg: false, rifle: false, crossbow: false, bomber: false, rocket: false },
+    ammo: { bullets: 0, shells: 0, charges: 0, bolts: 0, bombs: 0, rockets: 0 },
     cooldown: 0,
     swing: 0,
     swingHand: 0,
@@ -396,8 +397,8 @@ class Combat {
   private giveLoadout(survival: boolean) {
     const p = this.player;
     p.weapon = 'fists';
-    p.owned = { fists: true, bat: true, pistol: survival, shotgun: false, taser: survival, revolver: false, smg: false, rifle: false, crossbow: false, bomber: true };
-    p.ammo = { bullets: survival ? 16 : 0, shells: 0, charges: survival ? 3 : 0, bolts: 0, bombs: BOMB_STOCK };
+    p.owned = { fists: true, bat: true, pistol: survival, shotgun: false, taser: survival, revolver: false, smg: false, rifle: false, crossbow: false, bomber: true, rocket: false };
+    p.ammo = { bullets: survival ? 16 : 0, shells: 0, charges: survival ? 3 : 0, bolts: 0, bombs: BOMB_STOCK, rockets: 0 };
     const unlocks = useWalletStore.getState().unlocks;
     for (const id of Object.keys(UNLOCKABLE_WEAPONS) as WeaponId[]) {
       if (!unlocks.includes(id)) continue;
@@ -1411,6 +1412,30 @@ class Combat {
 
   // --- Player actions ------------------------------------------------------------------------
 
+  /** A gun bought in the shop during a walk: you carry it straight away, with its starting ammo. */
+  grantWeapon(id: WeaponId) {
+    if (!(this.active || this.arms)) return;
+    const p = this.player;
+    const def = WEAPONS[id];
+    if (!p.owned[id] && def.ammo) p.ammo[def.ammo] += UNLOCKABLE_WEAPONS[id] ?? 0;
+    p.owned[id] = true;
+    this.toast(`${def.label} ready: press its number or tap it in the weapon bar`, 'good');
+  }
+
+  /** Shop service: tops up every gun you carry (a couple of pickups' worth each). */
+  refillAmmo() {
+    const p = this.player;
+    const done = new Set<AmmoKind>();
+    for (const id of WEAPON_ORDER) {
+      const kind = WEAPONS[id].ammo;
+      if (!kind || kind === 'bombs' || !p.owned[id] || done.has(kind)) continue;
+      done.add(kind);
+      p.ammo[kind] += AMMO_PER_PICKUP[kind] * 2;
+    }
+    this.toast(done.size > 0 ? 'Ammo refilled' : 'Nothing to refill: pick up a gun first', done.size > 0 ? 'good' : 'warn');
+    playSfx('pickup');
+  }
+
   selectWeapon(id: WeaponId) {
     const p = this.player;
     if (!p.owned[id] || p.weapon === id) return;
@@ -1471,9 +1496,9 @@ class Combat {
     }
 
     // The bomber lobs a bomb that goes off where it lands (see sim/blast.ts).
-    if (w.id === 'bomber') {
+    if (w.id === 'bomber' || w.id === 'rocket') {
       playSfx('bomb_launch', 1);
-      blast.launch(a.x + a.dx * 0.8, a.y - 0.15 + a.dy * 0.8, a.z + a.dz * 0.8, a.dx, a.dy, a.dz);
+      blast.launch(a.x + a.dx * 0.8, a.y - 0.15 + a.dy * 0.8, a.z + a.dz * 0.8, a.dx, a.dy, a.dz, w.id === 'rocket');
       return true;
     }
 

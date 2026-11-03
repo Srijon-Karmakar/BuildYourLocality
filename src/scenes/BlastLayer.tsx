@@ -355,7 +355,7 @@ export function BlastLayer() {
         <meshStandardMaterial roughness={1} />
       </instancedMesh>
       <instancedMesh ref={ringMesh} args={[undefined, undefined, 4]} frustumCulled={false}>
-        <ringGeometry args={[0.97, 1, 72]} />
+        <ringGeometry args={[0.9, 1, 96]} />
         <meshBasicMaterial transparent depthWrite={false} blending={THREE.AdditiveBlending} side={THREE.DoubleSide} toneMapped={false} />
       </instancedMesh>
       {falling.map((f) => (

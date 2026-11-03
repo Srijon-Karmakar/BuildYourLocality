@@ -14,6 +14,7 @@ import {
   GiWinchesterRifle,
   GiCrossbow,
   GiMissileLauncher,
+  GiRocket,
 } from 'react-icons/gi';
 import {
   LuActivity,
@@ -379,6 +380,7 @@ const ICONS: Record<string, IconType> = {
   rifle: GiWinchesterRifle,
   crossbow: GiCrossbow,
   bomber: GiMissileLauncher,
+  rocket: GiRocket,
   peaceful: LuHandMetal,
   normal: GiPunch,
   survival: GiMonsterGrasp,

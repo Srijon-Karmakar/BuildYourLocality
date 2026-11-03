@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+import { useWalletStore } from './useWalletStore';
+
 export type WeatherKind = 'clear' | 'cloudy' | 'rain' | 'storm' | 'snow' | 'fog';
 /** `auto` lets the sky change by itself; otherwise the chosen weather is held. */
 export type WeatherSetting = 'auto' | WeatherKind;
@@ -62,12 +64,23 @@ export function saveSky(saved: Saved) {
 
 const initial = load();
 
+export const FREE_WEATHER: WeatherSetting[] = ['auto', 'clear', 'cloudy'];
+const owns = (id: string) => useWalletStore.getState().unlocks.includes(id);
+
 export const useWeatherStore = create<WeatherState>((set) => ({
   hour: initial.hour,
   hourSet: 0,
   speed: initial.speed,
   weather: initial.weather,
-  setHour: (hour) => set((s) => ({ hour: ((hour % 24) + 24) % 24, hourSet: s.hourSet + 1 })),
-  setSpeed: (speed) => set({ speed }),
-  setWeather: (weather) => set({ weather }),
+  // Picking the time of day, the day length or stormy weather comes with the shop's sky packs.
+  setHour: (hour) => {
+    if (!owns('sky_pack')) return;
+    set((s) => ({ hour: ((hour % 24) + 24) % 24, hourSet: s.hourSet + 1 }));
+  },
+  setSpeed: (speed) => {
+    if (owns('sky_pack')) set({ speed });
+  },
+  setWeather: (weather) => {
+    if (FREE_WEATHER.includes(weather) || owns('weather_pack')) set({ weather });
+  },
 }));

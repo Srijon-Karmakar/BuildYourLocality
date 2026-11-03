@@ -372,6 +372,7 @@ export function CombatHud() {
                 <b>Torch</b> ({touch ? 'button' : 'L'}) lights the dark but makes you easy to spot.
               </Tip>
               <Tip icon="bomber">The bomber (0) lobs a bomb: it flattens buildings, uproots trees and leaves craters. Fires spread downwind and rain puts them out. Stay clear of the blast.</Tip>
+              <Tip icon="rocket">The rocket launcher (-) fires a rocket that explodes on impact and brings buildings down. Bought in the shop.</Tip>
               <Tip icon="pistol">Gunfire is loud. A taser stuns without a sound. Dragons can be shot down.</Tip>
             </ul>
             <button className={primary} onClick={() => combat.beginRun()}>

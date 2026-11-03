@@ -16,7 +16,7 @@ const flashMaterial = new THREE.MeshBasicMaterial({ color: '#ffd27a', transparen
 const boltMaterial = new THREE.MeshBasicMaterial({ color: '#7de3ff', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
 
 /** How far in front of the camera each gun's muzzle is, for the flash. */
-const MUZZLE_Z: Partial<Record<WeaponId, number>> = { shotgun: -0.95, rifle: -1.15, smg: -0.7, revolver: -0.55, bomber: -1.0 };
+const MUZZLE_Z: Partial<Record<WeaponId, number>> = { shotgun: -0.95, rifle: -1.15, smg: -0.7, revolver: -0.55, bomber: -1.0, rocket: -1.3 };
 
 /** The weapon held in front of the camera, with a swing / recoil animation. */
 function Viewmodel() {
@@ -202,6 +202,23 @@ function Viewmodel() {
           <boxGeometry args={[0.06, 0.14, 0.07]} />
         </mesh>
       </group>
+      <group ref={setRef('rocket')}>
+        <mesh position={[0, 0.02, -0.4]} rotation={[Math.PI / 2, 0, 0]} material={darkSteel}>
+          <cylinderGeometry args={[0.075, 0.075, 1.15, 14]} />
+        </mesh>
+        <mesh position={[0, 0.02, -1.0]} rotation={[-Math.PI / 2, 0, 0]} material={steel}>
+          <coneGeometry args={[0.08, 0.2, 14]} />
+        </mesh>
+        <mesh position={[0, 0.02, 0.2]} rotation={[Math.PI / 2, 0, 0]} material={steel}>
+          <cylinderGeometry args={[0.1, 0.075, 0.14, 14]} />
+        </mesh>
+        <mesh position={[0, -0.1, -0.2]} rotation={[0.2, 0, 0]} material={grip}>
+          <boxGeometry args={[0.06, 0.16, 0.08]} />
+        </mesh>
+        <mesh position={[0, 0.11, -0.45]} material={steel}>
+          <boxGeometry args={[0.03, 0.05, 0.2]} />
+        </mesh>
+      </group>
       <group ref={setRef('bomber')}>
         <mesh position={[0, 0.02, -0.4]} rotation={[Math.PI / 2, 0, 0]} material={darkSteel}>
           <cylinderGeometry args={[0.075, 0.09, 0.95, 14]} />
@@ -304,6 +321,8 @@ export function CombatController() {
       if (typing(e) || useGameStore.getState().mode !== 'roam') return;
       const digit = /^Digit([0-9])$/.exec(e.code);
       if (digit) combat.selectWeapon(WEAPON_ORDER[(Number(digit[1]) + 9) % 10]);
+      // The minus key picks the eleventh weapon (the rocket launcher).
+      if (e.code === 'Minus') combat.selectWeapon(WEAPON_ORDER[10]);
       if (e.code === 'KeyC' || e.code === 'ControlLeft') crouchKey.current = true;
       if (e.code === 'KeyE' && !e.repeat) {
         if (vehicle.active) vehicle.exit();

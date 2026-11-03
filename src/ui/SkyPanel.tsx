@@ -1,5 +1,7 @@
 import { formatHour } from '../scenes/atmosphere';
-import { useWeatherStore, type TimeSpeed, type WeatherSetting } from '../state/useWeatherStore';
+import { useShopStore } from '../state/useShopStore';
+import { useWalletStore } from '../state/useWalletStore';
+import { FREE_WEATHER, useWeatherStore, type TimeSpeed, type WeatherSetting } from '../state/useWeatherStore';
 import { Icon } from './icons';
 import { WEATHER_ICONS, useClock } from './skyShared';
 
@@ -40,10 +42,20 @@ export function SkyPanel() {
   const setSpeed = useWeatherStore((s) => s.setSpeed);
   const setWeather = useWeatherStore((s) => s.setWeather);
   const hour = useClock();
+  const unlocks = useWalletStore((s) => s.unlocks);
+  const timeLocked = !unlocks.includes('sky_pack');
+  const weatherLocked = !unlocks.includes('weather_pack');
+  const openShop = () => useShopStore.getState().show('sky');
 
   return (
     <div className="flex flex-col gap-3 text-xs text-white sm:gap-4 sm:text-sm">
-      <div>
+      {(timeLocked || weatherLocked) && (
+        <button onClick={openShop} className="flex items-center justify-center gap-2 rounded-full bg-amber-400 px-4 py-2 text-xs font-semibold text-black active:bg-amber-300">
+          <Icon name="lock" />
+          {timeLocked && weatherLocked ? 'Unlock time and weather in the shop' : timeLocked ? 'Unlock time control in the shop' : 'Unlock weather in the shop'}
+        </button>
+      )}
+      <div className={timeLocked ? 'pointer-events-none opacity-40' : ''}>
         <div className="mb-1 flex items-baseline justify-between">
           <span className="text-white/60">Time of day</span>
           <span className="font-medium tabular-nums">{formatHour(hour)}</span>
@@ -68,7 +80,7 @@ export function SkyPanel() {
         </div>
       </div>
 
-      <div>
+      <div className={timeLocked ? 'pointer-events-none opacity-40' : ''}>
         <div className="mb-1 text-white/60">Day length</div>
         <div className="grid grid-cols-4 gap-1.5">
           {SPEEDS.map((sp) => (
@@ -82,12 +94,15 @@ export function SkyPanel() {
       <div>
         <div className="mb-1 text-white/60">Weather</div>
         <div className="grid grid-cols-4 gap-1.5">
-          {WEATHERS.map((w) => (
-            <button key={w.id} onClick={() => setWeather(w.id)} className={chip(weather === w.id)}>
-              <Icon name={w.icon} className="text-lg" />
-              {w.label}
-            </button>
-          ))}
+          {WEATHERS.map((w) => {
+            const locked = weatherLocked && !FREE_WEATHER.includes(w.id);
+            return (
+              <button key={w.id} onClick={() => (locked ? openShop() : setWeather(w.id))} className={`${chip(weather === w.id)} ${locked ? 'opacity-50' : ''}`}>
+                <Icon name={locked ? 'lock' : w.icon} className="text-lg" />
+                {w.label}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

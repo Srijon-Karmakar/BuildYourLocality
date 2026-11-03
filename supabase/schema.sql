@@ -375,14 +375,19 @@ create table if not exists public.shop_items (
 );
 alter table public.shop_items enable row level security; -- no policies: only the functions read it
 
+-- 'slot' is the price of the first extra world; each one after costs 50 more (see wallet_buy).
 insert into public.shop_items (id, cost, repeatable) values
-  ('slot', 20, true),
+  ('slot', 100, true),
   ('revive', 15, true),
+  ('ammo', 10, true),
   ('shotgun', 40, false),
   ('revolver', 30, false),
   ('smg', 60, false),
   ('rifle', 80, false),
-  ('crossbow', 50, false)
+  ('crossbow', 50, false),
+  ('rocket', 150, false),
+  ('weather_pack', 120, false),
+  ('sky_pack', 100, false)
 on conflict (id) do update set cost = excluded.cost, repeatable = excluded.repeatable;
 
 -- Internal: a player's wallet as returned to the game. Not callable by players.
@@ -467,10 +472,15 @@ begin
   insert into public.player_limits (user_id) values (uid) on conflict (user_id) do nothing;
   select * into r from public.player_limits where user_id = uid for update;
   if not item.repeatable and p_item = any (r.unlocks) then raise exception 'You already own this.'; end if;
+  -- Extra worlds get dearer: 100, 150, 200 ... for the 1st, 2nd, 3rd extra world.
+  if p_item = 'slot' then
+    if r.extra_worlds >= 100 then raise exception 'You have every world slot.'; end if;
+    item.cost := item.cost + 50 * r.extra_worlds;
+  end if;
   if r.money < item.cost then raise exception 'You need % more.', item.cost - r.money; end if;
   if p_item = 'slot' then
     update public.player_limits set money = money - item.cost, extra_worlds = least(extra_worlds + 1, 100) where user_id = uid;
-  elsif p_item = 'revive' then
+  elsif p_item in ('revive', 'ammo') then
     update public.player_limits set money = money - item.cost where user_id = uid;
   else
     update public.player_limits set money = money - item.cost, unlocks = array_append(unlocks, p_item) where user_id = uid;

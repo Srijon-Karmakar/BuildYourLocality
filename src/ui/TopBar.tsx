@@ -6,6 +6,7 @@ import { Icon } from './icons';
 import { MenuPanel } from './MenuPanel';
 import { ModeBar, ModeToggle } from './ModeBar';
 import { MoneyChip } from './MoneyChip';
+import { ShopButton } from './ShopButton';
 import { OnlineChip } from './OnlineChip';
 import { SiteLinks } from './SiteLinks';
 import { SyncBadge } from './SyncBadge';
@@ -57,6 +58,7 @@ export function TopBar() {
         <div className="flex items-start gap-1.5 sm:gap-2">
           <OnlineChip />
           <MoneyChip />
+          <ShopButton />
           <SyncBadge compact={compact} />
           <SkyChip compact={compact} />
           <AvatarMenu />

@@ -147,7 +147,7 @@ function terrainMaterial(quality: 'low' | 'medium' | 'high'): THREE.MeshStandard
   const { rock, sand } = getTerrainTextures(quality);
 
   material = new THREE.MeshStandardMaterial({ map: grass, normalMap: grassNormal, roughness: 1, metalness: 0 });
-  material.customProgramCacheKey = () => 'terrain-blend-v1';
+  material.customProgramCacheKey = () => 'terrain-blend-v2';
   material.onBeforeCompile = (shader) => {
     shader.uniforms.rockMap = { value: rock };
     shader.uniforms.sandMap = { value: sand };
@@ -169,9 +169,18 @@ function terrainMaterial(quality: 'low' | 'medium' | 'high'): THREE.MeshStandard
         vec3 snowCol = vec3(0.93, 0.95, 0.98);
         float wsum = max(0.001, vBlend.x + vBlend.y + vBlend.z + vBlend.w);
         vec3 terrainCol = (grassCol * vBlend.x + rockCol * vBlend.y + sandCol * vBlend.z + snowCol * vBlend.w) / wsum;
-        float variationAmt = texture2D(variationMap, vMapUv / 16.0).r;
-        diffuseColor.rgb *= terrainCol * mix(1.0, variationAmt, vBlend.x / wsum);
+        diffuseColor.rgb *= terrainCol;
         `,
+      )
+      // The soft light and dark patches multiply over the finished picture, exactly like the plain ground's
+      // overlay does, so edited land and untouched land look the same.
+      .replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+        {
+          float wsum2 = max(0.001, vBlend.x + vBlend.y + vBlend.z + vBlend.w);
+          gl_FragColor.rgb *= mix(vec3(1.0), texture2D(variationMap, vMapUv / 16.0).rgb, vBlend.x / wsum2);
+        }`,
       );
   };
   materialCache.set(quality, material);

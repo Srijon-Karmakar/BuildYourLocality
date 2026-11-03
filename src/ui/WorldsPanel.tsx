@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMoneyFormat } from '../lib/currency';
-import { rewardById, MONEY_PER_AD } from '../lib/rewards';
+import { MONEY_PER_AD } from '../lib/rewards';
+import { slotPrice } from '../lib/shop';
 import { adBlockedReason, buyReward, watchAdForMoney } from '../lib/wallet';
 import { useWalletStore } from '../state/useWalletStore';
 import { createWorld, deleteWorld, leaveVisit, openWorld, renameWorld } from '../lib/sync';
@@ -199,7 +200,7 @@ function MyWorlds() {
     }
   };
 
-  const slotCost = rewardById('slot')?.cost ?? 20;
+  const slotCost = slotPrice(extra);
   const unlock = async () => setMessage(await buyReward('slot'));
   const earn = async () => setMessage(await watchAdForMoney());
 
@@ -231,7 +232,7 @@ function MyWorlds() {
             Unlock a world
             <span className="flex items-center gap-1 font-semibold">
               <Icon name="coins" />
-              {slotCost}
+              {fmt(slotCost)}
             </span>
           </button>
           <button

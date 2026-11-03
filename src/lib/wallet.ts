@@ -1,8 +1,10 @@
-import { combat } from '../sim/combat';
+import { combat, WEAPONS, type WeaponId } from '../sim/combat';
 import { useAuthStore } from '../state/useAuthStore';
 import { useWalletStore } from '../state/useWalletStore';
 import { formatMoney } from './currency';
-import { AD_COOLDOWN_S, MAX_ADS_PER_DAY, MONEY_PER_AD, REVIVE_COST, rewardById } from './rewards';
+import { AD_COOLDOWN_S, MAX_ADS_PER_DAY, MONEY_PER_AD, REVIVE_COST } from './rewards';
+import { priceOf, shopItemById } from './shop';
+import { useWorldsStore } from '../state/useWorldsStore';
 import { showRewardedAd } from './rewardedAd';
 import { grantGuestWorldSlot, setServerWorldSlots } from './sync';
 import { callWallet, type WalletRow } from './worldPersistence';
@@ -218,29 +220,32 @@ export async function redeemCode(code: string): Promise<string> {
 
 export const owns = (id: string) => wallet().unlocks.includes(id);
 
-/** Buys an item with money. Resolves to a message for the player. */
+/** Buys something from the shop. Resolves to a message for the player. */
 export async function buyReward(id: string): Promise<string> {
-  const reward = rewardById(id);
-  if (!reward) return 'Unknown reward.';
+  const item = shopItemById(id);
+  if (!item) return 'Unknown item.';
   const { money, unlocks } = wallet();
-  if (!reward.repeatable && unlocks.includes(id)) return 'You already own this.';
-  if (money < reward.cost) return `You need ${formatMoney(reward.cost - money)} more.`;
+  const price = priceOf(item, useWorldsStore.getState().extraSlots);
+  if (item.kind === 'unlock' && unlocks.includes(id)) return 'You already own this.';
+  if (money < price) return `You need ${formatMoney(price - money)} more.`;
+  // Services only make sense in the right moment, so check before taking any money.
+  if (id === 'ammo' && !(combat.active || combat.arms)) return 'Ammo refills work during a walk.';
+  if (id === 'revive' && !(combat.active && !combat.player.alive)) return 'You can only revive after a knock-out.';
 
   if (uid()) {
     await flushWallet();
     const { wallet: w, error } = await callWallet('wallet_buy', { p_item: id });
     if (!w) return error ?? 'The purchase did not go through.';
     applyServer(w);
-    return reward.id === 'slot' ? 'World slot unlocked.' : `${reward.label} unlocked.`;
+  } else {
+    useWalletStore.setState({ money: money - price });
+    if (item.kind === 'slot') grantGuestWorldSlot();
+    else if (item.kind === 'unlock') useWalletStore.setState((s) => ({ unlocks: [...s.unlocks, id] }));
   }
-
-  useWalletStore.setState({ money: money - reward.cost });
-  if (reward.id === 'slot') {
-    grantGuestWorldSlot();
-    return 'World slot unlocked.';
-  }
-  useWalletStore.setState((s) => ({ unlocks: [...s.unlocks, id] }));
-  return `${reward.label} unlocked.`;
+  if (id === 'ammo') combat.refillAmmo();
+  if (item.kind === 'unlock' && id in WEAPONS) combat.grantWeapon(id as WeaponId);
+  if (id === 'revive') combat.revive();
+  return item.kind === 'slot' ? 'World slot unlocked.' : item.kind === 'service' ? `${item.label} done.` : `${item.label} unlocked.`;
 }
 
 // --- Reviving -------------------------------------------------------------------------------
