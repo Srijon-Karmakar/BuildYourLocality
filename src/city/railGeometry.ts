@@ -152,6 +152,82 @@ export function railGeometry(mask: number, opts: RailOptions = {}): THREE.Buffer
 
 const metroCache = new Map<number, THREE.BufferGeometry>();
 
+// --- Monorail: twin beams on pylons, high above the street --------------------------------
+
+/** Offset of each beam's centre line from the cell centre (monorails run on the right). */
+export const MONO_OFFSET = 1.25;
+/** Height of the top of the beams, metres. */
+export const MONO_HEIGHT = 7.4;
+const BEAM = '#cfd3d8';
+const BEAM_DARK = '#8f969e';
+const BEAM_W = 0.9;
+const BEAM_H = 0.7;
+
+const monoCache = new Map<string, THREE.BufferGeometry>();
+
+/** Elevated monorail track for one cell: a pylon at the middle, two guideway beams, and (at a station) a platform. */
+export function monorailGeometry(mask: number, station = false): THREE.BufferGeometry {
+  const key = `${mask}|${station}`;
+  const hit = monoCache.get(key);
+  if (hit) return hit;
+
+  const parts: Part[] = [];
+  const top = MONO_HEIGHT;
+  const y = top - BEAM_H;
+  const arms = ARMS.filter(([bit]) => mask & bit);
+  const count = arms.length;
+  const straightNS = count <= 2 && !(mask & (E | W)) && (mask & (N | S)) !== 0;
+  const straightEW = count <= 2 && !(mask & (N | S)) && (mask & (E | W)) !== 0;
+  const corner = count === 2 && !straightNS && !straightEW;
+  const alongX = straightEW;
+  const half = CELL / 2;
+
+  // Pylon with a cross girder carrying the beams.
+  parts.push(slab(0.9, 0.9, 0, 0, 0, y - 0.5, BEAM_DARK));
+  parts.push(alongX ? slab(1.0, MONO_OFFSET * 2 + BEAM_W, 0, 0, y - 0.5, 0.5, BEAM_DARK) : slab(MONO_OFFSET * 2 + BEAM_W, 1.0, 0, 0, y - 0.5, 0.5, BEAM_DARK));
+
+  if (corner) {
+    const c = cornerOf(mask);
+    for (const side of [-1, 1]) {
+      const r = CELL / 2 + side * MONO_OFFSET;
+      parts.push(sector(c.px, c.pz, r - BEAM_W / 2, r + BEAM_W / 2, c.phi0, c.phi1, y, BEAM_H, BEAM));
+    }
+  } else if (count >= 3 || count === 0) {
+    const list = count === 0 ? [ARMS[0], ARMS[2]] : arms;
+    for (const [, dx, dz] of list) {
+      const sign = dx !== 0 ? dx : dz;
+      for (const side of [-1, 1]) {
+        const off = side * MONO_OFFSET;
+        const len = half;
+        const mid = (sign * half) / 2;
+        parts.push(dx !== 0 ? slab(len, BEAM_W, mid, off, y, BEAM_H, BEAM) : slab(BEAM_W, len, off, mid, y, BEAM_H, BEAM));
+      }
+    }
+  } else {
+    for (const side of [-1, 1]) {
+      const off = side * MONO_OFFSET;
+      parts.push(alongX ? slab(CELL, BEAM_W, 0, off, y, BEAM_H, BEAM) : slab(BEAM_W, CELL, off, 0, y, BEAM_H, BEAM));
+    }
+  }
+
+  if (station) {
+    // A raised platform between and beside the beams, with a roof.
+    const long = CELL - 0.4;
+    const base = top + 0.05;
+    parts.push(alongX ? slab(long, 4.4, 0, 0, y - 0.1, 0.5, '#b9bdc2') : slab(4.4, long, 0, 0, y - 0.1, 0.5, '#b9bdc2'));
+    parts.push(alongX ? slab(long, 0.14, 0, 0, base + 0.5, 0.03, PLATFORM_EDGE) : slab(0.14, long, 0, 0, base + 0.5, 0.03, PLATFORM_EDGE));
+    parts.push(alongX ? slab(4.6, 4.8, 0, 0, base + 3.1, 0.16, ROOF) : slab(4.8, 4.6, 0, 0, base + 3.1, 0.16, ROOF));
+    for (const a of [-2, 2]) {
+      for (const s of [-2.1, 2.1]) parts.push(alongX ? slab(0.12, 0.12, a, s, base + 0.5, 2.6, ROOF) : slab(0.12, 0.12, s, a, base + 0.5, 2.6, ROOF));
+    }
+  }
+
+  const geometry = mergeGeometries(parts)!;
+  parts.forEach((p) => p.dispose());
+  monoCache.set(key, geometry);
+  return geometry;
+}
+
 /** The underground metro line, drawn as glowing dashes on the ground (only shown while building). */
 export function metroGeometry(mask: number): THREE.BufferGeometry {
   const hit = metroCache.get(mask);

@@ -168,9 +168,15 @@ function OnFootControls({ nearCar }: { nearCar: boolean }) {
               </HoldButton>
             )}
           </div>
-          <HoldButton label={flying ? 'Ascend' : 'Jump'} className="h-16 w-16 text-2xl" onHold={(down) => (virtualInput.jump = down)}>
-            <Icon name="up" />
-          </HoldButton>
+          <div className="flex flex-col items-center gap-3">
+            {/* Weapons turn up in peaceful walks too, so there is a trigger here as well. */}
+            <HoldButton label="Attack" className="h-16 w-16 bg-red-600/60 text-3xl" onHold={(down) => (virtualInput.attack = down)}>
+              <Icon name="swords" />
+            </HoldButton>
+            <HoldButton label={flying ? 'Ascend' : 'Jump'} className="h-12 w-12 text-2xl" onHold={(down) => (virtualInput.jump = down)}>
+              <Icon name="up" />
+            </HoldButton>
+          </div>
         </div>
       )}
     </div>

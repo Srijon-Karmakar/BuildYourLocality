@@ -10,6 +10,7 @@ import {
   CELL,
   ROAD_LIKE,
   isOverlay,
+  isCornerType,
   keepsClear,
   crossingArms,
   resolveRoad,
@@ -321,7 +322,7 @@ export const useCityStore = create<CityState>((set, get) => {
       if (isOverlay(type)) {
         // Trees can go over anything that is not a road, track or airfield.
         const under = pieces[occupancy[cells[0]]];
-        if (type !== 'lamp' && under && under.id !== ignoreId && keepsClear(under.type)) return false;
+        if (!isCornerType(type) && under && under.id !== ignoreId && keepsClear(under.type)) return false;
       } else if (!cells.every((key) => !occupancy[key] || occupancy[key] === ignoreId)) return false;
       // The ground must suit it: level for buildings, level or water (a bridge) for roads.
       const suits = ROAD_LIKE.includes(type) ? roadable : buildable;
@@ -337,10 +338,10 @@ export const useCityStore = create<CityState>((set, get) => {
 
     place: (piece) => {
       if (!get().canPlace(piece.type, piece.gx, piece.gz, piece.rot, piece.lot, undefined, piece.road)) return false;
-      // One streetlight to a corner: placing on the same corner again does nothing.
-      if (piece.type === 'lamp' && piece.offset) {
+      // One streetlight (or traffic light) to a corner: placing on the same corner again does nothing.
+      if (isCornerType(piece.type) && piece.offset) {
         const [ox, oz] = piece.offset;
-        const taken = Object.values(get().pieces).some((p) => p.type === 'lamp' && p.gx === piece.gx && p.gz === piece.gz && Math.abs((p.offset?.[0] ?? 0) - ox) < 0.5 && Math.abs((p.offset?.[1] ?? 0) - oz) < 0.5);
+        const taken = Object.values(get().pieces).some((p) => p.type === piece.type && p.gx === piece.gx && p.gz === piece.gz && Math.abs((p.offset?.[0] ?? 0) - ox) < 0.5 && Math.abs((p.offset?.[1] ?? 0) - oz) < 0.5);
         if (taken) return false;
       }
       const id = crypto.randomUUID();
@@ -568,8 +569,10 @@ export function roadMaskAt(
 const sideBit = (dx: number, dz: number) => (dz < 0 ? 1 : dx > 0 ? 2 : dz > 0 ? 4 : 8);
 
 /** Which arms of a piece carry this kind of traffic (roads/rails link everywhere, crossings only their own axis). */
-function armsOf(piece: Piece | undefined, family: 'road' | 'rail' | 'metro' | 'taxi' | 'pier'): number {
+function armsOf(piece: Piece | undefined, family: 'road' | 'rail' | 'metro' | 'taxi' | 'pier' | 'tram' | 'mono'): number {
   if (!piece) return 0;
+  if (family === 'tram') return piece.type === 'tram' || piece.type === 'tramstop' ? 15 : 0;
+  if (family === 'mono') return piece.type === 'monorail' || piece.type === 'monostation' ? 15 : 0;
   if (family === 'road') return piece.type === 'road' ? 15 : piece.type === 'crossing' ? crossingArms(piece.rot, 'road') : 0;
   if (family === 'rail') {
     return piece.type === 'rail' || piece.type === 'station' ? 15 : piece.type === 'crossing' ? crossingArms(piece.rot, 'rail') : 0;
@@ -589,7 +592,7 @@ export function linkedMask(
   occupancy: Record<string, string>,
   gx: number,
   gz: number,
-  family: 'road' | 'rail' | 'metro' | 'taxi' | 'pier',
+  family: 'road' | 'rail' | 'metro' | 'taxi' | 'pier' | 'tram' | 'mono',
 ): number {
   const here = armsOf(pieces[occupancy[cellKey(gx, gz)]], family) || 15;
   let mask = 0;
@@ -605,6 +608,14 @@ export function linkedMask(
 /** Bitmask of connected rail neighbours (track, stations, and level crossings along the rail). */
 export const railMaskAt = (pieces: Record<string, Piece>, occupancy: Record<string, string>, gx: number, gz: number) =>
   linkedMask(pieces, occupancy, gx, gz, 'rail');
+
+/** Bitmask of connected tram-track neighbours (track and stops). */
+export const tramMaskAt = (pieces: Record<string, Piece>, occupancy: Record<string, string>, gx: number, gz: number) =>
+  linkedMask(pieces, occupancy, gx, gz, 'tram');
+
+/** Bitmask of connected monorail neighbours (beam and stations). */
+export const monoMaskAt = (pieces: Record<string, Piece>, occupancy: Record<string, string>, gx: number, gz: number) =>
+  linkedMask(pieces, occupancy, gx, gz, 'mono');
 
 /** Bitmask of connected airfield neighbours (runway, taxiway and apron link to each other). */
 export const taxiMaskAt = (pieces: Record<string, Piece>, occupancy: Record<string, string>, gx: number, gz: number) =>

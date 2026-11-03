@@ -1,5 +1,5 @@
 import { CELL } from '../city/catalog';
-import { TRACK_OFFSET } from '../city/railGeometry';
+import { MONO_OFFSET, TRACK_OFFSET } from '../city/railGeometry';
 import { cellKey } from '../state/useCityStore';
 import { cellPath, samplePath } from './paths';
 import type { Simulation } from './simulation';
@@ -7,10 +7,41 @@ import { DIRS, cellCentre } from './world';
 
 type Cell = [number, number];
 
-/** Length of one carriage slot along the track (a carriage body is a little shorter). */
-export const CARRIAGE = 9;
-export const MAX_TRAINS = 6;
-export const MAX_CARRIAGES = 7;
+/** Which line a vehicle runs on. */
+export type TransitKind = 'rail' | 'tram' | 'mono';
+
+/** How each line looks and behaves. `carriage` is the length of one carriage slot along the track (a body is a little shorter). */
+export interface TransitProfile {
+  carriage: number;
+  /** Offset of the running line from the cell centre. */
+  offset: number;
+  maxTrains: number;
+  minUnits: number;
+  maxUnits: number;
+  speed: [number, number];
+  /** Another vehicle this close (metres) stops a new one appearing. */
+  spacing: number;
+  /** Track cells per vehicle wanted. */
+  perVehicle: number;
+  dwell: [number, number];
+  colours: number[];
+  /** Drawing: how the shared train meshes are scaled for this line, and how high the vehicle rides (metres). */
+  scale: [number, number, number];
+  lift: number;
+}
+
+export const PROFILES: Record<TransitKind, TransitProfile> = {
+  rail: { carriage: 9, offset: TRACK_OFFSET, maxTrains: 6, minUnits: 3, maxUnits: 7, speed: [6.5, 8.5], spacing: 55, perVehicle: 9, dwell: [7, 11], colours: [0xd7263d, 0x1b6ca8, 0x2e933c, 0xf4b942, 0x6a4c93, 0xe36414], scale: [1, 1, 1], lift: 0 },
+  tram: { carriage: 6.6, offset: TRACK_OFFSET, maxTrains: 5, minUnits: 1, maxUnits: 3, speed: [4.2, 5.8], spacing: 26, perVehicle: 6, dwell: [4, 7], colours: [0xf4b942, 0x2e933c, 0xd7263d, 0x3a86ff], scale: [0.86, 0.92, 0.72], lift: 0 },
+  mono: { carriage: 7.2, offset: MONO_OFFSET, maxTrains: 4, minUnits: 2, maxUnits: 4, speed: [7, 9.5], spacing: 40, perVehicle: 8, dwell: [5, 8], colours: [0xe8ecf0, 0x4a8dff, 0x9b5de5, 0x20c997], scale: [0.78, 0.8, 0.8], lift: 7.4 },
+};
+/** The most vehicles and carriages all three lines can have drawn at once. */
+export const MAX_TRANSIT_UNITS = Object.values(PROFILES).reduce((sum, p) => sum + p.maxTrains * p.maxUnits, 0);
+
+/** The classic railway's numbers, kept for the code that still imports them. */
+export const CARRIAGE = PROFILES.rail.carriage;
+export const MAX_TRAINS = PROFILES.rail.maxTrains;
+export const MAX_CARRIAGES = PROFILES.rail.maxUnits;
 
 export interface TrainPose {
   x: number;
@@ -44,7 +75,6 @@ export interface Train {
   poses: TrainPose[];
 }
 
-const TRAIN_COLOURS = [0xd7263d, 0x1b6ca8, 0x2e933c, 0xf4b942, 0x6a4c93, 0xe36414];
 const TRAIL_SPACING = 0.5;
 const ACCEL = 1.6;
 const BRAKE_MAX = 4.5;
@@ -69,13 +99,33 @@ export class TrainSystem {
   private closedUntil = new Map<string, number>();
 
   private readonly sim: Simulation;
+  readonly kind: TransitKind;
+  readonly profile: TransitProfile;
+  private readonly noCells = new Set<string>();
 
-  constructor(sim: Simulation) {
+  constructor(sim: Simulation, kind: TransitKind = 'rail') {
     this.sim = sim;
+    this.kind = kind;
+    this.profile = PROFILES[kind];
   }
 
   private get world() {
     return this.sim.world;
+  }
+
+  /** This line's track cells (key -> connected sides) and its stops. */
+  private get rails(): Map<string, number> {
+    return this.kind === 'rail' ? this.world.rails : this.kind === 'tram' ? this.world.tramRails : this.world.monoRails;
+  }
+  private get stations() {
+    return this.kind === 'rail' ? this.world.stations : this.kind === 'tram' ? this.world.tramStops : this.world.monoStops;
+  }
+  /** Level crossings and road junctions only matter to the railway; the other lines have none. */
+  private get crossings(): Set<string> {
+    return this.kind === 'rail' ? this.world.levelCrossings : this.noCells;
+  }
+  private get junctionCells(): Set<string> {
+    return this.kind === 'rail' ? this.world.junctions : this.noCells;
   }
 
   private dirIndex(a: Cell, b: Cell): number {
@@ -83,7 +133,7 @@ export class TrainSystem {
   }
 
   private pickNext(prev: Cell, cur: Cell): Cell | null {
-    const mask = this.world.rails.get(cellKey(cur[0], cur[1])) ?? 0;
+    const mask = this.rails.get(cellKey(cur[0], cur[1])) ?? 0;
     const incoming = this.dirIndex(prev, cur);
     if (incoming < 0) return null;
     const back = (incoming + 2) % 4;
@@ -102,11 +152,11 @@ export class TrainSystem {
   /** A station platform that the train should stop at (the last platform cell it reaches). */
   private isTerminalStation(cell: Cell, from: Cell): boolean {
     const key = cellKey(cell[0], cell[1]);
-    if (!this.world.stations.has(key)) return false;
+    if (!this.stations.has(key)) return false;
     const d = this.dirIndex(from, cell);
     if (d < 0) return true;
     const ahead = cellKey(cell[0] + DIRS[d].dx, cell[1] + DIRS[d].dz);
-    return !this.world.stations.has(ahead);
+    return !this.stations.has(ahead);
   }
 
   /** Is any part of a train on (or within a few metres of) this crossing cell? */
@@ -114,7 +164,7 @@ export class TrainSystem {
     const [gx, gz] = key.split(',').map(Number);
     const cx = cellCentre(gx);
     const cz = cellCentre(gz);
-    return this.trains.some((tr) => tr.poses.some((p) => p.visible && Math.hypot(p.x - cx, p.z - cz) < CARRIAGE / 2 + 3));
+    return this.trains.some((tr) => tr.poses.some((p) => p.visible && Math.hypot(p.x - cx, p.z - cz) < this.profile.carriage / 2 + 3));
   }
 
   /** Whether a train is standing with its doors open at this station cell. */
@@ -125,7 +175,7 @@ export class TrainSystem {
   /** Called when the track layout changes: drop trains whose track has gone. */
   rebuild() {
     for (const t of this.trains) {
-      const ok = this.world.rails.has(cellKey(...t.from)) && this.world.rails.has(cellKey(...t.to));
+      const ok = this.rails.has(cellKey(...t.from)) && this.rails.has(cellKey(...t.to));
       if (!ok) t.stuck = 999;
       else t.next = this.pickNext(t.from, t.to);
     }
@@ -133,8 +183,8 @@ export class TrainSystem {
   }
 
   update(dt: number, factor: number) {
-    const { rails, stations } = this.world;
-    const target = Math.round(Math.min(MAX_TRAINS, Math.ceil(rails.size / 9)) * Math.min(1.2, factor));
+    const { rails, stations } = this;
+    const target = Math.round(Math.min(this.profile.maxTrains, Math.ceil(rails.size / this.profile.perVehicle)) * Math.min(1.2, factor));
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
       this.spawnTimer = 2;
@@ -148,7 +198,9 @@ export class TrainSystem {
   }
 
   private spawn(preferStation: boolean) {
-    const { rails, stations, junctions, levelCrossings } = this.world;
+    const { rails, stations } = this;
+    const junctions = this.junctionCells;
+    const levelCrossings = this.crossings;
     const keys = [...rails.entries()].filter(([k, m]) => m !== 0 && !junctions.has(k) && !levelCrossings.has(k));
     const stationKeys = keys.filter(([k]) => stations.has(k));
     const pool = preferStation && stationKeys.length > 0 && Math.random() < 0.7 ? stationKeys : keys;
@@ -158,9 +210,10 @@ export class TrainSystem {
     const dir = pick(DIRS.filter((d) => mask & d.bit));
     const x = cellCentre(gx);
     const z = cellCentre(gz);
-    if (this.trains.some((t) => t.poses.some((p) => p.visible && (p.x - x) ** 2 + (p.z - z) ** 2 < 55 * 55))) return;
+    if (this.trains.some((t) => t.poses.some((p) => p.visible && (p.x - x) ** 2 + (p.z - z) ** 2 < this.profile.spacing ** 2))) return;
 
-    const units = 3 + Math.floor(Math.random() * (MAX_CARRIAGES - 2));
+    const { minUnits, maxUnits } = this.profile;
+    const units = minUnits + Math.floor(Math.random() * (maxUnits - minUnits + 1));
     const train: Train = {
       id: this.nextId++,
       x,
@@ -172,9 +225,9 @@ export class TrainSystem {
       next: null,
       prev: null,
       t: 0,
-      vMax: range(6.5, 8.5),
+      vMax: range(this.profile.speed[0], this.profile.speed[1]),
       units,
-      color: pick(TRAIN_COLOURS),
+      color: pick(this.profile.colours),
       dwell: 0,
       stoppedAt: null,
       stuck: 0,
@@ -215,11 +268,11 @@ export class TrainSystem {
 
     // Don't enter a level crossing that a car is still inside.
     const carInside = (key: string) => this.sim.crossingHeldByCar(key);
-    if (this.world.levelCrossings.has(toKey) && train.t < 0.5 && carInside(toKey)) {
+    if (this.crossings.has(toKey) && train.t < 0.5 && carInside(toKey)) {
       target = Math.min(target, Math.sqrt(2 * BRAKE_PLAN * Math.max(0, (0.15 - train.t) * CELL)));
     } else if (train.next) {
       const nextKey = cellKey(train.next[0], train.next[1]);
-      if (this.world.levelCrossings.has(nextKey) && carInside(nextKey)) {
+      if (this.crossings.has(nextKey) && carInside(nextKey)) {
         target = Math.min(target, Math.sqrt(2 * BRAKE_PLAN * Math.max(0, (1.15 - train.t) * CELL)));
       }
     }
@@ -247,13 +300,16 @@ export class TrainSystem {
         const dz = p.z - train.z;
         const dist = Math.hypot(dx, dz);
         if (dist > 40 || dx * fx + dz * fz < dist * 0.3) continue;
-        const gap = dist - CARRIAGE - 3;
+        const gap = dist - this.profile.carriage - 3;
         target = Math.min(target, gap <= 0 ? 0 : Math.sqrt(2 * BRAKE_PLAN * gap));
       }
     }
-    for (const car of this.sim.cars) obstacle(car.x, car.z, 2.4, car.length / 2);
-    for (const ped of this.sim.peds) if (ped.vis > 0.5 && ped.state !== 'waiting') obstacle(ped.x, ped.z, 1.7, 0.3);
-    if (this.sim.player.active) obstacle(this.sim.player.x, this.sim.player.z, 1.7, 0.4);
+    // A monorail rides far above the street, so nothing down there is in its way.
+    if (this.kind !== 'mono') {
+      for (const car of this.sim.cars) obstacle(car.x, car.z, 2.4, car.length / 2);
+      for (const ped of this.sim.peds) if (ped.vis > 0.5 && ped.state !== 'waiting') obstacle(ped.x, ped.z, 1.7, 0.3);
+      if (this.sim.player.active) obstacle(this.sim.player.x, this.sim.player.z, 1.7, 0.4);
+    }
 
     const accel = target > train.speed ? ACCEL : BRAKE_MAX;
     train.speed += Math.max(-accel * dt, Math.min(accel * dt, target - train.speed));
@@ -275,7 +331,7 @@ export class TrainSystem {
       if (this.isTerminalStation(train.from, train.prev) && train.stoppedAt !== key) {
         // Stop with the locomotive at the platform end; passengers swap over.
         train.stoppedAt = key;
-        train.dwell = range(7, 11);
+        train.dwell = range(this.profile.dwell[0], this.profile.dwell[1]);
         train.speed = 0;
         train.t = 0;
         this.sim.passengersAlight(key, 1 + Math.floor(Math.random() * 4));
@@ -290,7 +346,7 @@ export class TrainSystem {
     const cell = first ? train.from : train.to;
     const prev = first ? train.prev : train.from;
     const next = first ? train.to : train.next;
-    const path = cellPath(prev, cell, next, TRACK_OFFSET, TRACK_OFFSET, false);
+    const path = cellPath(prev, cell, next, this.profile.offset, this.profile.offset, false);
     const pose = samplePath(path, first ? 0.5 + train.t : train.t - 0.5);
     train.x = pose.x;
     train.z = pose.z;
@@ -299,11 +355,11 @@ export class TrainSystem {
     const head = train.trail[0];
     if (!head || (head.x - pose.x) ** 2 + (head.z - pose.z) ** 2 >= TRAIL_SPACING * TRAIL_SPACING) {
       train.trail.unshift({ x: pose.x, z: pose.z });
-      const maxTrail = Math.ceil((train.units * CARRIAGE + 6) / TRAIL_SPACING);
+      const maxTrail = Math.ceil((train.units * this.profile.carriage + 6) / TRAIL_SPACING);
       if (train.trail.length > maxTrail) train.trail.length = maxTrail;
     }
 
-    // Carriage k sits k * CARRIAGE back along the trail.
+    // Carriage k sits k * carriage back along the trail.
     for (let k = 0; k < train.units; k++) {
       const p = train.poses[k];
       if (k === 0) {
@@ -313,7 +369,7 @@ export class TrainSystem {
         p.visible = true;
         continue;
       }
-      const at = this.alongTrail(train, k * CARRIAGE);
+      const at = this.alongTrail(train, k * this.profile.carriage);
       if (!at) {
         p.visible = false;
         continue;
@@ -350,7 +406,7 @@ export class TrainSystem {
   /** Marks crossings with a train approaching (within ~26 m, heading for it) or still passing over. */
   private updateCrossings() {
     const now = this.sim.time;
-    for (const key of this.world.levelCrossings) {
+    for (const key of this.crossings) {
       const [gx, gz] = key.split(',').map(Number);
       const cx = cellCentre(gx);
       const cz = cellCentre(gz);
@@ -366,7 +422,7 @@ export class TrainSystem {
     }
     this.closed.clear();
     for (const [key, until] of this.closedUntil) {
-      if (until > now && this.world.levelCrossings.has(key)) this.closed.add(key);
+      if (until > now && this.crossings.has(key)) this.closed.add(key);
       else this.closedUntil.delete(key);
     }
   }

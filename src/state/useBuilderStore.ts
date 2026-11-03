@@ -134,4 +134,4 @@ export const useBuilderStore = create<BuilderState>((set) => ({
 }));
 
 /** Tools that keep applying while the pointer is dragged across cells (draw-style tools). */
-export const isDragTool = (tool: BuilderTool): boolean => tool === 'road' || tool === 'rail' || tool === 'metrotrack' || tool === 'pier' || tool === 'runway' || tool === 'taxiway' || tool === 'apron' || tool === 'bulldoze' || tool === 'paint' || tool === 'terrain' || tool === 'forest' || tool === 'wall';
+export const isDragTool = (tool: BuilderTool): boolean => tool === 'road' || tool === 'rail' || tool === 'tram' || tool === 'monorail' || tool === 'metrotrack' || tool === 'pier' || tool === 'runway' || tool === 'taxiway' || tool === 'apron' || tool === 'bulldoze' || tool === 'paint' || tool === 'terrain' || tool === 'forest' || tool === 'wall';

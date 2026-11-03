@@ -2,12 +2,12 @@ import { useFrame } from '@react-three/fiber';
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { sim } from '../sim/simulation';
-import { useCityStore, metroMaskAt, pierMaskAt, railMaskAt, taxiMaskAt } from '../state/useCityStore';
+import { useCityStore, metroMaskAt, monoMaskAt, pierMaskAt, railMaskAt, taxiMaskAt, tramMaskAt } from '../state/useCityStore';
 import { useGameStore } from '../state/useGameStore';
 import { WATER_LEVEL, useTerrainStore } from '../terrain/terrain';
 import { apronGeometry, parkingGeometry, pierGeometry, runwayGeometry } from './airGeometry';
 import { roadGeometry } from './roadGeometry';
-import { railGeometry, metroGeometry } from './railGeometry';
+import { railGeometry, metroGeometry, monorailGeometry } from './railGeometry';
 import { getSignMaterial } from './ledTextures';
 import { darkMetalMaterial, glassMaterial, metalMaterial, solidMaterial } from './materials';
 import { registerWet } from './nightLights';
@@ -28,6 +28,39 @@ export function ConnectedRail({ gx, gz }: { gx: number; gz: number }) {
   const mask = useCityStore((s) => railMaskAt(s.pieces, s.occupancy, gx, gz));
   const bridge = useWaterBelow(gx, gz);
   return <RailModel mask={mask} bridge={bridge} />;
+}
+
+/** Tram track: rails set flush into a paved strip, so it can run along the street. */
+export function TramTrackModel({ gx, gz }: { gx?: number; gz?: number }) {
+  const mask = useCityStore((s) => (gx === undefined || gz === undefined ? 5 : tramMaskAt(s.pieces, s.occupancy, gx, gz)));
+  return <mesh geometry={railGeometry(mask, { flush: true })} material={vertexMaterial} receiveShadow />;
+}
+
+export function TramStopModel({ gx, gz }: { gx?: number; gz?: number }) {
+  const mask = useCityStore((s) => (gx === undefined || gz === undefined ? 5 : tramMaskAt(s.pieces, s.occupancy, gx, gz)));
+  const ew = !(mask & 5) && (mask & 10) !== 0;
+  const sign = useMemo(() => getSignMaterial('TRAM', '#ffd23f'), []);
+  return (
+    <group>
+      <mesh geometry={railGeometry(mask || 5, { platform: true, flush: true })} material={vertexMaterial} receiveShadow castShadow />
+      {[-1, 1].map((side) => (
+        <mesh key={side} position={ew ? [0, 3.35, side * 0.82] : [side * 0.82, 3.35, 0]} rotation={[0, ew ? 0 : Math.PI / 2, 0]} material={sign} castShadow>
+          <boxGeometry args={[2, 0.5, 0.06]} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/** Elevated monorail beam on a pylon. */
+export function MonorailModel({ gx, gz }: { gx?: number; gz?: number }) {
+  const mask = useCityStore((s) => (gx === undefined || gz === undefined ? 5 : monoMaskAt(s.pieces, s.occupancy, gx, gz)));
+  return <mesh geometry={monorailGeometry(mask)} material={vertexMaterial} receiveShadow castShadow />;
+}
+
+export function MonorailStationModel({ gx, gz }: { gx?: number; gz?: number }) {
+  const mask = useCityStore((s) => (gx === undefined || gz === undefined ? 5 : monoMaskAt(s.pieces, s.occupancy, gx, gz)));
+  return <mesh geometry={monorailGeometry(mask || 5, true)} material={vertexMaterial} receiveShadow castShadow />;
 }
 
 /** The running direction of a platform: along north-south unless the track only goes east-west. */

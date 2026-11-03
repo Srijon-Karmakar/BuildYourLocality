@@ -117,6 +117,11 @@ export interface SimWorld {
   terminalExits: { x: number; z: number }[];
   /** Underground metro line cells, and which separate line each entrance belongs to (-1 = unconnected). */
   metroTracks: Map<string, number>;
+  /** Tram and monorail networks: cell key -> bitmask of connected neighbours, and their stops (see trains.ts). */
+  tramRails: Map<string, number>;
+  tramStops: Map<string, { pieceId: string; x: number; z: number }>;
+  monoRails: Map<string, number>;
+  monoStops: Map<string, { pieceId: string; x: number; z: number }>;
   metroGroup: Map<string, number>;
   /** Cells claimed by wide roads (painted over by them, so people treat them as road). */
   wideCells: Set<string>;
@@ -165,6 +170,10 @@ export const emptyWorld = (): SimWorld => ({
   stations: new Map(),
   levelCrossings: new Set(),
   metroTracks: new Map(),
+  tramRails: new Map(),
+  tramStops: new Map(),
+  monoRails: new Map(),
+  monoStops: new Map(),
   metroGroup: new Map(),
   wideCells: new Set(),
   junctions: new Set(),
@@ -231,6 +240,20 @@ export function buildWorld(pieces: Piece[]): SimWorld {
         world.stations.set(cells[0], { pieceId: piece.id, x: cellCentre(piece.gx), z: cellCentre(piece.gz) });
         world.blocked.add(cells[0]); // the platform is reached from the side, not crossed
       }
+      continue;
+    }
+    if (piece.type === 'tram' || piece.type === 'tramstop') {
+      world.tramRails.set(cells[0], 0);
+      if (piece.type === 'tramstop') {
+        world.tramStops.set(cells[0], { pieceId: piece.id, x: cellCentre(piece.gx), z: cellCentre(piece.gz) });
+        world.blocked.add(cells[0]); // the platform is reached from the side
+      }
+      continue;
+    }
+    if (piece.type === 'monorail' || piece.type === 'monostation') {
+      // The beams are far overhead: the street below stays free to walk.
+      world.monoRails.set(cells[0], 0);
+      if (piece.type === 'monostation') world.monoStops.set(cells[0], { pieceId: piece.id, x: cellCentre(piece.gx), z: cellCentre(piece.gz) });
       continue;
     }
     if (piece.type === 'pier') {
@@ -325,6 +348,8 @@ export function buildWorld(pieces: Piece[]): SimWorld {
   connect(world.rails, railArms);
   connect(world.taxi, new Map());
   connect(world.metroTracks, new Map());
+  connect(world.tramRails, new Map());
+  connect(world.monoRails, new Map());
   connect(world.roads, roadArms);
 
   // Runway strips: straight chains of runway cells at least four long (24 m).
@@ -533,9 +558,12 @@ export function buildWorld(pieces: Piece[]): SimWorld {
         }
         break;
       }
-      case 'station': {
+      case 'station':
+      case 'tramstop':
+      case 'monostation': {
         // The island platform is reached from either side of the track.
-        const mask = world.rails.get(cellKey(piece.gx, piece.gz)) ?? 0;
+        const network = piece.type === 'station' ? world.rails : piece.type === 'tramstop' ? world.tramRails : world.monoRails;
+        const mask = network.get(cellKey(piece.gx, piece.gz)) ?? 0;
         const alongNS = !!(mask & 5) || !(mask & 10);
         const sides: [number, number][] = alongNS ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
         const side = sides.find(([sx, sz]) => walkable(piece.gx + sx, piece.gz + sz));

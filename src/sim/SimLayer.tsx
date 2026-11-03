@@ -12,7 +12,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { WATER_LEVEL } from '../terrain/terrain';
 import { MAX_PLANES } from './aircraft';
 import { MAX_SHIPS, SHIP_LENGTH } from './ships';
-import { MAX_CARRIAGES, MAX_TRAINS } from './trains';
+import { MAX_TRANSIT_UNITS } from './trains';
 import { getGlowTexture, headlightBeamMaterial, registerNightEmissive } from '../city/nightLights';
 import { atmo } from '../scenes/atmosphere';
 
@@ -43,7 +43,7 @@ const trainGlass = new THREE.MeshStandardMaterial({ color: '#16222c', roughness:
 registerNightEmissive(trainGlass, 1.6);
 headlightBeamMaterial.map = getGlowTexture();
 const LAMPS_PER_CAR = 4;
-const MAX_UNITS = MAX_TRAINS * MAX_CARRIAGES;
+const MAX_UNITS = MAX_TRANSIT_UNITS;
 /** Room for moving cars plus those sitting in car parks. */
 const MAX_DRAWN_CARS = MAX_CARS + 160;
 
@@ -224,11 +224,14 @@ export function SimLayer() {
     if (trainBody.current && trainBand.current && trainWindows.current && trainBogies.current) {
       let n = 0;
       let b = 0;
-      for (const train of sim.trains.trains) {
+      for (const line of [sim.trains, sim.trams, sim.monorails]) {
+        const [sx, sy, sz] = line.profile.scale;
+        const lift = line.profile.lift;
+        for (const train of line.trains) {
         train.poses.forEach((pose, k) => {
           if (!pose.visible) return;
           _turn.setFromAxisAngle(UP, pose.heading);
-          _base.compose(_pos.set(pose.x, 0, pose.z), _turn, _scale.set(1, 1, 1));
+          _base.compose(_pos.set(pose.x, lift, pose.z), _turn, _scale.set(sx, sy, sz));
           setPart(trainBody.current!, n, _base, 0, 1.65, 0);
           setPart(trainBand.current!, n, _base, 0, 0.75, 0);
           setPart(trainWindows.current!, n, _base, 0, 2.15, 0);
@@ -238,6 +241,7 @@ export function SimLayer() {
           setPart(trainBogies.current!, b++, _base, 0, 0.55, 3);
           n++;
         });
+        }
       }
       trainBody.current.count = n;
       trainBand.current.count = n;

@@ -210,7 +210,10 @@ export class Simulation {
   /** One adaptive signal per junction that has a traffic light beside it. */
   readonly controllers = new Map<string, SignalController>();
   /** Trains on the railway (see trains.ts). */
-  readonly trains: TrainSystem = new TrainSystem(this);
+  readonly trains: TrainSystem = new TrainSystem(this, 'rail');
+  /** Trams on the street tracks, and monorails on the elevated beams. */
+  readonly trams: TrainSystem = new TrainSystem(this, 'tram');
+  readonly monorails: TrainSystem = new TrainSystem(this, 'mono');
   /** Aircraft using the airfield (see aircraft.ts). */
   readonly aircraft: AircraftSystem = new AircraftSystem(this);
   /** Ships sailing to and from the port (see ships.ts). */
@@ -266,6 +269,8 @@ export class Simulation {
     }
     this.cars = this.cars.filter((c) => !this.releaseIfGone(c));
     this.trains.update(dt, factor);
+    this.trams.update(dt, factor);
+    this.monorails.update(dt, factor);
     this.aircraft.update(dt, factor);
     this.ships.update(dt, factor);
     this.updateLots();
@@ -279,6 +284,8 @@ export class Simulation {
     this.dirty = false;
     this.world = buildWorld(Object.values(useCityStore.getState().pieces));
     this.trains.rebuild();
+    this.trams.rebuild();
+    this.monorails.rebuild();
     this.aircraft.rebuild();
     this.ships.rebuild();
     this.syncLots();
@@ -737,7 +744,7 @@ export class Simulation {
 
   /** People step off a train that has stopped at a station. */
   passengersAlight(key: string, count: number) {
-    const station = this.world.stations.get(key);
+    const station = this.world.stations.get(key) ?? this.world.tramStops.get(key) ?? this.world.monoStops.get(key);
     if (!station) return;
     for (let i = 0; i < count && this.peds.length < MAX_PEOPLE; i++) this.spawnPed({ x: station.x, z: station.z });
   }
@@ -1238,10 +1245,13 @@ export class Simulation {
         ped.timer -= dt;
         const stop = this.world.busStops.find((s) => s.pieceId === ped.goal?.pieceId);
         const bus = stop && this.cars.find((c) => c.kind === 'bus' && c.dwell > 0 && cellKey(c.from[0], c.from[1]) === stop.roadCell);
-        const stationKey = ped.goal?.kind === 'station' ? [...this.world.stations].find(([, v]) => v.pieceId === ped.goal?.pieceId)?.[0] : undefined;
+        const stationKey =
+          ped.goal?.kind === 'station'
+            ? [...this.world.stations, ...this.world.tramStops, ...this.world.monoStops].find(([, v]) => v.pieceId === ped.goal?.pieceId)?.[0]
+            : undefined;
         const taxiRoad = ped.goal?.kind === 'taxi' ? [...this.world.taxiByRoad].find(([, v]) => v.pieceId === ped.goal?.pieceId)?.[0] : undefined;
         const taxi = taxiRoad && this.cars.find((c) => c.kind === 'taxi' && c.dwell > 0 && cellKey(c.from[0], c.from[1]) === taxiRoad);
-        if (bus || taxi || (stationKey && this.trains.stoppedAtStation(stationKey))) ped.remove = true; // boards the bus / taxi / train
+        if (bus || taxi || (stationKey && (this.trains.stoppedAtStation(stationKey) || this.trams.stoppedAtStation(stationKey) || this.monorails.stoppedAtStation(stationKey)))) ped.remove = true; // boards the bus / taxi / train
         else if (ped.timer <= 0) this.leave(ped);
         break;
       }

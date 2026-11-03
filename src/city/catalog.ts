@@ -126,6 +126,10 @@ export type PieceType =
   | 'crossing'
   | 'metrotrack'
   | 'metroentrance'
+  | 'tram'
+  | 'tramstop'
+  | 'monorail'
+  | 'monostation'
   // airport
   | 'runway'
   | 'taxiway'
@@ -855,6 +859,10 @@ export const PIECES: Record<PieceType, PieceDef> = {
   crossing: transit('Level crossing'),
   metrotrack: transit('Metro line'),
   metroentrance: transit('Metro entrance', [3.4, 3.2, 3.4]),
+  tram: transit('Tram track'),
+  tramstop: transit('Tram stop'),
+  monorail: transit('Monorail'),
+  monostation: transit('Monorail station'),
 
   runway: { ...transit('Runway'), category: 'airport' },
   taxiway: { ...transit('Taxiway'), category: 'airport' },
@@ -902,10 +910,10 @@ export const GRASS_TYPES: PieceType[] = ['grass', 'tallgrass', 'wildflower'];
 /** Every plant the tree editor and the forest brush deal with. */
 export const PLANT_TYPES: PieceType[] = [...TREE_TYPES, ...GRASS_TYPES];
 export const isTreeType = (type: PieceType) => PLANT_TYPES.includes(type);
-/** Streetlights stand over roads, pavements and plots too, at a corner of the cell. */
-export const OVERLAY_TYPES: PieceType[] = [...PLANT_TYPES, 'lamp'];
+/** Streetlights and traffic lights stand over roads, pavements and plots too, at a corner of the cell. */
+export const OVERLAY_TYPES: PieceType[] = [...PLANT_TYPES, 'lamp', 'trafficlight'];
 /** Overlays that stand at a cell corner (the cursor picks which) instead of being scattered. */
-export const CORNER_TYPES: PieceType[] = ['lamp'];
+export const CORNER_TYPES: PieceType[] = ['lamp', 'trafficlight'];
 export const isCornerType = (type: PieceType) => CORNER_TYPES.includes(type);
 /** How far from the cell centre a corner piece stands, in metres (just inside the cell edge). */
 export const CORNER_REACH = CELL / 2 - 0.45;
@@ -915,7 +923,7 @@ export const isOverlay = (type: PieceType) => OVERLAY_TYPES.includes(type);
 export const keepsClear = (type: PieceType) => ROAD_LIKE.includes(type) || ['transit', 'airport', 'port'].includes(PIECES[type].category);
 
 /** Pieces that sit on the ground like a road: level land, or water (as a bridge). */
-export const ROAD_LIKE: PieceType[] = ['road', 'rail', 'crossing', 'metrotrack', 'pier'];
+export const ROAD_LIKE: PieceType[] = ['road', 'rail', 'crossing', 'metrotrack', 'pier', 'tram', 'monorail'];
 
 const BIT = { N: 1, E: 2, S: 4, W: 8 } as const;
 

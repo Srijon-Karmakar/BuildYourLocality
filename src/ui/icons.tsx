@@ -162,6 +162,7 @@ import {
   LuMilestone,
   LuArrowUpRight,
   LuCircleDot,
+  LuTramFront,
 } from 'react-icons/lu';
 
 /**
@@ -230,6 +231,10 @@ const ICONS: Record<string, IconType> = {
   rail: LuTrainTrack,
   station: LuTrainFront,
   crossing: LuConstruction,
+  tram: LuTramFront,
+  tramstop: LuTramFront,
+  monorail: LuCableCar,
+  monostation: LuCableCar,
   metrotrack: LuTrainFrontTunnel,
   metroentrance: LuTrainFrontTunnel,
   // airport

@@ -46,7 +46,7 @@ import {
   TaxiStandModel,
   CrossingModel,
   MetroEntranceModel,
-  MetroTrackModel,
+  MetroTrackModel, MonorailModel, MonorailStationModel, TramStopModel, TramTrackModel,
   RailModel,
   RunwayModel,
   StationModel,
@@ -380,6 +380,14 @@ export function PieceModel({
       return <StationModel gx={gx} gz={gz} />;
     case 'crossing':
       return <CrossingModel />;
+    case 'tram':
+      return <TramTrackModel gx={gx} gz={gz} />;
+    case 'tramstop':
+      return <TramStopModel gx={gx} gz={gz} />;
+    case 'monorail':
+      return <MonorailModel gx={gx} gz={gz} />;
+    case 'monostation':
+      return <MonorailStationModel gx={gx} gz={gz} />;
     case 'metrotrack':
       return <MetroTrackModel gx={gx} gz={gz} />;
     case 'metroentrance':
