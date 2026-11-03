@@ -38,17 +38,18 @@ import { WallEditor } from './WallEditor';
 import { resolveWall, wallStyleOf } from '../city/walls';
 import { FLOWER_SWATCHES, GRASS_SWATCHES, LEAF_SWATCHES, TREE_SHAPES, TRUNK_SWATCHES, resolveTree, seedFromId, type TreeSpec } from '../city/trees';
 import { LedEditor } from './LedEditor';
-import { ShapeEditor } from './ShapeEditor';
+import { ShapePanel } from './ShapeEditor';
 import { LANDMARKS, type Landmark } from '../city/landmarks';
 import { useBuilderStore } from '../state/useBuilderStore';
 import { connectedRoads, useCityStore, type Piece, type PiecePatch } from '../state/useCityStore';
 import { RoadSettings } from './RoadSettings';
 import { useGameStore } from '../state/useGameStore';
 
-type Tab = 'walls' | 'layout' | 'door' | 'roof' | 'extras';
+type Tab = 'walls' | 'layout' | 'shape' | 'door' | 'roof' | 'extras';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'walls', label: 'Walls' },
   { id: 'layout', label: 'Layout' },
+  { id: 'shape', label: 'Shape' },
   { id: 'door', label: 'Door' },
   { id: 'roof', label: 'Roof' },
   { id: 'extras', label: 'Extras' },
@@ -445,8 +446,11 @@ function SingleInspector() {
               ))}
             </div>
           </div>
-          <ShapeEditor block={block} onChange={editBlock} />
         </>
+      )}
+
+      {tab === 'shape' && (
+        <ShapePanel blocks={style.blocks} blockIndex={blockIndex} selectBlock={selectBlock} editBlock={editBlock} editAll={(change) => setBlocks(style.blocks.map((b) => ({ ...b, ...change })))} />
       )}
 
       {tab === 'door' && (

@@ -9,6 +9,10 @@ import {
   GiPunch,
   GiRobber,
   GiShotgun,
+  GiRevolver,
+  GiUzi,
+  GiWinchesterRifle,
+  GiCrossbow,
 } from 'react-icons/gi';
 import {
   LuActivity,
@@ -351,6 +355,10 @@ const ICONS: Record<string, IconType> = {
   pistol: GiPistolGun,
   shotgun: GiShotgun,
   taser: LuZap,
+  revolver: GiRevolver,
+  smg: GiUzi,
+  rifle: GiWinchesterRifle,
+  crossbow: GiCrossbow,
   peaceful: LuHandMetal,
   normal: GiPunch,
   survival: GiMonsterGrasp,

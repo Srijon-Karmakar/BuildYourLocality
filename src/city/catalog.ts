@@ -311,7 +311,30 @@ export interface Block {
   top?: BlockTop;
   /** Height of the crown in metres (0 or unset = sized from the block). */
   topH?: number;
+  /** Footprint outline; unset = a (rounded) rectangle or oval. */
+  plan?: BlockPlan;
+  /** Polygon and star: how many sides / points. */
+  sides?: number;
+  /** Star: inner radius ratio. Cross and Y: arm thickness. 0.1 - 0.9. */
+  inner?: number;
+  /** -1 to 1: widens (+) or narrows (-) the foot of the walls, like a flared base. */
+  flare?: number;
+  /** Fine size: fraction of the grid space the block fills (0.2 - 1). */
+  fw?: number;
+  fd?: number;
+  /** Fine position: metres moved within the grid space. */
+  ox?: number;
+  oz?: number;
 }
+
+export type BlockPlan = 'rect' | 'poly' | 'star' | 'cross' | 'y';
+export const BLOCK_PLANS: { id: BlockPlan; label: string }[] = [
+  { id: 'rect', label: 'Box / oval' },
+  { id: 'poly', label: 'Polygon' },
+  { id: 'star', label: 'Star' },
+  { id: 'cross', label: 'Cross' },
+  { id: 'y', label: 'Y shape' },
+];
 
 export type BlockTop = 'flat' | 'dome' | 'onion' | 'cone' | 'spire';
 export const BLOCK_TOPS: { id: BlockTop; label: string }[] = [
@@ -324,7 +347,7 @@ export const BLOCK_TOPS: { id: BlockTop; label: string }[] = [
 
 /** Does this block need the custom shaped body (anything beyond a plain straight box)? */
 export function isShaped(b: Block): boolean {
-  return !!(b.round || b.bevel || (b.taper !== undefined && b.taper !== 1) || b.twist || b.curve || (b.top && b.top !== 'flat'));
+  return !!((b.plan && b.plan !== 'rect') || b.flare || b.round || b.bevel || (b.taper !== undefined && b.taper !== 1) || b.twist || b.curve || (b.top && b.top !== 'flat'));
 }
 
 /** Metres of crown above a block's walls. */
@@ -922,12 +945,17 @@ export function blockBox(block: Block, lot: [number, number]): BlockBox {
   const x1 = (block.u + block.w) * UNIT - (block.u + block.w >= lw ? LOT_MARGIN : 0);
   const z0 = block.v * UNIT + (block.v === 0 ? LOT_MARGIN : 0);
   const z1 = (block.v + block.d) * UNIT - (block.v + block.d >= ld ? LOT_MARGIN : 0);
+  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+  const w = (x1 - x0) * clamp(block.fw ?? 1, 0.2, 1);
+  const d = (z1 - z0) * clamp(block.fd ?? 1, 0.2, 1);
+  const slackX = (x1 - x0 - w) / 2;
+  const slackZ = (z1 - z0 - d) / 2;
   return {
     y: (block.base ?? 0) * FLOOR_H,
-    cx: (x0 + x1) / 2 - (lw * UNIT) / 2,
-    cz: (z0 + z1) / 2 - (ld * UNIT) / 2,
-    w: x1 - x0,
-    d: z1 - z0,
+    cx: (x0 + x1) / 2 - (lw * UNIT) / 2 + clamp(block.ox ?? 0, -slackX, slackX),
+    cz: (z0 + z1) / 2 - (ld * UNIT) / 2 + clamp(block.oz ?? 0, -slackZ, slackZ),
+    w,
+    d,
     h: block.floors * FLOOR_H,
   };
 }

@@ -1,7 +1,7 @@
 import { createPortal, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { combat, WEAPON_ORDER, type WeaponId } from '../../sim/combat';
+import { combat, WEAPON_ORDER, WEAPONS, type WeaponId } from '../../sim/combat';
 import { useGameStore } from '../../state/useGameStore';
 import { viewState, virtualInput } from '../viewState';
 import { vehicle } from '../../sim/vehicle';
@@ -14,6 +14,9 @@ const grip = new THREE.MeshStandardMaterial({ color: '#2a1d14', roughness: 0.9 }
 const taserBody = new THREE.MeshStandardMaterial({ color: '#e8c21a', roughness: 0.5 });
 const flashMaterial = new THREE.MeshBasicMaterial({ color: '#ffd27a', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
 const boltMaterial = new THREE.MeshBasicMaterial({ color: '#7de3ff', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
+
+/** How far in front of the camera each gun's muzzle is, for the flash. */
+const MUZZLE_Z: Partial<Record<WeaponId, number>> = { shotgun: -0.95, rifle: -1.15, smg: -0.7, revolver: -0.55 };
 
 /** The weapon held in front of the camera, with a swing / recoil animation. */
 function Viewmodel() {
@@ -80,13 +83,13 @@ function Viewmodel() {
     // Muzzle flash on the first moments after a shot.
     const f = flash.current;
     if (f) {
-      const shot = (p.weapon === 'pistol' || p.weapon === 'shotgun') && p.swing > 0.82;
+      const shot = !WEAPONS[p.weapon].melee && p.weapon !== 'taser' && p.weapon !== 'crossbow' && p.swing > 0.82;
       f.visible = shot;
       if (shot) {
         const s = 0.14 + Math.random() * 0.08;
         f.scale.set(s, s, s);
         f.rotation.z = Math.random() * 6;
-        f.position.set(0.03, 0.06, p.weapon === 'shotgun' ? -0.95 : -0.62);
+        f.position.set(0.03, 0.06, MUZZLE_Z[p.weapon] ?? -0.62);
       }
     }
     const b = bolt.current;
@@ -144,6 +147,59 @@ function Viewmodel() {
         </mesh>
         <mesh position={[0, -0.04, 0.12]} rotation={[0.1, 0, 0]} material={wood}>
           <boxGeometry args={[0.08, 0.12, 0.38]} />
+        </mesh>
+      </group>
+      <group ref={setRef('revolver')}>
+        <mesh position={[0, 0.03, -0.2]} material={steel}>
+          <boxGeometry args={[0.06, 0.07, 0.42]} />
+        </mesh>
+        <mesh position={[0, 0.02, -0.1]} rotation={[Math.PI / 2, 0, 0]} material={darkSteel}>
+          <cylinderGeometry args={[0.05, 0.05, 0.1, 10]} />
+        </mesh>
+        <mesh position={[0, -0.09, -0.0]} rotation={[0.35, 0, 0]} material={wood}>
+          <boxGeometry args={[0.06, 0.17, 0.08]} />
+        </mesh>
+      </group>
+      <group ref={setRef('smg')}>
+        <mesh position={[0, 0.02, -0.2]} material={darkSteel}>
+          <boxGeometry args={[0.08, 0.1, 0.5]} />
+        </mesh>
+        <mesh position={[0, 0.02, -0.52]} rotation={[Math.PI / 2, 0, 0]} material={steel}>
+          <cylinderGeometry args={[0.018, 0.018, 0.2, 8]} />
+        </mesh>
+        <mesh position={[0, -0.14, -0.14]} material={steel}>
+          <boxGeometry args={[0.05, 0.2, 0.07]} />
+        </mesh>
+        <mesh position={[0, -0.1, 0.05]} rotation={[0.3, 0, 0]} material={grip}>
+          <boxGeometry args={[0.06, 0.15, 0.07]} />
+        </mesh>
+      </group>
+      <group ref={setRef('rifle')}>
+        <mesh position={[0, 0.03, -0.45]} rotation={[Math.PI / 2, 0, 0]} material={darkSteel}>
+          <cylinderGeometry args={[0.02, 0.02, 1.0, 8]} />
+        </mesh>
+        <mesh position={[0, 0.0, -0.1]} material={wood}>
+          <boxGeometry args={[0.07, 0.1, 0.5]} />
+        </mesh>
+        <mesh position={[0, -0.03, 0.2]} rotation={[0.12, 0, 0]} material={wood}>
+          <boxGeometry args={[0.08, 0.14, 0.34]} />
+        </mesh>
+        <mesh position={[0, 0.1, -0.2]} rotation={[Math.PI / 2, 0, 0]} material={steel}>
+          <cylinderGeometry args={[0.025, 0.025, 0.3, 8]} />
+        </mesh>
+      </group>
+      <group ref={setRef('crossbow')}>
+        <mesh position={[0, 0.0, -0.1]} material={wood}>
+          <boxGeometry args={[0.06, 0.07, 0.6]} />
+        </mesh>
+        <mesh position={[0, 0.02, -0.36]} material={darkSteel}>
+          <boxGeometry args={[0.62, 0.025, 0.04]} />
+        </mesh>
+        <mesh position={[0, 0.045, -0.2]} material={steel}>
+          <boxGeometry args={[0.012, 0.012, 0.5]} />
+        </mesh>
+        <mesh position={[0, -0.08, 0.12]} rotation={[0.3, 0, 0]} material={grip}>
+          <boxGeometry args={[0.06, 0.14, 0.07]} />
         </mesh>
       </group>
       <group ref={setRef('taser')}>
@@ -229,7 +285,7 @@ export function CombatController() {
     const typing = (e: Event) => e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
     const onKeyDown = (e: KeyboardEvent) => {
       if (typing(e) || useGameStore.getState().mode !== 'roam') return;
-      const digit = /^Digit([1-5])$/.exec(e.code);
+      const digit = /^Digit([1-9])$/.exec(e.code);
       if (digit) combat.selectWeapon(WEAPON_ORDER[Number(digit[1]) - 1]);
       if (e.code === 'KeyC' || e.code === 'ControlLeft') crouchKey.current = true;
       if (e.code === 'KeyE' && !e.repeat) {

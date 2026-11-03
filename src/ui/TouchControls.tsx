@@ -185,6 +185,7 @@ const cameraKey = (code: string) => (down: boolean) => {
 /** Build mode on a phone: camera buttons as a precise alternative to pinch / twist gestures. */
 export function CameraPad() {
   const hand = useBuilderStore((s) => s.hand);
+  const tool = useBuilderStore((s) => s.tool);
   return (
     <div
       className="pointer-events-none absolute flex flex-col gap-2"
@@ -208,6 +209,16 @@ export function CameraPad() {
       <HoldButton label="Tilt down" className="h-9 w-9 text-base" onHold={cameraKey('TiltDown')}>
         <Icon name="down" />
       </HoldButton>
+      <button
+        aria-label="Edit"
+        className={`${pad} h-9 w-9 text-base ${!hand && tool === 'select' ? '!bg-white !text-black' : ''}`}
+        onClick={() => {
+          useBuilderStore.getState().setHand(false);
+          useBuilderStore.getState().setTool('select');
+        }}
+      >
+        <Icon name="edit" />
+      </button>
       <button
         aria-label="Hand mode"
         aria-pressed={hand}

@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { rewardById, TOKENS_PER_AD } from '../lib/rewards';
 import { adBlockedReason, buyReward, watchAdForTokens } from '../lib/wallet';
 import { useWalletStore } from '../state/useWalletStore';
-import { createWorld, deleteWorld, openWorld, renameWorld } from '../lib/sync';
+import { createWorld, deleteWorld, leaveVisit, openWorld, renameWorld } from '../lib/sync';
 import { useAuthStore } from '../state/useAuthStore';
-import { FREE_WORLDS, useWorldsStore, worldLimit, type WorldMeta } from '../state/useWorldsStore';
+import { FREE_WORLDS, ownedCount, useWorldsStore, worldLimit, type WorldMeta, type WorldVisibility } from '../state/useWorldsStore';
+import { CommunityList, JoinFriend } from './CommunityPanel';
+import { OnlineNow, ShareSettings } from './ShareSettings';
 import { Icon } from './icons';
 
 const ago = (t: number) => {
@@ -23,7 +25,9 @@ function WorldRow({ world, active, busy }: { world: WorldMeta; active: boolean; 
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(world.name);
   const [confirm, setConfirm] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const owned = world.owned !== false;
 
   const save = async () => {
     const err = await renameWorld(world.id, name);
@@ -63,26 +67,40 @@ function WorldRow({ world, active, busy }: { world: WorldMeta; active: boolean; 
             <span className="flex items-center gap-1.5">
               <span className="truncate text-sm font-medium">{world.name}</span>
               {active && <span className="shrink-0 rounded-full bg-emerald-400/90 px-1.5 text-[10px] font-semibold text-black">OPEN</span>}
+              {owned && world.visibility === 'public' && <span className="shrink-0 rounded-full bg-sky-400/90 px-1.5 text-[10px] font-semibold text-black">PUBLIC</span>}
+              {!owned && <span className="shrink-0 rounded-full bg-violet-400/90 px-1.5 text-[10px] font-semibold text-black">FRIEND</span>}
             </span>
             <span className="block truncate text-[11px] text-white/50">
-              {world.pieces !== undefined ? `${world.pieces} ${world.pieces === 1 ? "piece" : "pieces"}` : "Saved world"}
+              {!owned ? `by ${world.ownerName ?? 'a friend'}` : world.pieces !== undefined ? `${world.pieces} ${world.pieces === 1 ? "piece" : "pieces"}` : "Saved world"}
               {world.updatedAt ? ` · ${ago(world.updatedAt)}` : ''}
             </span>
           </button>
         )}
         {!editing && (
           <>
-            <button
-              className={small}
-              onClick={() => {
-                setName(world.name);
-                setEditing(true);
-              }}
-              aria-label="Rename"
-              title="Rename"
-            >
-              <Icon name="edit" />
-            </button>
+            {owned && (
+              <button
+                className={`${small} !w-auto px-2.5 text-[11px] ${sharing ? '!bg-white !text-black' : ''}`}
+                onClick={() => setSharing((v) => !v)}
+                aria-label="Share settings"
+                title="Share settings"
+              >
+                Share
+              </button>
+            )}
+            {owned && (
+              <button
+                className={small}
+                onClick={() => {
+                  setName(world.name);
+                  setEditing(true);
+                }}
+                aria-label="Rename"
+                title="Rename"
+              >
+                <Icon name="edit" />
+              </button>
+            )}
             <button
               className={`${small} ${confirm ? '!bg-red-600 !text-white' : ''}`}
               disabled={busy}
@@ -92,14 +110,15 @@ function WorldRow({ world, active, busy }: { world: WorldMeta; active: boolean; 
                 setConfirm(false);
                 void deleteWorld(world.id).then(setError);
               }}
-              aria-label={confirm ? 'Tap again to delete for good' : 'Delete'}
-              title={confirm ? 'Tap again to delete for good' : 'Delete'}
+              aria-label={confirm ? 'Tap again to confirm' : owned ? 'Delete' : 'Leave'}
+              title={confirm ? 'Tap again to confirm' : owned ? 'Delete' : 'Leave this world'}
             >
               <Icon name="trash" />
             </button>
           </>
         )}
       </div>
+      {sharing && owned && <ShareSettings world={world} />}
       {error && <div className="mt-1 px-2 text-xs text-amber-300">{error}</div>}
     </li>
   );
@@ -107,6 +126,51 @@ function WorldRow({ world, active, busy }: { world: WorldMeta; active: boolean; 
 
 /** The player's worlds: open, rename, delete, start a new one, or unlock more by watching an ad. */
 export function WorldsPanel() {
+  const [tab, setTab] = useState<'mine' | 'community' | 'join'>('mine');
+  const visiting = useWorldsStore((s) => s.visiting);
+  const readOnly = useWorldsStore((s) => s.readOnly);
+  const busyNow = useWorldsStore((s) => s.busy);
+  const notice = useWorldsStore((s) => s.error);
+  const tabButton = (id: typeof tab, label: string) => (
+    <button
+      key={id}
+      onClick={() => setTab(id)}
+      className={`flex-1 rounded-full px-3 py-1.5 text-xs font-medium transition ${tab === id ? 'bg-white text-black' : 'bg-white/10 text-white/75 active:bg-white/20 sm:hover:bg-white/15'}`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="flex flex-col gap-3">
+      {visiting && (
+        <div className="flex items-center gap-2 rounded-2xl bg-sky-400/15 p-2.5 text-xs text-sky-100">
+          <div className="min-w-0 flex-1">
+            <span className="block truncate font-medium">Visiting {visiting.name}</span>
+            <span className="block truncate text-[11px] text-sky-100/70">
+              by {visiting.ownerName ?? 'a player'} · {readOnly ? 'explore only' : 'you can build here'}
+            </span>
+          </div>
+          <button disabled={busyNow} onClick={() => void leaveVisit()} className="shrink-0 rounded-full bg-white px-3 py-1 text-[11px] font-medium text-black active:bg-white/80 disabled:opacity-50">
+            Leave
+          </button>
+        </div>
+      )}
+      {notice && <p className="rounded-xl bg-amber-400/15 px-2.5 py-1.5 text-xs text-amber-200">{notice}</p>}
+      <OnlineNow />
+      <div className="flex gap-1.5">
+        {tabButton('mine', 'My worlds')}
+        {tabButton('community', 'Community')}
+        {tabButton('join', 'Join a friend')}
+      </div>
+      {tab === 'mine' && <MyWorlds />}
+      {tab === 'community' && <CommunityList />}
+      {tab === 'join' && <JoinFriend />}
+    </div>
+  );
+}
+
+function MyWorlds() {
   const worlds = useWorldsStore((s) => s.worlds);
   const activeId = useWorldsStore((s) => s.activeId);
   const extra = useWorldsStore((s) => s.extraSlots);
@@ -116,12 +180,21 @@ export function WorldsPanel() {
   const tokens = useWalletStore((s) => s.tokens);
   const watching = useWalletStore((s) => s.watching);
 
+  const [choosing, setChoosing] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newVisibility, setNewVisibility] = useState<WorldVisibility>('private');
+
   const limit = worldLimit(extra);
-  const full = worlds.length >= limit;
+  const owned = ownedCount(worlds);
+  const full = owned >= limit;
 
   const add = async () => {
-    const err = await createWorld();
+    const err = await createWorld(newName, newVisibility);
     setMessage(err === 'limit' ? 'All world slots are in use.' : err);
+    if (!err) {
+      setChoosing(false);
+      setNewName('');
+    }
   };
 
   const slotCost = rewardById('slot')?.cost ?? 20;
@@ -132,7 +205,7 @@ export function WorldsPanel() {
     <div className="flex flex-col gap-3 text-xs text-white sm:text-sm">
       <div className="flex items-center justify-between">
         <span className="text-white/70">
-          {worlds.length} of {limit} worlds
+          {owned} of {limit} worlds
         </span>
         <span className="text-[11px] text-white/45">
           {FREE_WORLDS} free{extra > 0 ? ` + ${extra} unlocked` : ''}
@@ -169,10 +242,52 @@ export function WorldsPanel() {
           </button>
           <span className="text-center text-[11px] text-white/45">You have {tokens} tokens.</span>
         </div>
+      ) : choosing ? (
+        <form
+          className="flex flex-col gap-2 rounded-2xl bg-white/5 p-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void add();
+          }}
+        >
+          <input
+            autoFocus
+            maxLength={30}
+            placeholder={`World ${worlds.length + 1}`}
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            className="rounded-full bg-white/10 px-3.5 py-2 text-base outline-none placeholder:text-white/35 sm:text-sm"
+          />
+          <div className="flex gap-1.5">
+            {(['private', 'public'] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setNewVisibility(v)}
+                className={`flex-1 rounded-full px-3 py-1.5 text-xs font-medium ${newVisibility === v ? 'bg-white text-black' : 'bg-white/10 text-white/75'}`}
+              >
+                {v === 'private' ? 'Private' : 'Public'}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] leading-snug text-white/50">
+            {newVisibility === 'private'
+              ? 'Only you, plus friends you invite with a code or approve on request.'
+              : 'Listed in Community so other players can explore it. You choose whether visitors can build.'}
+          </p>
+          <div className="flex gap-1.5">
+            <button type="button" onClick={() => setChoosing(false)} className="flex-1 rounded-full bg-white/10 px-3 py-2 text-xs text-white/80">
+              Cancel
+            </button>
+            <button type="submit" disabled={busy} className="flex-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black disabled:opacity-50">
+              Create
+            </button>
+          </div>
+        </form>
       ) : (
         <button
           disabled={busy}
-          onClick={() => void add()}
+          onClick={() => setChoosing(true)}
           className="flex min-h-10 items-center justify-center gap-2 rounded-full bg-white px-4 text-sm font-medium text-black active:bg-white/80 disabled:opacity-50 sm:min-h-0 sm:py-2"
         >
           <Icon name="plus" />

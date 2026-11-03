@@ -1,19 +1,32 @@
 import { useAuthStore } from '../state/useAuthStore';
 import { useCityStore, type Piece } from '../state/useCityStore';
 import { useSyncStore } from '../state/useSyncStore';
-import { useWorldsStore, worldLimit, type WorldMeta } from '../state/useWorldsStore';
+import { useGameStore } from '../state/useGameStore';
+import { ownedCount, useWorldsStore, worldLimit, type WorldMeta, type WorldVisibility } from '../state/useWorldsStore';
+import { broadcastPatch, joinWorldChannel, leaveWorldChannel } from './collab';
 import { isSupabaseConfigured } from './supabaseClient';
 import { useTerrainStore, type TerrainCell } from '../terrain/terrain';
 import {
   deleteWorldRow,
   fetchExtraSlots,
   fetchWorld,
+  fetchWorldInfo,
+  joinWorldByCode,
+  listJoinedWorlds,
   listWorlds,
   parsePieces,
   parseTerrain,
+  patchIsEmpty,
+  pushPatch,
   pushWorld,
+  removeMember,
   renameWorldRow,
+  requestWorldJoin,
   saveExtraSlots,
+  setWorldPublicBuild,
+  setWorldVisibility,
+  type WorldPatch,
+  type WorldRow,
 } from './worldPersistence';
 
 /**
@@ -38,6 +51,8 @@ const listKey = (scope: string) => `apnagali.worlds.v1.${scope}`;
 const activeKey = (scope: string) => `apnagali.world.active.${scope}`;
 const slotsKey = (scope: string) => `apnagali.world.slots.${scope}`;
 const SAVE_DELAY_MS = 1500;
+/** In a shared world changes go out quickly so friends see them soon. */
+const SHARED_DELAY_MS = 500;
 const SAVE_MAX_WAIT_MS = 10_000;
 const LOCAL_DELAY_MS = 400;
 
@@ -94,7 +109,7 @@ function readList(scope: string): WorldMeta[] {
     if (!Array.isArray(raw)) return [];
     return raw
       .filter((w): w is WorldMeta => !!w && typeof w.id === 'string' && typeof w.name === 'string')
-      .map((w) => ({ id: w.id, name: w.name, updatedAt: Number(w.updatedAt) || 0, pieces: typeof w.pieces === 'number' ? w.pieces : undefined }));
+      .map((w) => ({ ...w, updatedAt: Number(w.updatedAt) || 0, pieces: typeof w.pieces === 'number' ? w.pieces : undefined }));
   } catch {
     return [];
   }
@@ -157,6 +172,11 @@ let localTimer: ReturnType<typeof setTimeout> | undefined;
 let cloudTimer: ReturnType<typeof setTimeout> | undefined;
 let maxWaitTimer: ReturnType<typeof setTimeout> | undefined;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
+/** What the cloud (and the other builders) already have; edits are the difference from it. */
+let baseP: Record<string, Piece> = {};
+let baseT: Terrain = {};
+/** The open world has been loaded, so live changes from other players can be applied. */
+let loadedWorld: string | null = null;
 
 const setStatus = (patch: Partial<ReturnType<typeof useSyncStore.getState>>) => useSyncStore.setState(patch);
 const scopeOf = () => identity ?? 'guest';
@@ -171,6 +191,53 @@ function applyWorld(pieces: Piece[], terrain: Terrain) {
   } finally {
     applying = false;
   }
+  baseP = useCityStore.getState().pieces;
+  baseT = useTerrainStore.getState().cells;
+}
+
+/** Everything changed since the last save, as a small patch. */
+function diffAgainstBase(): WorldPatch {
+  const pieces = useCityStore.getState().pieces;
+  const cells = currentTerrain();
+  const patch: WorldPatch = { pieces: [], removedPieces: [], cells: {}, removedCells: [] };
+  for (const id in pieces) if (baseP[id] !== pieces[id]) patch.pieces.push(pieces[id]);
+  for (const id in baseP) if (!(id in pieces)) patch.removedPieces.push(id);
+  for (const key in cells) if (baseT[key] !== cells[key]) patch.cells[key] = cells[key];
+  for (const key in baseT) if (!(key in cells)) patch.removedCells.push(key);
+  return patch;
+}
+
+/** Applies what another player built, keeping this player's own unsaved edits. */
+function applyRemote(patch: WorldPatch) {
+  if (!activeWorldId || loadedWorld !== activeWorldId) return;
+  const pieces = { ...useCityStore.getState().pieces };
+  const cells = { ...currentTerrain() };
+  for (const id of patch.removedPieces) delete pieces[id];
+  const upserts = parsePieces(patch.pieces);
+  for (const piece of upserts) pieces[piece.id] = piece;
+  const terrain = parseTerrain({ terrain: patch.cells });
+  for (const key of patch.removedCells) delete cells[key];
+  Object.assign(cells, terrain);
+
+  applying = true;
+  try {
+    useTerrainStore.getState().setCells(cells);
+    useCityStore.getState().setPieces(Object.values(pieces));
+  } finally {
+    applying = false;
+  }
+  // These now match the other player's copy, so they are not ours to save again.
+  const nextP = { ...baseP };
+  for (const id of patch.removedPieces) delete nextP[id];
+  const livePieces = useCityStore.getState().pieces;
+  for (const piece of upserts) nextP[piece.id] = livePieces[piece.id];
+  baseP = nextP;
+  const nextT = { ...baseT };
+  for (const key of patch.removedCells) delete nextT[key];
+  const liveCells = useTerrainStore.getState().cells;
+  for (const key in terrain) nextT[key] = liveCells[key];
+  baseT = nextT;
+  touchActive(false);
 }
 
 const worldsNow = () => useWorldsStore.getState().worlds;
@@ -180,7 +247,47 @@ function setWorlds(list: WorldMeta[]) {
   writeList(scopeOf(), list);
 }
 
-const activeName = () => worldsNow().find((w) => w.id === activeWorldId)?.name ?? 'My World';
+const activeMeta = (): WorldMeta | undefined => worldsNow().find((w) => w.id === activeWorldId) ?? useWorldsStore.getState().visiting ?? undefined;
+const activeName = () => activeMeta()?.name ?? 'My World';
+
+/** This player's display name in shared worlds. */
+function myName(): string {
+  const user = useAuthStore.getState().session?.user;
+  const given = user?.user_metadata?.name ?? user?.user_metadata?.full_name;
+  return String(given ?? user?.email?.split('@')[0] ?? 'Player').slice(0, 30);
+}
+
+const isReadOnly = () => useWorldsStore.getState().readOnly;
+
+/** Other builders may be writing to this world, so save only our changes instead of replacing it all. */
+const patchMode = () => {
+  const m = activeMeta();
+  return !!m && (m.owned === false || !!m.shared || (m.memberCount ?? 0) > 0 || useWorldsStore.getState().online.length > 0);
+};
+
+/** Joins (or leaves) the live channel that fits the open world. */
+function syncChannel() {
+  const uid = identity;
+  if (!uid || !activeWorldId || !activeMeta()) {
+    leaveWorldChannel();
+    return;
+  }
+  joinWorldChannel(activeWorldId, { userId: uid, name: myName() }, applyRemote);
+}
+
+const toMeta = (row: WorldRow, uid: string, cached?: WorldMeta): WorldMeta => ({
+  id: row.id,
+  name: row.name,
+  updatedAt: row.updatedAt,
+  pieces: cached?.pieces,
+  owned: row.ownerId ? row.ownerId === uid : true,
+  visibility: row.visibility,
+  publicBuild: row.publicBuild,
+  ownerName: row.ownerName,
+  joinCode: row.joinCode,
+  memberCount: row.memberCount,
+  shared: row.visibility === 'public' && row.publicBuild !== false,
+});
 
 /** Keeps the picker's piece count (and, after an edit, "last saved") for the open world current. */
 function touchActive(edited: boolean) {
@@ -197,8 +304,16 @@ function touchActive(edited: boolean) {
 
 function activate(id: string) {
   activeWorldId = id;
-  setItem(activeKey(scopeOf()), id);
-  useWorldsStore.setState({ activeId: id });
+  loadedWorld = null;
+  const inList = worldsNow().some((w) => w.id === id);
+  if (inList) {
+    setItem(activeKey(scopeOf()), id);
+    useWorldsStore.setState({ activeId: id, visiting: null, readOnly: false });
+  } else {
+    useWorldsStore.setState({ activeId: id });
+  }
+  if (isReadOnly()) useGameStore.getState().setMode('roam');
+  syncChannel();
 }
 
 function persistLocal(synced: boolean) {
@@ -230,13 +345,14 @@ function markDirty(delay = SAVE_DELAY_MS) {
 
 /** The player changed the city. */
 function onChange() {
+  if (isReadOnly()) return;
   clearTimeout(localTimer);
   localTimer = setTimeout(() => persistLocal(false), LOCAL_DELAY_MS);
   const status = useSyncStore.getState().status;
   changeSeq++;
   if (!identity || status === 'loading') return;
   if (status !== 'error' && status !== 'offline') setStatus({ status: 'saving' });
-  scheduleCloud(SAVE_DELAY_MS);
+  scheduleCloud(patchMode() ? SHARED_DELAY_MS : SAVE_DELAY_MS);
 }
 
 async function pushNow(): Promise<void> {
@@ -244,6 +360,10 @@ async function pushNow(): Promise<void> {
   clearTimeout(maxWaitTimer);
   cloudTimer = maxWaitTimer = undefined;
   if (!identity || !activeWorldId || pushing || changeSeq === syncedSeq) return;
+  if (isReadOnly()) {
+    syncedSeq = changeSeq;
+    return;
+  }
   if (blocked) {
     // Never save over a cloud world we could not read: try reading it again first.
     void loadCloudWorld(identity, activeWorldId, worldToken);
@@ -258,15 +378,30 @@ async function pushNow(): Promise<void> {
   persistLocal(false);
   if (useSyncStore.getState().status !== 'error') setStatus({ status: 'saving' });
 
+  const meta = activeMeta();
+  const patch = diffAgainstBase();
+  const snapP = useCityStore.getState().pieces;
+  const snapT = currentTerrain();
   let error: string | null;
   try {
-    error = await pushWorld(uid, wid, name, currentPieces(), currentTerrain());
+    if (patchMode() && meta) {
+      error = patchIsEmpty(patch) ? null : await pushPatch(wid, patch);
+    } else {
+      error = await pushWorld(uid, wid, name, currentPieces(), snapT, { visibility: meta?.visibility, ownerName: myName() });
+    }
   } catch (e) {
     error = e instanceof Error ? e.message : 'Network error';
   }
   pushing = false;
   if (uid !== identity || wid !== activeWorldId) return; // signed out / switched world while saving
 
+  if (error && /cannot build/i.test(error)) {
+    // The owner turned building off (or removed us): keep looking around, stop saving.
+    useWorldsStore.setState({ readOnly: true, error: 'The owner turned building off in this world.' });
+    useGameStore.getState().setMode('roam');
+    setStatus({ status: 'saved', error: null });
+    return;
+  }
   if (error) {
     setStatus({ status: navigator.onLine ? 'error' : 'offline', error });
     clearTimeout(retryTimer);
@@ -277,6 +412,9 @@ async function pushNow(): Promise<void> {
   retryDelay = 2000;
   clearTimeout(retryTimer);
   syncedSeq = seq;
+  baseP = snapP;
+  baseT = snapT;
+  if (!patchIsEmpty(patch)) broadcastPatch(uid, patch);
   if (changeSeq === seq) {
     persistLocal(true);
     setStatus({ status: 'saved', lastSavedAt: Date.now(), error: null });
@@ -323,7 +461,8 @@ async function loadCloudWorld(
   }
 
   blocked = false;
-  if (mine && !mine.synced) {
+  loadedWorld = id;
+  if (mine && !mine.synced && !patchMode() && !isReadOnly()) {
     // This device has edits that never reached the cloud: they win over the older copy.
     applyWorld(mine.pieces, mine.terrain);
     markDirty(300);
@@ -332,6 +471,11 @@ async function loadCloudWorld(
     applyWorld(result.pieces, result.terrain);
     persistLocal(true);
     setStatus({ status: 'saved', lastSavedAt: null, error: null });
+  } else if (patchMode()) {
+    // A shared world that is gone, or that we may no longer open.
+    applyWorld([], {});
+    setStatus({ status: 'error', error: 'This world is no longer available.' });
+    return;
   } else {
     // Not in the account yet (a world created offline, or deleted elsewhere): upload this copy.
     applyWorld(mine?.pieces ?? [], mine?.terrain ?? {});
@@ -382,6 +526,8 @@ async function handleIdentity(): Promise<void> {
   const wtoken = worldToken;
 
   if (!uid) {
+    leaveWorldChannel();
+    useWorldsStore.setState({ visiting: null, readOnly: false });
     // Signed out (or never signed in): show this device's guest worlds, never the account's.
     if (wasInitialized && previous) applyWorld([], {});
     loadGuest();
@@ -397,6 +543,12 @@ async function handleIdentity(): Promise<void> {
   } catch {
     // offline: fall back to the list cached on this device
   }
+  let joined: WorldRow[] = [];
+  try {
+    joined = await listJoinedWorlds(uid);
+  } catch {
+    // joined worlds appear again once the account answers
+  }
   let extra: number | null = null;
   try {
     extra = await fetchExtraSlots(uid);
@@ -411,7 +563,8 @@ async function handleIdentity(): Promise<void> {
     const inCloud = new Set(cloudList.map((w) => w.id));
     // Worlds made on this device that have not reached the account yet stay in the list.
     const pending = cached.filter((w) => !inCloud.has(w.id) && readLocal(uid, w.id)?.synced === false);
-    worlds = [...cloudList.map((w) => ({ ...w, pieces: cached.find((c) => c.id === w.id)?.pieces })), ...pending];
+    const withCount = (w: WorldRow) => toMeta(w, uid, cached.find((c) => c.id === w.id));
+    worlds = [...cloudList.map(withCount), ...joined.map(withCount), ...pending];
   } else {
     worlds = cached;
   }
@@ -481,7 +634,7 @@ async function handleIdentity(): Promise<void> {
       setStatus({ status: 'saving' });
       return;
     }
-    const canAdd = worlds.length < worldLimit(slots);
+    const canAdd = ownedCount(worlds) < worldLimit(slots);
     const choice = await new Promise<'cloud' | 'local'>((resolve) => {
       setStatus({
         conflict: { localCount: onScreen.length + Object.keys(onScreenTerrain).length, cloudCount, canAdd },
@@ -553,16 +706,23 @@ export async function openWorld(id: string): Promise<void> {
 }
 
 /** Starts a new empty world and opens it. Resolves to an error message (or null). */
-export async function createWorld(name?: string): Promise<string | null> {
+export async function createWorld(name?: string, visibility: WorldVisibility = 'private'): Promise<string | null> {
   const state = useWorldsStore.getState();
   if (state.busy) return null;
-  if (state.worlds.length >= worldLimit(state.extraSlots)) return 'limit';
+  if (ownedCount(state.worlds) >= worldLimit(state.extraSlots)) return 'limit';
   setBusy(true);
   try {
     await flushSync();
     clearCloudTimers();
     const list = worldsNow();
-    const meta = makeMeta(cleanName(name) || `World ${list.length + 1}`);
+    const meta: WorldMeta = {
+      ...makeMeta(cleanName(name) || `World ${list.length + 1}`),
+      owned: true,
+      visibility,
+      publicBuild: true,
+      shared: visibility === 'public',
+      ownerName: myName(),
+    };
     setWorlds([...list, meta]);
     changeSeq = syncedSeq = 0;
     retryDelay = 2000;
@@ -604,7 +764,8 @@ export async function deleteWorld(id: string): Promise<string | null> {
       for (let i = 0; i < 30 && pushing; i++) await new Promise((r) => setTimeout(r, 100));
     }
     if (identity) {
-      const error = await deleteWorldRow(identity, id);
+      const joined = worldsNow().find((w) => w.id === id)?.owned === false;
+      const error = joined ? await removeMember(id, identity) : await deleteWorldRow(identity, id);
       if (error) return error;
     }
     removeLocal(scopeOf(), id);
@@ -650,6 +811,97 @@ export async function grantWorldSlot(): Promise<string | null> {
     writeSlots(scopeOf(), before);
   }
   return error;
+}
+
+// --- Community and co-op ----------------------------------------------------------------------
+
+const patchWorldMeta = (id: string, patch: Partial<WorldMeta>) => setWorlds(worldsNow().map((w) => (w.id === id ? { ...w, ...patch } : w)));
+
+/** Owner: makes a world private or public (public worlds appear in Community). */
+export async function setVisibility(id: string, visibility: WorldVisibility): Promise<string | null> {
+  if (!identity) return 'Sign in to share a world.';
+  // A world made on this device may not exist in the account yet: save it first.
+  await flushSync();
+  const error = await setWorldVisibility(identity, id, visibility);
+  if (!error) patchWorldMeta(id, { visibility, shared: visibility === 'public' && worldsNow().find((w) => w.id === id)?.publicBuild !== false });
+  return error;
+}
+
+/** Owner: lets visitors build in a public world, or only explore it. */
+export async function setPublicBuild(id: string, publicBuild: boolean): Promise<string | null> {
+  if (!identity) return 'Sign in to share a world.';
+  const error = await setWorldPublicBuild(identity, id, publicBuild);
+  if (!error) patchWorldMeta(id, { publicBuild, shared: worldsNow().find((w) => w.id === id)?.visibility === 'public' && publicBuild });
+  return error;
+}
+
+/** Reloads the world list from the account (after joining a world, or when friends joined yours). */
+export async function refreshWorlds(): Promise<void> {
+  const uid = identity;
+  if (!uid) return;
+  const [listed, joined] = await Promise.all([listWorlds(uid), listJoinedWorlds(uid)]);
+  if (uid !== identity || listed.error) return;
+  const cached = worldsNow();
+  const pending = cached.filter((w) => w.owned !== false && !listed.worlds.some((l) => l.id === w.id) && readLocal(uid, w.id)?.synced === false);
+  const withCount = (w: WorldRow) => toMeta(w, uid, cached.find((c) => c.id === w.id));
+  setWorlds([...listed.worlds.map(withCount), ...joined.map(withCount), ...pending]);
+}
+
+/** Friend: joins a private world with the owner's code, then opens it. Resolves to an error (or null). */
+export async function joinWithCode(code: string): Promise<string | null> {
+  if (!identity) return 'Sign in to join a friend’s world.';
+  const clean = code.trim();
+  if (!clean) return 'Enter the code your friend gave you.';
+  const { id, error } = await joinWorldByCode(clean, myName());
+  if (error || !id) return error ?? 'Could not join.';
+  await refreshWorlds();
+  await openWorld(id);
+  return null;
+}
+
+/** Friend: asks the owner to let them into a private world. Resolves to a message. */
+export async function requestJoin(worldId: string): Promise<{ message: string; ok: boolean }> {
+  if (!identity) return { message: 'Sign in first.', ok: false };
+  const { worldName, error } = await requestWorldJoin(worldId.trim(), myName());
+  if (error || !worldName) return { message: error ?? 'Could not send the request.', ok: false };
+  if (worldsNow().some((w) => w.id === worldId)) return { message: `You are already in ${worldName}.`, ok: true };
+  return { message: `Request sent to the owner of ${worldName}. It appears under Joined once they approve.`, ok: true };
+}
+
+/** Opens a public world from Community. The player's own and joined worlds open as normal. */
+export async function visitWorld(id: string): Promise<string | null> {
+  const state = useWorldsStore.getState();
+  if (state.busy || id === activeWorldId) return null;
+  if (!identity) return 'Sign in to explore community worlds.';
+  if (worldsNow().some((w) => w.id === id)) {
+    await openWorld(id);
+    return null;
+  }
+  setBusy(true);
+  try {
+    const info = await fetchWorldInfo(id);
+    if (!info) return 'That world is not available any more.';
+    const meta = toMeta(info, identity);
+    useWorldsStore.setState({ visiting: meta, readOnly: info.publicBuild === false });
+    await switchTo(id, true);
+    return null;
+  } finally {
+    setBusy(false);
+  }
+}
+
+/** Leaves a visited community world and returns to the player's own. */
+export async function leaveVisit(): Promise<void> {
+  const state = useWorldsStore.getState();
+  if (!state.visiting || state.busy) return;
+  const first = worldsNow().find((w) => w.owned !== false) ?? worldsNow()[0];
+  setBusy(true);
+  try {
+    useWorldsStore.setState({ visiting: null, readOnly: false });
+    if (first) await switchTo(first.id, true);
+  } finally {
+    setBusy(false);
+  }
 }
 
 let started = false;

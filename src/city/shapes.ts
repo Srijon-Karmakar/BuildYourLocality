@@ -16,6 +16,51 @@ const cache = new Map<string, THREE.BufferGeometry>();
 type P2 = [number, number];
 
 /** Outline broken into strips: straight walls and corner arcs, each with its own vertices so edges stay crisp. */
+/** Straight-edged outline through the given points (each edge its own strip, so corners stay crisp). */
+function polygonStrips(pts: P2[]): P2[][] {
+  return pts.map((p, i) => [p, pts[(i + 1) % pts.length]]);
+}
+
+/** Outlines other than a rounded rectangle: regular polygon, star, cross and Y, fitted to the a x b footprint. */
+function planStrips(plan: string, a: number, b: number, sides: number, inner: number): P2[][] {
+  if (plan === 'poly') {
+    const n = Math.min(16, Math.max(3, Math.round(sides)));
+    const pts: P2[] = [];
+    for (let k = 0; k < n; k++) {
+      const t = (k / n) * Math.PI * 2 - Math.PI / 2 + Math.PI / n;
+      pts.push([a * Math.cos(t), b * Math.sin(t)]);
+    }
+    return polygonStrips(pts);
+  }
+  if (plan === 'star') {
+    const n = Math.min(16, Math.max(3, Math.round(sides)));
+    const pts: P2[] = [];
+    for (let k = 0; k < n * 2; k++) {
+      const t = (k / (n * 2)) * Math.PI * 2 - Math.PI / 2;
+      const rad = k % 2 === 0 ? 1 : Math.min(0.9, Math.max(0.1, inner));
+      pts.push([a * rad * Math.cos(t), b * rad * Math.sin(t)]);
+    }
+    return polygonStrips(pts);
+  }
+  // Cross (four arms) and Y (three): arms of half-width t that meet at inner corners.
+  const arms = plan === 'y' ? 3 : 4;
+  const t = Math.min(0.9, Math.max(0.1, inner)) * 0.5;
+  const step = (Math.PI * 2) / arms;
+  const junction = t / Math.sin(step / 2);
+  const pts: P2[] = [];
+  for (let i = 0; i < arms; i++) {
+    const phi = -Math.PI / 2 + i * step;
+    const dx = Math.cos(phi);
+    const dz = Math.sin(phi);
+    const px = -dz;
+    const pz = dx;
+    pts.push([dx - px * t, dz - pz * t], [dx + px * t, dz + pz * t]);
+    const mid = phi + step / 2;
+    pts.push([Math.cos(mid) * junction, Math.sin(mid) * junction]);
+  }
+  return polygonStrips(pts.map(([x, z]): P2 => [x * a, z * b]));
+}
+
 function outlineStrips(a: number, b: number, r: number, bevel: boolean): P2[][] {
   const strips: P2[][] = [];
   const ix = a - r;
@@ -49,15 +94,24 @@ export function shapedBodyGeometry(box: BlockBox, floors: number, block: Block):
   const curve = Math.min(1, Math.max(-1, block.curve ?? 0));
   const top = block.top ?? 'flat';
   const bevel = !!block.bevel;
+  const plan = block.plan ?? 'rect';
+  const sides = block.sides ?? (plan === 'star' ? 5 : 6);
+  const inner = block.inner ?? (plan === 'star' ? 0.45 : 0.4);
+  const flare = Math.min(1, Math.max(-1, block.flare ?? 0));
   const capH = capHeightOf(block, box.w, box.d);
-  const key = [box.w.toFixed(2), box.d.toFixed(2), box.y.toFixed(2), floors, round, taper, twist.toFixed(3), curve, top, capH.toFixed(2), bevel].join('|');
+  const key = [box.w.toFixed(2), box.d.toFixed(2), box.y.toFixed(2), floors, round, taper, twist.toFixed(3), curve, top, capH.toFixed(2), bevel, plan, sides, inner, flare].join('|');
   const hit = cache.get(key);
-  if (hit) return hit;
+  if (hit) {
+    // Most recently used goes to the back of the map, so the front is the oldest.
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit;
+  }
 
   const a = box.w / 2;
   const b = box.d / 2;
   const r = round * Math.min(a, b);
-  const strips = outlineStrips(a, b, r, bevel);
+  const strips = plan === 'rect' ? outlineStrips(a, b, r, bevel) : planStrips(plan, a, b, sides, inner);
 
   // Running length along the outline, for the texture's horizontal coordinate (whole modules around).
   const lengths = strips.map((pts) => {
@@ -79,14 +133,14 @@ export function shapedBodyGeometry(box: BlockBox, floors: number, block: Block):
 
   const y0 = LOT_HEIGHT + box.y;
   const H = box.h;
-  const wallRings = twist || curve ? Math.min(36, Math.max(6, floors)) : 1;
+  const wallRings = twist || curve || flare ? Math.min(36, Math.max(6, floors)) : 1;
 
   // Rings: [scale, angle, y, texture v, group].
   type Ring = { s: number; ang: number; y: number; v: number };
   const wall: Ring[] = [];
   for (let i = 0; i <= wallRings; i++) {
     const t = i / wallRings;
-    wall.push({ s: (1 + (taper - 1) * t) * (1 + 0.35 * curve * Math.sin(Math.PI * t)), ang: twist * t, y: y0 + H * t, v: floors * t });
+    wall.push({ s: (1 + (taper - 1) * t) * (1 + 0.35 * curve * Math.sin(Math.PI * t)) * (1 + 0.8 * flare * Math.pow(1 - t, 3)), ang: twist * t, y: y0 + H * t, v: floors * t });
   }
   const last = wall[wall.length - 1];
   const crown: Ring[] = [];
@@ -174,6 +228,12 @@ export function shapedBodyGeometry(box: BlockBox, floors: number, block: Block):
   geometry.addGroup(wallIndexCount, idx.length - wallIndexCount, 1);
   geometry.computeVertexNormals();
   cache.set(key, geometry);
+  // Dragging a slider makes many one-off shapes; keep only the recent ones.
+  while (cache.size > 120) {
+    const oldest = cache.keys().next().value as string;
+    cache.get(oldest)?.dispose();
+    cache.delete(oldest);
+  }
   return geometry;
 }
 

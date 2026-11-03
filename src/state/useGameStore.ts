@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useWorldsStore } from './useWorldsStore';
 import type { Density } from '../sim/simulation';
 
 /** Build = orbiting city-builder camera; roam = first-person walk / fly through the city. */
@@ -69,7 +70,8 @@ export const useGameStore = create<GameState>((set) => ({
   roamSubMode: 'peaceful',
   graphics: { ...PRESETS[startPreset], preset: startPreset, adaptive: true, showFps: false, bloom: !isCoarsePointer, headBob: true, ...savedGraphics() },
   flying: false,
-  setMode: (mode) => set({ mode }),
+  // A world that can only be explored (community world with building turned off) never enters build mode.
+  setMode: (mode) => set({ mode: mode === 'build' && useWorldsStore.getState().readOnly ? 'roam' : mode }),
   setRoamSubMode: (roamSubMode) => set({ roamSubMode }),
   setGraphics: (patch) =>
     set((state) => {

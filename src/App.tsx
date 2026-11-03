@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
-import { startSync } from './lib/sync';
+import { joinWithCode, requestJoin, startSync } from './lib/sync';
+import { useWorldsStore } from './state/useWorldsStore';
+import { useMenuStore } from './state/useMenuStore';
 import { startWallet } from './lib/wallet';
 import { initAds } from './lib/rewardedAd';
 import { useAuthStore } from './state/useAuthStore';
@@ -33,6 +35,20 @@ function App() {
       stopAuth();
     };
   }, []);
+
+  // Invite links: ?join=CODE joins a friend's world, ?world=ID asks the owner to let you in.
+  const signedIn = useAuthStore((s) => !!s.session);
+  useEffect(() => {
+    if (!signedIn) return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('join');
+    const world = params.get('world');
+    if (!code && !world) return;
+    window.history.replaceState(null, '', window.location.pathname);
+    useMenuStore.getState().select('worlds');
+    if (code) void joinWithCode(code).then((err) => useWorldsStore.setState({ error: err }));
+    else if (world) void requestJoin(world).then((r) => useWorldsStore.setState({ error: r.message }));
+  }, [signedIn]);
 
   return (
     <div className="relative h-full w-full overflow-hidden">

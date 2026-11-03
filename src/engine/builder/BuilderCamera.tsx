@@ -24,7 +24,7 @@ function panBy(dx: number, dy: number) {
 /**
  * City-builder camera orbiting a ground point.
  *
- * Mouse: right-drag rotates, middle-drag pans, wheel zooms, WASD/arrows pan, Q/E turn.
+ * Mouse: right-drag rotates, middle-drag pans, wheel zooms, WASD/arrows pan, Q/Z turn, E edit, H hand.
  * Touch: two fingers pan + pinch-zoom + twist-rotate; one finger pans too, except while a
  * drag-to-draw tool (road / delete / paint) is active, where it draws instead. On-screen
  * camera buttons feed virtualKeys for rotate / tilt / zoom.
@@ -115,6 +115,12 @@ export function BuilderCamera() {
         b.setHand(!b.hand);
         return;
       }
+      if (e.code === 'KeyE' && !e.repeat && !e.ctrlKey && !e.metaKey) {
+        const b = useBuilderStore.getState();
+        b.setHand(false);
+        b.setTool('select');
+        return;
+      }
       held.current.add(e.code);
     };
     const onKeyUp = (e: KeyboardEvent) => held.current.delete(e.code);
@@ -165,7 +171,7 @@ export function BuilderCamera() {
     const strafe = axis(['KeyD', 'ArrowRight'], ['KeyA', 'ArrowLeft']);
     viewState.x += (fx * forward + rx * strafe) * speed;
     viewState.z += (fz * forward + rz * strafe) * speed;
-    viewState.yaw += axis(['KeyQ'], ['KeyE']) * 1.5 * delta;
+    viewState.yaw += axis(['KeyQ'], ['KeyZ', 'KeyE']) * 1.5 * delta;
     viewState.pitch = Math.min(MAX_PITCH, Math.max(MIN_PITCH, viewState.pitch + axis(['TiltUp'], ['TiltDown']) * 0.9 * delta));
     viewState.dist = clampDist(viewState.dist * Math.exp(axis(['ZoomOut'], ['ZoomIn']) * 1.1 * delta));
 

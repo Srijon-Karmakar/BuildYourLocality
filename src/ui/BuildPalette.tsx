@@ -95,7 +95,7 @@ function ControlsHint({ touch }: { touch: boolean }) {
     <div className="pointer-events-none rounded-md bg-black/40 pointer-coarse:bg-black/64 px-2 py-0.5 text-[11px] text-white/70 sm:text-xs">
       {touch
         ? 'Tap to place · Drag to pan · Pinch to zoom · Twist to rotate'
-        : 'Click: place · R: rotate · Del/X: delete · Ctrl+Z: undo · H: hand · WASD: pan · Q/E: turn · Right-drag: orbit · Wheel: zoom · Tab: walk'}
+        : 'Click: place · R: rotate · Del/X: delete · Ctrl+Z: undo · H: hand · E: edit · WASD: pan · Q/Z: turn · Right-drag: orbit · Wheel: zoom · Tab: walk'}
     </div>
   );
 }
@@ -315,6 +315,19 @@ export function BuildPalette() {
             </button>
           ))}
           <span className="mx-1 h-5 w-px shrink-0 bg-white/20" />
+          {!touch && (
+          <button
+            className={iconBtn + (!hand && tool === 'select' ? ' bg-white text-black' : ' text-white/90 hover:bg-white/10')}
+            onClick={() => {
+              setHand(false);
+              setTool('select');
+            }}
+            title="Edit (E): click a building to customise it"
+            aria-label="Edit"
+          >
+            <Icon name="edit" />
+          </button>
+          )}
           {!touch && (
           <button
             className={iconBtn + (hand ? ' bg-white text-black' : ' text-white/90 hover:bg-white/10')}

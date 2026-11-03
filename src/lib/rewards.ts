@@ -25,6 +25,10 @@ export interface RewardDef {
 export const REWARDS: RewardDef[] = [
   { id: 'slot', label: 'Extra world', desc: 'One more world slot, to build somewhere new.', icon: 'worlds', cost: 20, repeatable: true },
   { id: 'shotgun', label: 'Shotgun loadout', desc: 'Start every walk with a shotgun and 12 shells.', icon: 'shotgun', cost: 40 },
+  { id: 'revolver', label: 'Revolver', desc: 'A heavy six-shooter. Start every walk with it and 18 rounds.', icon: 'revolver', cost: 30 },
+  { id: 'smg', label: 'Submachine gun', desc: 'Sprays bullets fast. Start every walk with it and 60 rounds.', icon: 'smg', cost: 60 },
+  { id: 'rifle', label: 'Hunting rifle', desc: 'Long range, hard-hitting. Start every walk with it and 20 rounds.', icon: 'rifle', cost: 80 },
+  { id: 'crossbow', label: 'Crossbow', desc: 'Almost silent, so nobody hears you. Start every walk with it and 12 bolts.', icon: 'crossbow', cost: 50 },
   { id: 'wallet', label: 'Deep pockets', desc: 'Start every walk with $500 instead of $200.', icon: 'money', cost: 25 },
 ];
 

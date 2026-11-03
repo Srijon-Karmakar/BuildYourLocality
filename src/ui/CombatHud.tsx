@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { atmo, formatHour } from '../scenes/atmosphere';
-import { combat, SURVIVAL_HOURS, WEAPONS, WEAPON_ORDER, type Stealth, type Toast, type WeaponId } from '../sim/combat';
+import { combat, SURVIVAL_HOURS, UNLOCKABLE_WEAPONS, WEAPONS, WEAPON_ORDER, type Stealth, type Toast, type WeaponId } from '../sim/combat';
 import { REVIVE_COST } from '../lib/rewards';
 import { reviveWithAd, reviveWithTokens } from '../lib/wallet';
 import { useGameStore } from '../state/useGameStore';
@@ -174,6 +174,8 @@ function WeaponBar({ s, compact }: { s: Snapshot; compact: boolean }) {
       {WEAPON_ORDER.map((id, i) => {
         const w = WEAPONS[id];
         const owned = s.owned[id];
+        // Guns bought with tokens only appear once you carry them.
+        if (!owned && id in UNLOCKABLE_WEAPONS) return null;
         const n = s.ammoOf[id];
         return (
           <button

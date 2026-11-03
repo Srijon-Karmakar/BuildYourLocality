@@ -14,8 +14,8 @@ import { cellCentre, cellOf, isWalkable } from './world';
 
 // --- Weapons ---------------------------------------------------------------------------------
 
-export type WeaponId = 'fists' | 'bat' | 'pistol' | 'shotgun' | 'taser';
-export type AmmoKind = 'bullets' | 'shells' | 'charges';
+export type WeaponId = 'fists' | 'bat' | 'pistol' | 'shotgun' | 'taser' | 'revolver' | 'smg' | 'rifle' | 'crossbow';
+export type AmmoKind = 'bullets' | 'shells' | 'charges' | 'bolts';
 
 export interface WeaponDef {
   id: WeaponId;
@@ -44,10 +44,17 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   pistol: { id: 'pistol', label: 'Pistol', icon: 'pistol', melee: false, damage: 26, range: 60, cooldown: 0.34, ammo: 'bullets', pellets: 1, spread: 0.012, knock: 3, stun: 0.25, noise: 48 },
   shotgun: { id: 'shotgun', label: 'Shotgun', icon: 'shotgun', melee: false, damage: 11, range: 24, cooldown: 1.0, ammo: 'shells', pellets: 7, spread: 0.1, knock: 11, stun: 0.9, noise: 58 },
   taser: { id: 'taser', label: 'Taser', icon: 'taser', melee: false, damage: 3, range: 9, cooldown: 1.4, ammo: 'charges', pellets: 1, spread: 0.005, knock: 1, stun: 4.5, noise: 14 },
+  revolver: { id: 'revolver', label: 'Revolver', icon: 'revolver', melee: false, damage: 48, range: 70, cooldown: 0.65, ammo: 'bullets', pellets: 1, spread: 0.008, knock: 7, stun: 0.5, noise: 62 },
+  smg: { id: 'smg', label: 'SMG', icon: 'smg', melee: false, damage: 11, range: 42, cooldown: 0.09, ammo: 'bullets', pellets: 1, spread: 0.045, knock: 1.5, stun: 0.1, noise: 56 },
+  rifle: { id: 'rifle', label: 'Rifle', icon: 'rifle', melee: false, damage: 70, range: 120, cooldown: 0.95, ammo: 'bullets', pellets: 1, spread: 0.002, knock: 9, stun: 0.7, noise: 75 },
+  crossbow: { id: 'crossbow', label: 'Crossbow', icon: 'crossbow', melee: false, damage: 55, range: 65, cooldown: 1.3, ammo: 'bolts', pellets: 1, spread: 0.004, knock: 4, stun: 0.6, noise: 6 },
 };
-export const WEAPON_ORDER: WeaponId[] = ['fists', 'bat', 'pistol', 'shotgun', 'taser'];
+export const WEAPON_ORDER: WeaponId[] = ['fists', 'bat', 'pistol', 'revolver', 'smg', 'shotgun', 'rifle', 'crossbow', 'taser'];
 
-const AMMO_PER_PICKUP: Record<AmmoKind, number> = { bullets: 12, shells: 6, charges: 2 };
+/** Guns that are bought with tokens: the reward id is the weapon id. They come with ammo at the start of every walk. */
+export const UNLOCKABLE_WEAPONS: Partial<Record<WeaponId, number>> = { shotgun: 12, revolver: 18, smg: 60, rifle: 20, crossbow: 12 };
+
+const AMMO_PER_PICKUP: Record<AmmoKind, number> = { bullets: 12, shells: 6, charges: 2, bolts: 4 };
 
 // --- Entities ---------------------------------------------------------------------------------
 
@@ -261,8 +268,8 @@ class Combat {
     cash: 200,
     alive: true,
     weapon: 'fists',
-    owned: { fists: true, bat: true, pistol: false, shotgun: false, taser: false },
-    ammo: { bullets: 0, shells: 0, charges: 0 },
+    owned: { fists: true, bat: true, pistol: false, shotgun: false, taser: false, revolver: false, smg: false, rifle: false, crossbow: false },
+    ammo: { bullets: 0, shells: 0, charges: 0, bolts: 0 },
     cooldown: 0,
     swing: 0,
     swingHand: 0,
@@ -345,13 +352,14 @@ class Combat {
     p.alarm = 0;
     p.cash = Math.max(p.cash, 200);
     p.weapon = 'fists';
-    p.owned = { fists: true, bat: true, pistol: this.subMode === 'survival', shotgun: false, taser: this.subMode === 'survival' };
-    p.ammo = { bullets: this.subMode === 'survival' ? 16 : 0, shells: 0, charges: this.subMode === 'survival' ? 3 : 0 };
+    p.owned = { fists: true, bat: true, pistol: this.subMode === 'survival', shotgun: false, taser: this.subMode === 'survival', revolver: false, smg: false, rifle: false, crossbow: false };
+    p.ammo = { bullets: this.subMode === 'survival' ? 16 : 0, shells: 0, charges: this.subMode === 'survival' ? 3 : 0, bolts: 0 };
     // Loadout bought with tokens (lib/rewards.ts).
     const unlocks = useWalletStore.getState().unlocks;
-    if (unlocks.includes('shotgun')) {
-      p.owned.shotgun = true;
-      p.ammo.shells = 12;
+    for (const id of Object.keys(UNLOCKABLE_WEAPONS) as WeaponId[]) {
+      if (!unlocks.includes(id)) continue;
+      p.owned[id] = true;
+      p.ammo[WEAPONS[id].ammo!] += UNLOCKABLE_WEAPONS[id] ?? 0;
     }
     if (unlocks.includes('wallet')) p.cash = Math.max(p.cash, 500);
     p.kills = 0;
@@ -1311,7 +1319,7 @@ class Combat {
         this.toast('Medkit: +40 health', 'good');
         break;
       case 'ammo': {
-        const owned = (['pistol', 'shotgun', 'taser'] as WeaponId[]).filter((w) => p.owned[w]);
+        const owned = WEAPON_ORDER.filter((w) => WEAPONS[w].ammo && p.owned[w]);
         const w = owned.length > 0 ? pick(owned) : 'pistol';
         const kind = WEAPONS[w].ammo!;
         p.ammo[kind] += AMMO_PER_PICKUP[kind];
@@ -1394,7 +1402,7 @@ class Combat {
     }
 
     // Ranged: each pellet is a ray tested against everything standing in the way.
-    playSfx(w.id === 'shotgun' ? 'shotgun' : w.id === 'taser' ? 'taser' : 'shot');
+    playSfx(w.id === 'shotgun' ? 'shotgun' : w.id === 'taser' ? 'taser' : w.id === 'crossbow' ? 'swing' : 'shot', w.id === 'smg' ? 0.7 : 1);
     for (let i = 0; i < w.pellets; i++) {
       const sx = (Math.random() - 0.5) * 2 * w.spread;
       const sy = (Math.random() - 0.5) * 2 * w.spread;
@@ -1444,8 +1452,8 @@ class Combat {
         x1: a.x + dx * bestT,
         y1: a.y + dy * bestT,
         z1: a.z + dz * bestT,
-        life: w.id === 'taser' ? 0.18 : 0.07,
-        colour: w.id === 'taser' ? 0x7de3ff : 0xffe9a0,
+        life: w.id === 'taser' ? 0.18 : w.id === 'crossbow' ? 0.14 : 0.07,
+        colour: w.id === 'taser' ? 0x7de3ff : w.id === 'crossbow' ? 0xd9d2c0 : 0xffe9a0,
       });
       if (hit.kind && hit.ref) {
         const flat = Math.hypot(dx, dz) || 1;
@@ -1864,7 +1872,8 @@ class Combat {
     }
 
     // An armed, recently active player scares people.
-    const armed = (p.weapon === 'pistol' || p.weapon === 'shotgun') && p.alive;
+    // A crossbow is quiet enough not to scare anyone; every other gun except the taser does.
+    const armed = !WEAPONS[p.weapon].melee && p.weapon !== 'taser' && p.weapon !== 'crossbow' && p.alive;
     if (armed && sim.time - this.lastShotAt < 6 && nearPlayer < 14 && ped.role === 'civilian' && (ped.state as string) !== 'fleeing') {
       if (ped.temper < 0.85) {
         if (Math.random() < 0.35 && nearPlayer < 8) {

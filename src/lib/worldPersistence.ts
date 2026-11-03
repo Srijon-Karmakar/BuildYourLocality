@@ -28,6 +28,7 @@ import {
   lotUnits,
   type Block,
   BLOCK_TOPS,
+  BLOCK_PLANS,
   type DoorSpec,
   type PieceType,
 } from '../city/catalog';
@@ -36,12 +37,20 @@ import { TREE_SHAPES, type TreeSpec } from '../city/trees';
 import { WALL_CAPS, WALL_OPENINGS, WALL_POSTS, WALL_STYLES, type WallSpec } from '../city/walls';
 import { COVERS, MAX_HEIGHT, MIN_HEIGHT, type TerrainCell } from '../terrain/terrain';
 import { supabase } from './supabaseClient';
+import type { WorldVisibility } from '../state/useWorldsStore';
 
 /** A saved world as listed in the world picker (the city itself is fetched on demand). */
 export interface WorldRow {
   id: string;
   name: string;
   updatedAt: number;
+  ownerId?: string;
+  ownerName?: string;
+  visibility?: WorldVisibility;
+  publicBuild?: boolean;
+  /** Owner only: the invite code and how many friends have joined. */
+  joinCode?: string;
+  memberCount?: number;
 }
 
 /** Postgres "unique violation" / our limit trigger: the database has not been migrated for several worlds yet. */
@@ -59,26 +68,90 @@ export async function pushWorld(
   name: string,
   pieces: Piece[],
   terrain: Record<string, TerrainCell> = {},
+  extra: { visibility?: WorldVisibility; ownerName?: string } = {},
 ): Promise<string | null> {
   const { error } = await supabase.from('worlds').upsert(
-    { id, owner_id: userId, name, chunks: { terrain }, objects: pieces, updated_at: new Date().toISOString() },
+    {
+      id,
+      owner_id: userId,
+      name,
+      chunks: { terrain },
+      objects: pieces,
+      updated_at: new Date().toISOString(),
+      ...(extra.visibility ? { visibility: extra.visibility } : {}),
+      ...(extra.ownerName ? { owner_name: extra.ownerName } : {}),
+    },
     { onConflict: 'id' },
   );
   return error ? friendly(error) : null;
 }
 
+const WORLD_COLUMNS = 'id, name, updated_at, owner_id, owner_name, visibility, public_build';
+
+interface RawWorld {
+  id: unknown;
+  name: unknown;
+  updated_at: unknown;
+  owner_id?: unknown;
+  owner_name?: unknown;
+  visibility?: unknown;
+  public_build?: unknown;
+  join_code?: unknown;
+  world_members?: { count: number }[] | null;
+}
+
+const toRow = (r: RawWorld): WorldRow => ({
+  id: String(r.id),
+  name: String(r.name ?? 'My World'),
+  updatedAt: Date.parse(String(r.updated_at)) || 0,
+  ownerId: r.owner_id ? String(r.owner_id) : undefined,
+  ownerName: r.owner_name ? String(r.owner_name) : undefined,
+  visibility: r.visibility === 'public' ? 'public' : 'private',
+  publicBuild: r.public_build !== false,
+  joinCode: r.join_code ? String(r.join_code) : undefined,
+  memberCount: r.world_members?.[0]?.count,
+});
+
 /** Lists the user's worlds, newest first, without their contents. */
 export async function listWorlds(userId: string): Promise<{ worlds: WorldRow[]; error: string | null }> {
   const { data, error } = await supabase
     .from('worlds')
-    .select('id, name, updated_at')
+    .select(`${WORLD_COLUMNS}, join_code, world_members(count)`)
     .eq('owner_id', userId)
     .order('updated_at', { ascending: false });
   if (error) return { worlds: [], error: error.message };
-  return {
-    worlds: (data ?? []).map((r) => ({ id: String(r.id), name: String(r.name ?? 'My World'), updatedAt: Date.parse(String(r.updated_at)) || 0 })),
-    error: null,
-  };
+  return { worlds: (data ?? []).map((r) => toRow(r as RawWorld)), error: null };
+}
+
+/** Worlds the player joined as a friend (their own are not included). */
+export async function listJoinedWorlds(userId: string): Promise<WorldRow[]> {
+  const { data, error } = await supabase.from('world_members').select(`worlds(${WORLD_COLUMNS})`).eq('user_id', userId);
+  if (error) return [];
+  const rows: WorldRow[] = [];
+  for (const m of data ?? []) {
+    const w = (m as unknown as { worlds: RawWorld | RawWorld[] | null }).worlds;
+    const one = Array.isArray(w) ? w[0] : w;
+    if (one) rows.push(toRow(one));
+  }
+  return rows;
+}
+
+/** Public worlds for the Community tab, most recently built in first. */
+export async function listPublicWorlds(): Promise<{ worlds: WorldRow[]; error: string | null }> {
+  const { data, error } = await supabase
+    .from('worlds')
+    .select(WORLD_COLUMNS)
+    .eq('visibility', 'public')
+    .order('updated_at', { ascending: false })
+    .limit(60);
+  if (error) return { worlds: [], error: error.message };
+  return { worlds: (data ?? []).map((r) => toRow(r as RawWorld)), error: null };
+}
+
+/** One world's details (null when it does not exist or is not visible to this player). */
+export async function fetchWorldInfo(id: string): Promise<WorldRow | null> {
+  const { data } = await supabase.from('worlds').select(`${WORLD_COLUMNS}, join_code`).eq('id', id).maybeSingle();
+  return data ? toRow(data as RawWorld) : null;
 }
 
 export async function renameWorldRow(userId: string, id: string, name: string): Promise<string | null> {
@@ -155,6 +228,21 @@ function sanitizeBlocks(blocks: unknown, lot: [number, number]): Block[] | undef
     if (BLOCK_TOPS.some((t) => t.id === raw.top) && raw.top !== 'flat') block.top = raw.top;
     const topH = num(raw.topH, 0, 400, 0.5);
     if (topH) block.topH = topH;
+    if (BLOCK_PLANS.some((p) => p.id === raw.plan) && raw.plan !== 'rect') block.plan = raw.plan;
+    const sides = num(raw.sides, 3, 16, 1);
+    if (sides) block.sides = sides;
+    const inner = num(raw.inner, 0.1, 0.9, 0.05);
+    if (inner) block.inner = inner;
+    const flare = num(raw.flare, -1, 1, 0.05);
+    if (flare) block.flare = flare;
+    const fw = num(raw.fw, 0.2, 1, 0.05);
+    if (fw !== undefined && fw !== 1) block.fw = fw;
+    const fd = num(raw.fd, 0.2, 1, 0.05);
+    if (fd !== undefined && fd !== 1) block.fd = fd;
+    const ox = num(raw.ox, -120, 120, 0.25);
+    if (ox) block.ox = ox;
+    const oz = num(raw.oz, -120, 120, 0.25);
+    if (oz) block.oz = oz;
     return block;
   });
 }
@@ -369,10 +457,10 @@ export function parseTerrain(chunks: unknown): Record<string, TerrainCell> {
 
 /** Fetches one saved world's contents (null pieces when the world no longer exists), or an error message. */
 export async function fetchWorld(
-  userId: string,
+  _userId: string,
   id: string,
 ): Promise<{ pieces: Piece[] | null; terrain: Record<string, TerrainCell>; error: string | null }> {
-  const { data, error } = await supabase.from('worlds').select('objects, chunks').eq('owner_id', userId).eq('id', id).maybeSingle();
+  const { data, error } = await supabase.from('worlds').select('objects, chunks').eq('id', id).maybeSingle();
   if (error) return { pieces: null, terrain: {}, error: error.message };
   return { pieces: data ? parsePieces(data.objects) : null, terrain: data ? parseTerrain(data.chunks) : {}, error: null };
 }
@@ -395,4 +483,82 @@ export async function fetchWallet(userId: string): Promise<WalletRow | null> {
 export async function saveWallet(userId: string, wallet: WalletRow): Promise<string | null> {
   const { error } = await supabase.from('player_limits').upsert({ user_id: userId, tokens: wallet.tokens, unlocks: wallet.unlocks }, { onConflict: 'user_id' });
   return error?.message ?? null;
+}
+
+// --- Community and co-op ----------------------------------------------------------------------
+
+/** Saves only what changed, so players building in the same world do not overwrite each other. */
+export interface WorldPatch {
+  pieces: Piece[];
+  removedPieces: string[];
+  cells: Record<string, TerrainCell>;
+  removedCells: string[];
+}
+
+export const patchIsEmpty = (p: WorldPatch) =>
+  p.pieces.length === 0 && p.removedPieces.length === 0 && p.removedCells.length === 0 && Object.keys(p.cells).length === 0;
+
+export async function pushPatch(worldId: string, patch: WorldPatch): Promise<string | null> {
+  const { error } = await supabase.rpc('apply_world_patch', {
+    p_world: worldId,
+    p_pu: patch.pieces,
+    p_pr: patch.removedPieces,
+    p_tu: patch.cells,
+    p_tr: patch.removedCells,
+  });
+  return error?.message ?? null;
+}
+
+export async function setWorldVisibility(userId: string, id: string, visibility: WorldVisibility): Promise<string | null> {
+  const { error } = await supabase.from('worlds').update({ visibility }).eq('id', id).eq('owner_id', userId);
+  return error?.message ?? null;
+}
+
+/** Public worlds only: whether visitors may build, or only explore. */
+export async function setWorldPublicBuild(userId: string, id: string, publicBuild: boolean): Promise<string | null> {
+  const { error } = await supabase.from('worlds').update({ public_build: publicBuild }).eq('id', id).eq('owner_id', userId);
+  return error?.message ?? null;
+}
+
+/** Joins a private world with its invite code. Resolves to the world id, or an error message. */
+export async function joinWorldByCode(code: string, name: string): Promise<{ id: string | null; error: string | null }> {
+  const { data, error } = await supabase.rpc('join_world_by_code', { p_code: code, p_name: name });
+  return error ? { id: null, error: error.message } : { id: String(data), error: null };
+}
+
+/** Asks a world's owner for access. Resolves to the world's name, or an error message. */
+export async function requestWorldJoin(worldId: string, name: string): Promise<{ worldName: string | null; error: string | null }> {
+  const { data, error } = await supabase.rpc('request_world_join', { p_world: worldId, p_name: name });
+  return error ? { worldName: null, error: error.message } : { worldName: String(data), error: null };
+}
+
+export interface PersonRow {
+  userId: string;
+  name: string;
+}
+
+export async function listMembers(worldId: string): Promise<PersonRow[]> {
+  const { data } = await supabase.from('world_members').select('user_id, name').eq('world_id', worldId).order('joined_at');
+  return (data ?? []).map((r) => ({ userId: String(r.user_id), name: String(r.name) }));
+}
+
+export async function listRequests(worldId: string): Promise<PersonRow[]> {
+  const { data } = await supabase.from('world_requests').select('user_id, name').eq('world_id', worldId).order('created_at');
+  return (data ?? []).map((r) => ({ userId: String(r.user_id), name: String(r.name) }));
+}
+
+export async function resolveRequest(worldId: string, userId: string, approve: boolean): Promise<string | null> {
+  const { error } = await supabase.rpc('resolve_world_request', { p_world: worldId, p_user: userId, p_approve: approve });
+  return error?.message ?? null;
+}
+
+/** Owner removes a friend, or a friend leaves (their own id). */
+export async function removeMember(worldId: string, userId: string): Promise<string | null> {
+  const { error } = await supabase.from('world_members').delete().eq('world_id', worldId).eq('user_id', userId);
+  return error?.message ?? null;
+}
+
+export async function regenerateJoinCode(worldId: string): Promise<{ code: string | null; error: string | null }> {
+  const { data, error } = await supabase.rpc('regenerate_join_code', { p_world: worldId });
+  return error ? { code: null, error: error.message } : { code: String(data), error: null };
 }
