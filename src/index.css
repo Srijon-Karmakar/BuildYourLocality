@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* Title font of the loading screen (public/fonts). */
+@font-face {
+  font-family: "Bouncy Bites";
+  src: url("/fonts/BouncyBites-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: block;
+}
+
 /* Softer, rounder UI everywhere: every rounded-* class in the interface reads these. */
 @theme {
   --radius-xs: 0.25rem;
@@ -96,4 +104,57 @@ button,
 label,
 select {
   touch-action: manipulation;
+}
+
+/* Loading screen: a slow push-in on the banner, and each message sliding up as it appears. */
+@keyframes loader-drift {
+  from { transform: scale(1.02); }
+  to { transform: scale(1.09); }
+}
+.loader-drift { animation: loader-drift 14s ease-out forwards; }
+@keyframes loader-line {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.loader-line { animation: loader-line 0.5s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .loader-drift, .loader-line { animation: none; }
+}
+
+/* Loading screen title: a sci-fi face with a glitch. Two coloured copies jitter behind and slice across the letters. */
+.glitch { position: relative; display: inline-block; }
+.glitch::before,
+.glitch::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  -webkit-text-fill-color: currentColor;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.glitch::before { color: #00e5ff; animation: glitch-a 3.2s infinite steps(1); }
+.glitch::after { color: #ff2fd0; animation: glitch-b 2.7s infinite steps(1); }
+@keyframes glitch-a {
+  0%, 84%, 100% { transform: none; clip-path: inset(0 0 0 0); opacity: 0; }
+  85% { transform: translate(-6px, 1px); clip-path: inset(10% 0 62% 0); opacity: 0.95; }
+  88% { transform: translate(5px, -2px); clip-path: inset(55% 0 12% 0); opacity: 0.95; }
+  91% { transform: translate(-3px, 0); clip-path: inset(30% 0 40% 0); opacity: 0.95; }
+  94% { transform: none; clip-path: inset(0 0 0 0); opacity: 0; }
+}
+@keyframes glitch-b {
+  0%, 70%, 100% { transform: none; clip-path: inset(0 0 0 0); opacity: 0; }
+  71% { transform: translate(6px, -1px); clip-path: inset(66% 0 8% 0); opacity: 0.95; }
+  74% { transform: translate(-5px, 2px); clip-path: inset(6% 0 70% 0); opacity: 0.95; }
+  77% { transform: translate(3px, 0); clip-path: inset(40% 0 30% 0); opacity: 0.95; }
+  80% { transform: none; clip-path: inset(0 0 0 0); opacity: 0; }
+}
+@keyframes glitch-shake {
+  0%, 86%, 100% { transform: none; }
+  87% { transform: translate(2px, 0) skewX(-4deg); }
+  89% { transform: translate(-3px, 0) skewX(5deg); }
+  91% { transform: translate(1px, 0); }
+}
+.glitch-shake { animation: glitch-shake 3.2s infinite steps(1); }
+@media (prefers-reduced-motion: reduce) {
+  .glitch::before, .glitch::after, .glitch-shake { animation: none; }
 }

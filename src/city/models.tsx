@@ -8,6 +8,7 @@ import {
   PIECES,
   blockBox,
   collidersOf,
+  isShaped,
   isOverlay,
   pieceFootprint,
   resolveStyle,
@@ -25,6 +26,7 @@ import { BlockDetails } from './buildingDetails';
 import { getFacadeMaterial, getRoofMaterial } from './cityTextures';
 import { WATER_LEVEL, useTerrainStore } from '../terrain/terrain';
 import { LOT_HEIGHT, boxBodyGeometry, gableRoofGeometry } from './geometries';
+import { shapedBodyGeometry } from './shapes';
 import { roadGeometry } from './roadGeometry';
 import { darkMetalMaterial, glassDoorMaterial, metalMaterial, plinthMaterial, slabMaterial, solidMaterial } from './materials';
 import { registerWet } from './nightLights';
@@ -170,24 +172,37 @@ function BlockModel({ block, lot, facade, roof, style, quality, main, tower }: B
   const box = blockBox(block, lot);
   const facadeMat = getFacadeMaterial(block.facade ?? facade, style.windows, style.tint, quality);
   const roofMat = getRoofMaterial(roof, quality);
-  const body = boxBodyGeometry(box.w, box.d, block.floors);
+  const shaped = isShaped(block);
+  const body = shaped ? shapedBodyGeometry(box, block.floors, block) : boxBodyGeometry(box.w, box.d, block.floors);
   const materials = useMemo(
     () => [facadeMat, facadeMat, roofMat, facadeMat, facadeMat, facadeMat],
     [facadeMat, roofMat],
   );
   const gableMaterials = useMemo(() => [roofMat, facadeMat], [facadeMat, roofMat]);
+  const shapedMaterials = useMemo(() => [facadeMat, roofMat], [facadeMat, roofMat]);
   const trim = solidMaterial(style.trim, 0.9);
   const top = box.h + LOT_HEIGHT;
   const ridgeAlongZ = box.d > box.w;
 
+  if (shaped) {
+    // Rounded, tapered, twisted or crowned: one lofted body, no box-only trim.
+    return (
+      <group position={[box.cx, 0, box.cz]}>
+        <mesh geometry={body} material={shapedMaterials} castShadow receiveShadow />
+      </group>
+    );
+  }
+
   return (
-    <>
+    <group position={[0, box.y, 0]}>
       <group position={[box.cx, 0, box.cz]}>
         <mesh geometry={body} material={materials} castShadow receiveShadow />
         {/* Plinth: a darker base course that grounds the building. */}
-        <mesh position={[0, LOT_HEIGHT + 0.25, 0]} material={plinthMaterial} castShadow receiveShadow>
-          <boxGeometry args={[box.w + 0.12, 0.5, box.d + 0.12]} />
-        </mesh>
+        {box.y === 0 && (
+          <mesh position={[0, LOT_HEIGHT + 0.25, 0]} material={plinthMaterial} castShadow receiveShadow>
+            <boxGeometry args={[box.w + 0.12, 0.5, box.d + 0.12]} />
+          </mesh>
+        )}
 
         <BlockDetails box={box} floors={block.floors} trim={style.trim} cornice={style.cornice} corners={style.corners} bands={style.bands} />
 
@@ -226,7 +241,7 @@ function BlockModel({ block, lot, facade, roof, style, quality, main, tower }: B
       {main && style.roofStyle === 'flat' && (
         <RoofExtras extras={style.roofExtras} box={box} top={top + 0.02} towerAntenna={tower && !style.roofExtras.includes('antenna') && style.roofExtras.length === 0} />
       )}
-    </>
+    </group>
   );
 }
 
@@ -270,7 +285,11 @@ export function BuildingModel({ type, facade, roof, style, seed }: BuildingProps
       ))}
 
       {style.leds.map((led, i) =>
-        style.blocks[led.block] ? <LedScreen key={i} spec={led} box={blockBox(style.blocks[led.block], style.lot)} floors={style.blocks[led.block].floors} /> : null,
+        style.blocks[led.block] ? (
+          <group key={i} position={[0, blockBox(style.blocks[led.block], style.lot).y, 0]}>
+            <LedScreen spec={led} box={blockBox(style.blocks[led.block], style.lot)} floors={style.blocks[led.block].floors} />
+          </group>
+        ) : null,
       )}
 
       {style.sign && (
@@ -398,7 +417,7 @@ export const PieceView = memo(function PieceView({ piece }: { piece: Piece }) {
     : [(piece.gx + w / 2) * CELL + (piece.offset?.[0] ?? 0), 0, (piece.gz + d / 2) * CELL + (piece.offset?.[1] ?? 0)];
   const rotation: [number, number, number] = [0, (piece.rot * Math.PI) / 2, 0];
   const style = resolveStyle(piece.type, piece);
-  const colliders = isWall ? wallColliders(resolveWall(piece.wall)) : collidersOf(piece.type, style, piece.scale ?? 1);
+  const colliders: { cx: number; cz: number; w: number; h: number; d: number; cy?: number }[] = isWall ? wallColliders(resolveWall(piece.wall)) : collidersOf(piece.type, style, piece.scale ?? 1);
   // Trees can share a cell, so each gets its own seed (and with it its own shape) from its id.
   const seed = isOverlay(piece.type) ? seedOfId(piece.id) : seedOf(piece.gx, piece.gz);
   const model = (
@@ -430,7 +449,7 @@ export const PieceView = memo(function PieceView({ piece }: { piece: Piece }) {
     // Keyed on the collider shapes so they are rebuilt when blocks / floors / roof change.
     <RigidBody key={JSON.stringify(colliders)} type="fixed" position={position} rotation={rotation}>
       {colliders.map((c, i) => (
-        <CuboidCollider key={i} args={[c.w / 2, c.h / 2, c.d / 2]} position={[c.cx, c.h / 2, c.cz]} />
+        <CuboidCollider key={i} args={[c.w / 2, c.h / 2, c.d / 2]} position={[c.cx, c.cy ?? c.h / 2, c.cz]} />
       ))}
       {model}
     </RigidBody>

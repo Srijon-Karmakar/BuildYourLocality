@@ -11,6 +11,8 @@ import {
   resolveLook,
   resolveStyle,
   roofHeightOf,
+  isShaped,
+  capHeightOf,
   rotatedFootprint,
   type PieceType,
 } from '../../city/catalog';
@@ -79,7 +81,7 @@ function pieceHeight(piece: Piece): number {
   return Math.max(
     ...style.blocks.map((b) => {
       const box = blockBox(b, style.lot);
-      return box.h + (style.roofStyle === 'gable' ? roofHeightOf(box) : 0);
+      return box.y + box.h + (isShaped(b) ? capHeightOf(b, box.w, box.d) : style.roofStyle === 'gable' ? roofHeightOf(box) : 0);
     }),
   );
 }
@@ -115,7 +117,7 @@ function BlockHighlight({ piece, index }: { piece: Piece; index: number }) {
   const [w, d] = pieceFootprint(piece);
   return (
     <group position={[(piece.gx + w / 2) * CELL, 0, (piece.gz + d / 2) * CELL]} rotation={[0, (piece.rot * Math.PI) / 2, 0]}>
-      <mesh position={[box.cx, box.h / 2 + 0.1, box.cz]}>
+      <mesh position={[box.cx, box.y + box.h / 2 + 0.1, box.cz]}>
         <boxGeometry args={[box.w + 0.2, box.h + 0.2, box.d + 0.2]} />
         <meshBasicMaterial color="#ffd23f" transparent opacity={0.3} depthWrite={false} />
       </mesh>
@@ -326,7 +328,7 @@ export function CityBuilder() {
         setHover(null);
       }
     };
-    if (mode !== 'build' || !pointerInside.current) return clear();
+    if (mode !== 'build' || !pointerInside.current || useBuilderStore.getState().hand) return clear();
 
     const point = groundPoint(raycaster, camera, pointer);
     if (!point) return clear();
@@ -358,6 +360,7 @@ export function CityBuilder() {
     };
     const onDown = (e: PointerEvent) => {
       pointerInside.current = true;
+      if (useBuilderStore.getState().hand) return; // hand mode: the camera takes the drag
       if (e.pointerType === 'touch') {
         touchMode.current = true;
         touches.add(e.pointerId);

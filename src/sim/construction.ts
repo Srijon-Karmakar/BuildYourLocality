@@ -91,7 +91,7 @@ export function partialPiece(piece: Piece, progress: number): Piece {
   const cached = byKey?.get(key);
   if (cached) return cached;
   const style = resolveStyle(piece.type, piece);
-  const blocks: Block[] = style.blocks.map((b) => ({ ...b, floors: clamp(Math.ceil(b.floors * progress), 1, b.floors) }));
+  const blocks: Block[] = style.blocks.map((b) => ({ ...b, floors: clamp(Math.ceil(b.floors * progress), 1, b.floors), top: 'flat' as const, twist: 0 }));
   const out: Piece = { ...piece, blocks, roofStyle: 'flat', led: null, leds: [], sign: null, roofExtras: [], balconies: 'none' };
   if (!byKey) {
     byKey = new Map();

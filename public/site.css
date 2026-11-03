@@ -1,0 +1,17 @@
+:root{color-scheme:dark;--bg:#07080d;--fg:#e8e9ee;--muted:#9a9eae;--accent:#f5c06b;--line:rgba(255,255,255,.1)}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.7 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:auto;height:auto;-webkit-user-select:text;user-select:text}
+a{color:var(--accent)}
+header,main,footer{max-width:760px;margin:0 auto;padding:0 20px}
+header{display:flex;align-items:center;justify-content:space-between;padding-top:22px;padding-bottom:22px;border-bottom:1px solid var(--line)}
+.brand{font:italic 500 28px "Cormorant Garamond",Georgia,serif;letter-spacing:.12em;color:#fff;text-decoration:none}
+nav a{margin-left:18px;color:var(--muted);text-decoration:none;font-size:15px}
+nav a:hover{color:#fff}
+main{padding-top:40px;padding-bottom:40px}
+h1{font:italic 500 clamp(40px,8vw,64px)/1.1 "Cormorant Garamond",Georgia,serif;letter-spacing:.04em;margin:0 0 12px}
+h2{font-size:22px;margin:40px 0 8px}
+p,li{color:#c9ccd8}
+.lead{font-size:20px;color:var(--fg)}
+.btn{display:inline-block;margin-top:12px;padding:12px 28px;border-radius:999px;background:var(--accent);color:#1a1405;font-weight:600;text-decoration:none}
+footer{padding-top:24px;padding-bottom:40px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+footer a{color:var(--muted);margin-right:16px}

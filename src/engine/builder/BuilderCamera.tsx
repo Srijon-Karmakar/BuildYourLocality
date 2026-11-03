@@ -39,6 +39,7 @@ export function BuilderCamera() {
   useEffect(() => {
     if (mode !== 'build') return;
     let drag: 'rotate' | 'pan' | null = null;
+    const handOn = () => useBuilderStore.getState().hand;
     const touches = new Map<number, { x: number; y: number }>();
     let gesture: { cx: number; cy: number; dist: number; angle: number } | null = null;
 
@@ -59,6 +60,7 @@ export function BuilderCamera() {
         return;
       }
       if (e.button === 2) drag = 'rotate';
+      else if (e.button === 0 && handOn()) drag = 'pan';
       else if (e.button === 1) drag = 'pan';
       else return;
       dom.setPointerCapture(e.pointerId);
@@ -80,7 +82,7 @@ export function BuilderCamera() {
           if (dAngle < -Math.PI) dAngle += Math.PI * 2;
           viewState.yaw -= dAngle;
           gesture = next;
-        } else if (touches.size === 1 && !isDragTool(useBuilderStore.getState().tool)) {
+        } else if (touches.size === 1 && (handOn() || !isDragTool(useBuilderStore.getState().tool))) {
           panBy(dx, dy);
         }
         return;
@@ -108,6 +110,11 @@ export function BuilderCamera() {
     const onContextMenu = (e: Event) => e.preventDefault();
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
+      if (e.code === 'KeyH' && !e.repeat && !e.ctrlKey && !e.metaKey) {
+        const b = useBuilderStore.getState();
+        b.setHand(!b.hand);
+        return;
+      }
       held.current.add(e.code);
     };
     const onKeyUp = (e: KeyboardEvent) => held.current.delete(e.code);
@@ -133,6 +140,15 @@ export function BuilderCamera() {
       keys.clear();
     };
   }, [mode, dom]);
+
+  // An open hand while hand mode is on.
+  const hand = useBuilderStore((st) => st.hand);
+  useEffect(() => {
+    dom.style.cursor = hand && mode === 'build' ? 'grab' : '';
+    return () => {
+      dom.style.cursor = '';
+    };
+  }, [hand, mode, dom]);
 
   useFrame((_, delta) => {
     if (mode !== 'build') return;

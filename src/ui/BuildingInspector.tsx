@@ -370,8 +370,8 @@ function SingleInspector() {
         <>
           <Section title="Lot size (grid cells)">
             <div className="flex flex-col gap-1.5">
-              <Stepper label="Width" value={style.lot[0]} min={MIN_LOT} max={MAX_LOT} onChange={(v) => changeLot([v, style.lot[1]])} />
-              <Stepper label="Depth" value={style.lot[1]} min={MIN_LOT} max={MAX_LOT} onChange={(v) => changeLot([style.lot[0], v])} />
+              <Stepper label="Width" value={style.lot[0]} min={MIN_LOT} max={MAX_LOT} bigStep={5} onChange={(v) => changeLot([v, style.lot[1]])} />
+              <Stepper label="Depth" value={style.lot[1]} min={MIN_LOT} max={MAX_LOT} bigStep={5} onChange={(v) => changeLot([style.lot[0], v])} />
             </div>
           </Section>
 

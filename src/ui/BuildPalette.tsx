@@ -95,7 +95,7 @@ function ControlsHint({ touch }: { touch: boolean }) {
     <div className="pointer-events-none rounded-md bg-black/40 pointer-coarse:bg-black/64 px-2 py-0.5 text-[11px] text-white/70 sm:text-xs">
       {touch
         ? 'Tap to place · Drag to pan · Pinch to zoom · Twist to rotate'
-        : 'Click: place · R: rotate · Del/X: delete · Ctrl+Z: undo · WASD: pan · Q/E: turn · Right-drag: orbit · Wheel: zoom · Tab: walk'}
+        : 'Click: place · R: rotate · Del/X: delete · Ctrl+Z: undo · H: hand · WASD: pan · Q/E: turn · Right-drag: orbit · Wheel: zoom · Tab: walk'}
     </div>
   );
 }
@@ -103,7 +103,7 @@ function ControlsHint({ touch }: { touch: boolean }) {
 /** The tool dock: scrollable item row, category tabs, undo/redo, plus the material picker. */
 export function BuildPalette() {
   const mode = useGameStore((s) => s.mode);
-  const { tool, brush, facade, roof, selectedId, multiSelect, setMultiSelect, roadSpec, roadPreset, setTool, setBrush, setFacade, setRoof, setRoadSpec, applyRoadPreset, wall, applyWallStyle } = useBuilderStore();
+  const { tool, brush, facade, roof, selectedId, multiSelect, setMultiSelect, roadSpec, roadPreset, setTool, setBrush, setFacade, setRoof, setRoadSpec, applyRoadPreset, wall, applyWallStyle, hand, setHand } = useBuilderStore();
   const activate = (item: Item) => {
     setTool(item.id);
     if (item.brush) setBrush(item.brush);
@@ -315,6 +315,17 @@ export function BuildPalette() {
             </button>
           ))}
           <span className="mx-1 h-5 w-px shrink-0 bg-white/20" />
+          {!touch && (
+          <button
+            className={iconBtn + (hand ? ' bg-white text-black' : ' text-white/90 hover:bg-white/10')}
+            onClick={() => setHand(!hand)}
+            title="Hand mode (H): drag to move the view, wheel to zoom"
+            aria-label="Hand mode"
+            aria-pressed={hand}
+          >
+            <Icon name="hand" />
+          </button>
+          )}
           <button className={iconBtn + ' text-white/90 hover:bg-white/10'} disabled={!canUndo} onClick={undo} title="Undo (Ctrl+Z)" aria-label="Undo">
             <Icon name="undo" />
           </button>

@@ -79,6 +79,42 @@ export function getGroundTextures(quality: Quality) {
         heights[y * size + x] = s.height;
       }
     }
+    // Small grass blocks baked in: 2 x 2 blocks per 6 m tile, each a touch lighter or darker and a touch
+    // higher or lower, with a dark seam between them and a bevel. Painted into the texture, so it covers
+    // all the ground at once: no moving patch, nothing to flicker against roads.
+    const blocks = 2;
+    const bs = size / blocks;
+    const seam = Math.max(1, Math.round(size / 96));
+    const bevel = seam * 3;
+    const cellHash = (bx: number, by: number) => {
+      const n = Math.sin(bx * 127.1 + by * 311.7 + 7.7) * 43758.5453;
+      return n - Math.floor(n);
+    };
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const bx = Math.floor(x / bs);
+        const by = Math.floor(y / bs);
+        const lx = x - bx * bs;
+        const ly = y - by * bs;
+        const h = cellHash(bx, by);
+        const edge = Math.min(lx, bs - 1 - lx, ly, bs - 1 - ly);
+        const i = y * size + x;
+        let shade = 0.86 + 0.26 * h;
+        let drop = 0.35 * h;
+        if (edge < seam) {
+          shade = 0.55;
+          drop = -0.8;
+        } else if (edge < bevel) {
+          const lit = lx < bevel || ly < bevel ? 1.1 : 0.9;
+          shade *= lit;
+          drop -= 0.25 * (1 - (edge - seam) / (bevel - seam));
+        }
+        color.data[i * 4] = clamp255(color.data[i * 4] * shade * (edge < seam ? 1.15 : 1));
+        color.data[i * 4 + 1] = clamp255(color.data[i * 4 + 1] * shade);
+        color.data[i * 4 + 2] = clamp255(color.data[i * 4 + 2] * shade * (edge < seam ? 0.8 : 1));
+        heights[i] += drop;
+      }
+    }
     tex = {
       map: toTexture(color, true),
       normalMap: toTexture(heightsToNormals(heights, size, size, 2 * (size / 64)), false),
@@ -453,14 +489,25 @@ interface Rect {
   height: number;
   rough: number;
   /** Outline: a plain rectangle unless set. An arch has a half-round top. */
-  shape?: 'arch' | 'ellipse';
+  shape?: 'arch' | 'ellipse' | 'pointed';
 }
+
+/** Half-width of a pointed arch at depth dy below its apex (shoulders at depth s). */
+const pointedHalf = (w: number, s: number, dy: number) => (w / 2) * Math.pow(Math.min(1, Math.max(0, dy / s)), 0.8);
 
 /** Adds the rect's outline to the canvas path. */
 function tracePath(ctx: CanvasRenderingContext2D, r: Rect) {
   ctx.beginPath();
   if (r.shape === 'ellipse') {
     ctx.ellipse(r.x + r.w / 2, r.y + r.h / 2, r.w / 2, r.h / 2, 0, 0, Math.PI * 2);
+  } else if (r.shape === 'pointed') {
+    const s = Math.min(r.h, r.w * 1.1);
+    ctx.moveTo(r.x, r.y + r.h);
+    ctx.lineTo(r.x, r.y + s);
+    for (let k = 1; k <= 12; k++) ctx.lineTo(r.x + r.w / 2 - pointedHalf(r.w, s, s * (1 - k / 12)), r.y + s * (1 - k / 12));
+    for (let k = 11; k >= 0; k--) ctx.lineTo(r.x + r.w / 2 + pointedHalf(r.w, s, s * (1 - k / 12)), r.y + s * (1 - k / 12));
+    ctx.lineTo(r.x + r.w, r.y + r.h);
+    ctx.closePath();
   } else if (r.shape === 'arch') {
     const rad = r.w / 2;
     ctx.moveTo(r.x, r.y + r.h);
@@ -481,6 +528,11 @@ function insideRect(r: Rect, x: number, y: number): boolean {
     const dy = (y - (r.y + r.h / 2)) / (r.h / 2);
     return dx * dx + dy * dy <= 1;
   }
+  if (r.shape === 'pointed') {
+    const s = Math.min(r.h, r.w * 1.1);
+    if (y >= r.y + s) return true;
+    return Math.abs(x - (r.x + r.w / 2)) <= pointedHalf(r.w, s, y - r.y);
+  }
   if (r.shape === 'arch') {
     const rad = r.w / 2;
     if (y >= r.y + rad) return true;
@@ -494,7 +546,7 @@ function windowRects(style: WindowStyle, frame: string): Rect[] {
   const paneBottom = '#35607e';
   const pane = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h, fill: [paneTop, paneBottom], height: 0.2, rough: 0.07 });
   const bar = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h, fill: frame, height: 0.85, rough: 0.5 });
-  const shaped = (shape: 'arch' | 'ellipse', x: number, y: number, w: number, h: number, glass: boolean): Rect =>
+  const shaped = (shape: 'arch' | 'ellipse' | 'pointed', x: number, y: number, w: number, h: number, glass: boolean): Rect =>
     glass ? { ...pane(x, y, w, h), shape } : { ...bar(x, y, w, h), shape };
   const sill = (x: number, y: number, w: number): Rect => ({ x, y, w, h: 5, fill: '#d8d3c8', height: 0.9, rough: 0.7 });
   switch (style) {
@@ -506,6 +558,9 @@ function windowRects(style: WindowStyle, frame: string): Rect[] {
         bar(50, 60, 60, 3),
         sill(38, 100, 84),
       ];
+    case 'iwan':
+      // A tall pointed-arch niche framed in a deeper arch, as on Mughal gateways.
+      return [shaped('pointed', 22, 6, 116, 118, false), shaped('pointed', 30, 16, 100, 108, true), bar(78.5, 16, 3, 108), sill(18, 118, 124)];
     case 'shuttered': {
       // A narrower sash flanked by louvred shutters (painted in the frame colour's complement).
       const shutter = '#4c6b57';

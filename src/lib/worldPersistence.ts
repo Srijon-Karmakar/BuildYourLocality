@@ -27,6 +27,7 @@ import {
   WINDOW_STYLES,
   lotUnits,
   type Block,
+  BLOCK_TOPS,
   type DoorSpec,
   type PieceType,
 } from '../city/catalog';
@@ -138,6 +139,22 @@ function sanitizeBlocks(blocks: unknown, lot: [number, number]): Block[] | undef
       floors: clampInt(raw.floors, 1, MAX_FLOORS, 1),
     };
     if (FACADES.some((f) => f.id === raw.facade)) block.facade = raw.facade;
+    const num = (v: unknown, min: number, max: number, step: number): number | undefined =>
+      typeof v === 'number' && Number.isFinite(v) ? Math.round(Math.min(max, Math.max(min, v)) / step) * step : undefined;
+    const base = num(raw.base, 0, MAX_FLOORS, 0.5);
+    if (base) block.base = base;
+    const round = num(raw.round, 0, 1, 0.05);
+    if (round) block.round = round;
+    if (raw.bevel === true) block.bevel = true;
+    const taper = num(raw.taper, 0, 3, 0.05);
+    if (taper !== undefined && taper !== 1) block.taper = taper;
+    const twist = num(raw.twist, -720, 720, 1);
+    if (twist) block.twist = twist;
+    const curve = num(raw.curve, -1, 1, 0.05);
+    if (curve) block.curve = curve;
+    if (BLOCK_TOPS.some((t) => t.id === raw.top) && raw.top !== 'flat') block.top = raw.top;
+    const topH = num(raw.topH, 0, 400, 0.5);
+    if (topH) block.topH = topH;
     return block;
   });
 }

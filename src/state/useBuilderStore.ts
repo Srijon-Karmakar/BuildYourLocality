@@ -38,6 +38,9 @@ interface BuilderState {
   selectedBlock: number;
   /** Building being carried to a new spot while the move tool is active. */
   movingId: string | null;
+  /** Hand mode: the left button / one finger only moves the camera, nothing is placed or picked. */
+  hand: boolean;
+  setHand: (hand: boolean) => void;
   setTool: (tool: BuilderTool) => void;
   rotate: () => void;
   setFacade: (facade: FacadeId | 'preset') => void;
@@ -78,6 +81,8 @@ export const useBuilderStore = create<BuilderState>((set) => ({
   multiSelect: false,
   selectedBlock: 0,
   movingId: null,
+  hand: false,
+  setHand: (hand) => set({ hand }),
   setTool: (tool) => set({ tool }),
   rotate: () => set((state) => ({ rotation: (state.rotation + 1) % 4 })),
   setFacade: (facade) => set({ facade }),

@@ -47,10 +47,11 @@ export const TINTS = [
   { id: '#c9b8e0', label: 'Lavender' },
 ] as const;
 
-export type WindowStyle = 'punched' | 'arched' | 'shuttered' | 'loft' | 'slit' | 'round' | 'ribbon' | 'tall' | 'none';
+export type WindowStyle = 'punched' | 'arched' | 'iwan' | 'shuttered' | 'loft' | 'slit' | 'round' | 'ribbon' | 'tall' | 'none';
 export const WINDOW_STYLES: { id: WindowStyle; label: string }[] = [
   { id: 'punched', label: 'Classic' },
   { id: 'arched', label: 'Arched' },
+  { id: 'iwan', label: 'Pointed arch (iwan)' },
   { id: 'shuttered', label: 'Shuttered' },
   { id: 'loft', label: 'Loft grid' },
   { id: 'slit', label: 'Slits' },
@@ -279,8 +280,8 @@ export function roadLayout(spec: RoadSpec): RoadLayout {
 // --- Building customisation ------------------------------------------------------
 
 export const MIN_LOT = 1;
-export const MAX_LOT = 4;
-export const MAX_BLOCKS = 8;
+export const MAX_LOT = 40;
+export const MAX_BLOCKS = 32;
 
 /**
  * One rectangular volume of a building, on the lot's layout grid (UNIT metres per step,
@@ -294,6 +295,46 @@ export interface Block {
   floors: number;
   /** Overrides the building's facade material for just this block. */
   facade?: FacadeId;
+  /** Storeys this block is lifted off the ground (it sits on top of another block). 0 = on the ground. */
+  base?: number;
+  /** Corner rounding 0-1: 0 square, 1 as round as the footprint allows (a circle on a square block). */
+  round?: number;
+  /** Corners are cut flat instead of curved (octagons and the like). */
+  bevel?: boolean;
+  /** Size at the top relative to the bottom (1 = straight sides). */
+  taper?: number;
+  /** Degrees the top is turned relative to the bottom. */
+  twist?: number;
+  /** -1 to 1: narrows (-) or swells (+) the middle of the walls. */
+  curve?: number;
+  /** What crowns the block. */
+  top?: BlockTop;
+  /** Height of the crown in metres (0 or unset = sized from the block). */
+  topH?: number;
+}
+
+export type BlockTop = 'flat' | 'dome' | 'onion' | 'cone' | 'spire';
+export const BLOCK_TOPS: { id: BlockTop; label: string }[] = [
+  { id: 'flat', label: 'Flat' },
+  { id: 'dome', label: 'Dome' },
+  { id: 'onion', label: 'Onion dome' },
+  { id: 'cone', label: 'Cone / pyramid' },
+  { id: 'spire', label: 'Spire' },
+];
+
+/** Does this block need the custom shaped body (anything beyond a plain straight box)? */
+export function isShaped(b: Block): boolean {
+  return !!(b.round || b.bevel || (b.taper !== undefined && b.taper !== 1) || b.twist || b.curve || (b.top && b.top !== 'flat'));
+}
+
+/** Metres of crown above a block's walls. */
+export function capHeightOf(b: Block, w: number, d: number): number {
+  const top = b.top ?? 'flat';
+  if (top === 'flat') return 0;
+  if (b.topH && b.topH > 0) return b.topH;
+  const r = (Math.min(w, d) / 2) * (b.taper ?? 1);
+  const k = { dome: 1, onion: 1.7, cone: 2, spire: 4.5 }[top];
+  return Math.max(1.5, r * k);
 }
 
 export type DoorStyle = 'none' | 'single' | 'double' | 'glass' | 'garage';
@@ -865,6 +906,8 @@ export function pieceFootprint(piece: { type: PieceType; rot: number; lot?: [num
 
 /** A block's walls in the lot's local frame (metres, origin at lot centre, +z = front). */
 export interface BlockBox {
+  /** Height of the block's underside above the lot slab. */
+  y: number;
   cx: number;
   cz: number;
   w: number;
@@ -880,6 +923,7 @@ export function blockBox(block: Block, lot: [number, number]): BlockBox {
   const z0 = block.v * UNIT + (block.v === 0 ? LOT_MARGIN : 0);
   const z1 = (block.v + block.d) * UNIT - (block.v + block.d >= ld ? LOT_MARGIN : 0);
   return {
+    y: (block.base ?? 0) * FLOOR_H,
     cx: (x0 + x1) / 2 - (lw * UNIT) / 2,
     cz: (z0 + z1) / 2 - (ld * UNIT) / 2,
     w: x1 - x0,
@@ -898,13 +942,31 @@ export function collidersOf(
   type: PieceType,
   style: BuildingStyle,
   scale = 1,
-): { cx: number; cz: number; w: number; h: number; d: number }[] {
+): { cx: number; cz: number; w: number; h: number; d: number; cy?: number }[] {
   const def = PIECES[type];
   if (def.paintable) {
-    return style.blocks.map((b) => {
+    return style.blocks.flatMap((b) => {
       const box = blockBox(b, style.lot);
+      if (isShaped(b)) {
+        // Shaped walls are approximated by a few stacked boxes that follow the taper, plus one for the crown.
+        const taper = b.taper ?? 1;
+        const slices = taper !== 1 || b.curve ? 3 : 1;
+        const out: { cx: number; cz: number; w: number; h: number; d: number; cy?: number }[] = [];
+        for (let i = 0; i < slices; i++) {
+          const t = (i + 0.5) / slices;
+          const s = Math.max(0.1, (1 + (taper - 1) * t) * (1 + 0.35 * (b.curve ?? 0) * Math.sin(Math.PI * t)));
+          const h = box.h / slices;
+          out.push({ cx: box.cx, cz: box.cz, w: box.w * s * 0.96, d: box.d * s * 0.96, h, cy: box.y + i * h + h / 2 });
+        }
+        const cap = capHeightOf(b, box.w, box.d);
+        if (cap > 0) {
+          const s = Math.max(0.1, taper) * 0.6;
+          out.push({ cx: box.cx, cz: box.cz, w: box.w * s, d: box.d * s, h: cap * 0.6, cy: box.y + box.h + cap * 0.3 });
+        }
+        return out;
+      }
       const roofH = style.roofStyle === 'gable' ? roofHeightOf(box) : 0;
-      return { cx: box.cx, cz: box.cz, w: box.w, d: box.d, h: box.h + roofH };
+      return [{ cx: box.cx, cz: box.cz, w: box.w, d: box.d, h: box.h + roofH, cy: box.y + (box.h + roofH) / 2 }];
     });
   }
   return def.collider
