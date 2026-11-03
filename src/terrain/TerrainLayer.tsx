@@ -68,7 +68,7 @@ export function buildChunkGeometry(cx: number, cz: number, flat: boolean): THREE
         const cover = coverAt(Math.floor(wx / CELL), Math.floor(wz / CELL));
         const steep = sstep(0.14, 0.42, 1 - ny);
         const rock = cover === 'rock' ? 1 : steep;
-        const sand = cover === 'sand' ? 1 : sstep(0.12, -0.3, h);
+        const sand = cover === 'sand' ? 1 : sstep(-0.02, -0.4, h);
         const snow = sstep(24, 34, h) * (1 - 0.5 * steep);
         const grass = Math.max(0, 1 - rock - sand - snow);
         blend.set([grass, rock, sand, snow], k * 4);

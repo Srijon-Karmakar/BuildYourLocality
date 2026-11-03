@@ -11,6 +11,9 @@ import {
   LED_ART_H,
   LED_ART_W,
   LED_MAX_ADS,
+  LED_MAX_LAYERS,
+  type LedLayer,
+  type BoardSpec,
   LED_MAX_IMAGE_CHARS,
   type LedAd,
   MAX_LEDS,
@@ -293,6 +296,44 @@ function sanitizeLed(led: unknown): LedSpec | undefined {
   out.sync = oneOf(raw.sync, ['together', 'chase', 'solo'] as const);
   out.transition = oneOf(raw.transition, ['fade', 'slide', 'cut'] as const);
   out.fit = oneOf(raw.fit, ['contain', 'cover'] as const);
+  if (Array.isArray(raw.layers)) {
+    const kinds = ['text', 'rect', 'ellipse', 'line'] as const;
+    const anims = ['none', 'pulse', 'blink', 'scrollx', 'scrolly', 'spin', 'rainbow'] as const;
+    const fonts = ['bold', 'mono', 'serif', 'round', 'pixel'] as const;
+    const layers: LedLayer[] = [];
+    for (const l of raw.layers.slice(0, LED_MAX_LAYERS) as Partial<LedLayer>[]) {
+      if (!l || typeof l !== 'object' || !kinds.includes(l.kind as (typeof kinds)[number])) continue;
+      layers.push({
+        id: typeof l.id === 'string' ? l.id.slice(0, 40) : `l${layers.length}`,
+        kind: l.kind!,
+        x: num(l.x, -0.5, 1.5) ?? 0.5,
+        y: num(l.y, -0.5, 1.5) ?? 0.5,
+        w: num(l.w, 0.01, 3) ?? 0.3,
+        h: num(l.h, 0.01, 3) ?? 0.3,
+        rot: num(l.rot, -360, 360) ?? 0,
+        color: isHex(l.color) ? l.color : '#ffffff',
+        ...(isHex(l.color2) ? { color2: l.color2 } : {}),
+        opacity: num(l.opacity, 0.05, 1) ?? 1,
+        ...(typeof l.text === 'string' ? { text: l.text.slice(0, 80) } : {}),
+        ...(fonts.includes(l.font as (typeof fonts)[number]) ? { font: l.font } : {}),
+        anim: anims.includes(l.anim as (typeof anims)[number]) ? l.anim! : 'none',
+        speed: num(l.speed, 0.25, 3) ?? 1,
+      });
+    }
+    out.layers = layers;
+  }
+  if (raw.board && typeof raw.board === 'object') {
+    const b = raw.board as Partial<BoardSpec>;
+    out.board = {
+      ...(num(b.w, 3, 30) !== undefined ? { w: num(b.w, 3, 30) } : {}),
+      ...(num(b.h, 1.5, 14) !== undefined ? { h: num(b.h, 1.5, 14) } : {}),
+      ...(num(b.mast, 0, 30) !== undefined ? { mast: num(b.mast, 0, 30) } : {}),
+      ...(num(b.tilt, -30, 30) !== undefined ? { tilt: num(b.tilt, -30, 30) } : {}),
+      ...(num(b.thick, 0.1, 1.2) !== undefined ? { thick: num(b.thick, 0.1, 1.2) } : {}),
+      ...(oneOf(b.poles, ['two', 'one', 'none'] as const) ? { poles: oneOf(b.poles, ['two', 'one', 'none'] as const) } : {}),
+      ...(oneOf(b.sides, ['two', 'one'] as const) ? { sides: oneOf(b.sides, ['two', 'one'] as const) } : {}),
+    };
+  }
   if (Array.isArray(raw.ads)) {
     const ads = raw.ads
       .slice(0, LED_MAX_ADS)

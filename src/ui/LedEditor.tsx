@@ -26,7 +26,7 @@ import {
 } from '../city/catalog';
 import { Icon } from './icons';
 
-const chip = (active: boolean) =>
+export const chip = (active: boolean) =>
   `min-h-9 rounded-lg px-3 py-2 text-center transition disabled:opacity-30 sm:min-h-0 sm:rounded-md sm:px-2 sm:py-1 ${active ? 'bg-white text-black' : 'bg-white/10 text-white/80 hover:bg-white/20 active:bg-white/25'}`;
 
 const TEXT_MODES: LedMode[] = ['text', 'ticker', 'slides'];
@@ -45,7 +45,7 @@ function quantize(hex: string): string {
 }
 
 /** Holds a value locally while it is being dragged or typed and passes it on shortly after, so one drag is one edit. */
-function useDraft<T>(value: T, commit: (v: T) => void, delay = 220): [T, (v: T) => void] {
+export function useDraft<T>(value: T, commit: (v: T) => void, delay = 220): [T, (v: T) => void] {
   const [draft, setDraft] = useState(value);
   const timer = useRef<number | null>(null);
   const latest = useRef(commit);
@@ -67,7 +67,7 @@ function useDraft<T>(value: T, commit: (v: T) => void, delay = 220): [T, (v: T) 
   return [draft, set];
 }
 
-function Group({ title, children }: { title: string; children: ReactNode }) {
+export function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
       <div className="text-white/55">{title}</div>
@@ -76,7 +76,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function Chips<T extends string>({ value, options, onChange }: { value: T; options: { id: T; label: string }[]; onChange: (v: T) => void }) {
+export function Chips<T extends string>({ value, options, onChange }: { value: T; options: { id: T; label: string }[]; onChange: (v: T) => void }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {options.map((o) => (
@@ -88,7 +88,7 @@ function Chips<T extends string>({ value, options, onChange }: { value: T; optio
   );
 }
 
-function Slider({ label, value, min, max, step, format, onChange }: { label: string; value: number; min: number; max: number; step: number; format: (v: number) => string; onChange: (v: number) => void }) {
+export function Slider({ label, value, min, max, step, format, onChange }: { label: string; value: number; min: number; max: number; step: number; format: (v: number) => string; onChange: (v: number) => void }) {
   const [draft, setDraft] = useDraft(value, onChange);
   return (
     <label className="flex items-center gap-2">
@@ -99,7 +99,7 @@ function Slider({ label, value, min, max, step, format, onChange }: { label: str
   );
 }
 
-function Colour({ label, value, onChange }: { label: string; value: string; onChange: (hex: string) => void }) {
+export function Colour({ label, value, onChange }: { label: string; value: string; onChange: (hex: string) => void }) {
   const [draft, setDraft] = useDraft(value, onChange);
   return (
     <label className="flex flex-col items-center gap-1">

@@ -389,6 +389,91 @@ function drawArt(s: Scene) {
   }
 }
 
+/** Paints the layers of a billboard over the finished picture, bottom layer first. */
+function drawLayers(ctx: CanvasRenderingContext2D, cols: number, rows: number, spec: ResolvedLed, clock: number) {
+  const layers = spec.layers;
+  if (!layers || layers.length === 0) return;
+  for (const l of layers) {
+    const t = clock * l.speed;
+    let alpha = l.opacity;
+    let scale = 1;
+    let rot = l.rot;
+    let dx = 0;
+    let dy = 0;
+    let colour = l.color;
+    switch (l.anim) {
+      case 'pulse':
+        scale = 1 + 0.15 * Math.sin(t * 4);
+        break;
+      case 'blink':
+        if (Math.floor(t * 2) % 2 === 1) alpha = 0;
+        break;
+      case 'scrollx':
+        dx = (((t * 0.18) % 1.6) - 0.8) * cols;
+        break;
+      case 'scrolly':
+        dy = -(((t * 0.18) % 1.6) - 0.8) * rows;
+        break;
+      case 'spin':
+        rot += t * 90;
+        break;
+      case 'rainbow':
+        colour = rgbCss(hueToRgb((t * 0.15) % 1));
+        break;
+    }
+    if (alpha <= 0.01) continue;
+    ctx.save();
+    ctx.globalAlpha = clamp01(alpha);
+    ctx.translate(l.x * cols + dx, l.y * rows + dy);
+    ctx.rotate((rot * Math.PI) / 180);
+    ctx.scale(scale, scale);
+    const w = l.w * cols;
+    const h = l.h * rows;
+    let fill: string | CanvasGradient = colour;
+    if (l.color2 && l.anim !== 'rainbow') {
+      const g = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
+      g.addColorStop(0, l.color);
+      g.addColorStop(1, l.color2);
+      fill = g;
+    }
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = colour;
+    switch (l.kind) {
+      case 'rect':
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+        break;
+      case 'ellipse':
+        ctx.beginPath();
+        ctx.ellipse(0, 0, Math.max(0.5, w / 2), Math.max(0.5, h / 2), 0, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case 'line':
+        ctx.lineWidth = Math.max(1, h);
+        ctx.beginPath();
+        ctx.moveTo(-w / 2, 0);
+        ctx.lineTo(w / 2, 0);
+        ctx.stroke();
+        break;
+      case 'text': {
+        const size = Math.max(4, Math.round(h));
+        ctx.font = `bold ${size}px ${FONTS[l.font ?? 'bold']}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        if (l.color2 && l.anim !== 'rainbow') {
+          const tw = Math.max(8, ctx.measureText(l.text ?? '').width);
+          const g = ctx.createLinearGradient(-tw / 2, 0, tw / 2, 0);
+          g.addColorStop(0, l.color);
+          g.addColorStop(1, l.color2);
+          ctx.fillStyle = g;
+        }
+        ctx.fillText(l.text ?? '', 0, size * 0.04);
+        break;
+      }
+    }
+    ctx.restore();
+  }
+}
+
 function paintScene(s: Scene) {
   const { ctx, cols, rows, spec, t } = s;
   fill(s, spec.bg);
@@ -566,6 +651,8 @@ function paintScene(s: Scene) {
 
 /** How often a screen needs a new picture: 0 = painted once, otherwise frames per second. */
 function repaintRate(spec: ResolvedLed): number {
+  // Moving layers need frames even when the look underneath is still.
+  if (spec.layers?.some((l) => l.anim !== 'none')) return FAST_FPS;
   switch (spec.mode) {
     case 'solid':
       return 0;
@@ -679,6 +766,7 @@ function render(screen: LedScreenTexture, now: number) {
       }
     }
   }
+  drawLayers(screen.lctx, screen.cols, screen.rows, spec, clock);
   if (now - screen.averageAt > 500) {
     screen.averageAt = now;
     averageCtx.drawImage(screen.logical, 0, 0, 6, 6);
@@ -766,7 +854,8 @@ function textureKey(spec: ResolvedLed, cols: number, rows: number): string {
   const ads = spec.mode === 'ads' ? JSON.stringify(spec.ads) : '';
   // Chasing and independent screens must not share a picture with their neighbours.
   const place = spec.sync === 'chase' ? spec.side : spec.sync === 'solo' ? `${spec.block}${spec.side}${spec.bottom}${spec.offset}` : '';
-  return [spec.mode, spec.text, spec.color, spec.color2, spec.bg, spec.speed, spec.dots, spec.font, spec.textSize, spec.scroll, spec.pixels, spec.layout, spec.panels, spec.sync, spec.transition, spec.fit, ads.length > 0 ? hashText(ads) : '', place, cols, rows].join('|');
+  const layers = spec.layers && spec.layers.length > 0 ? hashText(JSON.stringify(spec.layers)) : '';
+  return [layers, spec.mode, spec.text, spec.color, spec.color2, spec.bg, spec.speed, spec.dots, spec.font, spec.textSize, spec.scroll, spec.pixels, spec.layout, spec.panels, spec.sync, spec.transition, spec.fit, ads.length > 0 ? hashText(ads) : '', place, cols, rows].join('|');
 }
 
 function hashText(text: string): string {

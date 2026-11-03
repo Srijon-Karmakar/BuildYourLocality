@@ -1,7 +1,7 @@
 import { useFrame } from '@react-three/fiber';
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { CELL, isTreeType, type LedSpec, type PieceType } from './catalog';
+import { CELL, isTreeType, resolveBoard, type LedSpec, type PieceType } from './catalog';
 import { TreeModel } from './TreeModel';
 import type { TreeSpec } from './trees';
 import { getLedMaterial, getSignMaterial } from './ledTextures';
@@ -231,24 +231,33 @@ function BusStop({ accent, led }: PropProps) {
 
 function Billboard({ accent, led }: PropProps) {
   const spec = led ?? DEFAULT_LED.billboard;
+  const b = resolveBoard(spec.board);
   const frame = solidMaterial(accent ?? '#1c1f24', 0.5, 0.5);
-  const screen = getLedMaterial(spec, 7.5, 3.5, 2.2);
+  const screen = getLedMaterial(spec, b.w, b.h, 2.2);
+  const cy = b.mast + b.h / 2;
+  const depth = 0.3 + b.thick * 0.3;
+  const poleX = b.poles === 'two' ? [-b.w * 0.21, b.w * 0.21] : b.poles === 'one' ? [0] : [];
   return (
     <group>
-      {[-1.6, 1.6].map((x) => (
-        <mesh key={x} position={[x, 2.8, 0]} material={frame} castShadow>
-          <cylinderGeometry args={[0.14, 0.2, 5.6, 10]} />
+      {poleX.map((x) => (
+        <mesh key={x} position={[x, b.mast / 2, 0]} material={frame} castShadow>
+          <cylinderGeometry args={[0.14 + b.thick * 0.1, 0.2 + b.thick * 0.15, b.mast, 10]} />
         </mesh>
       ))}
-      <mesh position={[0, 7, 0]} material={frame} castShadow>
-        <boxGeometry args={[7.9, 3.9, 0.3]} />
-      </mesh>
-      <mesh position={[0, 7, 0.17]} material={screen}>
-        <boxGeometry args={[7.5, 3.5, 0.05]} />
-      </mesh>
-      <mesh position={[0, 7, -0.17]} rotation={[0, Math.PI, 0]} material={screen}>
-        <boxGeometry args={[7.5, 3.5, 0.05]} />
-      </mesh>
+      {/* The board leans about its middle. */}
+      <group position={[0, cy, 0]} rotation={[(-b.tilt * Math.PI) / 180, 0, 0]}>
+        <mesh material={frame} castShadow>
+          <boxGeometry args={[b.w + b.thick, b.h + b.thick, depth]} />
+        </mesh>
+        <mesh position={[0, 0, depth / 2 + 0.02]} material={screen}>
+          <boxGeometry args={[b.w, b.h, 0.05]} />
+        </mesh>
+        {b.sides === 'two' && (
+          <mesh position={[0, 0, -depth / 2 - 0.02]} rotation={[0, Math.PI, 0]} material={screen}>
+            <boxGeometry args={[b.w, b.h, 0.05]} />
+          </mesh>
+        )}
+      </group>
     </group>
   );
 }

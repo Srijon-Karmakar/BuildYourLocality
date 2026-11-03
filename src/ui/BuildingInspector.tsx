@@ -39,6 +39,7 @@ import { SpanEditor } from './SpanEditor';
 import { pathLength, resolveSpan } from '../city/spans';
 import { resolveWall, wallStyleOf } from '../city/walls';
 import { FLOWER_SWATCHES, GRASS_SWATCHES, LEAF_SWATCHES, TREE_SHAPES, TRUNK_SWATCHES, resolveTree, seedFromId, type TreeSpec } from '../city/trees';
+import { BillboardStudio } from './BillboardStudio';
 import { LedEditor } from './LedEditor';
 import { ShapePanel } from './ShapeEditor';
 import { LANDMARKS, type Landmark } from '../city/landmarks';
@@ -849,6 +850,12 @@ function PropInspector({ piece }: { piece: Piece }) {
       {hasLed && (
         <Section title="LED screen">
           <LedEditor spec={led} onChange={(change) => updatePiece(piece.id, { led: { ...led, ...change } })} />
+        </Section>
+      )}
+
+      {piece.type === 'billboard' && (
+        <Section title="Billboard studio">
+          <BillboardStudio spec={led} onChange={(change) => updatePiece(piece.id, { led: { ...led, ...change } })} />
         </Section>
       )}
 

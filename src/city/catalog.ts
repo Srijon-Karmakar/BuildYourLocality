@@ -454,6 +454,69 @@ export interface LedAd {
 }
 
 export const LED_MAX_ADS = 8;
+
+/** Billboards: an unlimited stack of layers (text and shapes) painted over the screen's look. */
+export type LedLayerKind = 'text' | 'rect' | 'ellipse' | 'line';
+export type LedLayerAnim = 'none' | 'pulse' | 'blink' | 'scrollx' | 'scrolly' | 'spin' | 'rainbow';
+
+export interface LedLayer {
+  id: string;
+  kind: LedLayerKind;
+  /** Centre of the layer, 0 to 1 across and down the screen. */
+  x: number;
+  y: number;
+  /** Size, as a share of the screen (text: w is ignored and h is the letter height). */
+  w: number;
+  h: number;
+  /** Degrees. */
+  rot: number;
+  color: string;
+  /** Second colour: a left-to-right gradient when it is set. */
+  color2?: string;
+  /** 0.05 to 1. */
+  opacity: number;
+  text?: string;
+  font?: LedFont;
+  anim: LedLayerAnim;
+  /** Animation speed, 0.25 to 3. */
+  speed: number;
+}
+
+export const LED_LAYER_KINDS: { id: LedLayerKind; label: string }[] = [
+  { id: 'text', label: 'Text' },
+  { id: 'rect', label: 'Box' },
+  { id: 'ellipse', label: 'Circle' },
+  { id: 'line', label: 'Line' },
+];
+export const LED_LAYER_ANIMS: { id: LedLayerAnim; label: string }[] = [
+  { id: 'none', label: 'Still' },
+  { id: 'pulse', label: 'Pulse' },
+  { id: 'blink', label: 'Blink' },
+  { id: 'scrollx', label: 'Slide across' },
+  { id: 'scrolly', label: 'Slide up' },
+  { id: 'spin', label: 'Spin' },
+  { id: 'rainbow', label: 'Rainbow' },
+];
+/** There is no real limit: this only stops a runaway paste from freezing the screen. */
+export const LED_MAX_LAYERS = 400;
+
+/** The billboard's own structure: how big it is, how it stands and how it faces. */
+export interface BoardSpec {
+  /** Screen width and height, metres. */
+  w: number;
+  h: number;
+  /** Height of the supports, metres (the screen sits on top). */
+  mast: number;
+  poles: 'two' | 'one' | 'none';
+  /** Degrees the screen leans back (negative: forward). */
+  tilt: number;
+  sides: 'two' | 'one';
+  /** Frame thickness, metres. */
+  thick: number;
+}
+
+export const BOARD_DEFAULT: BoardSpec = { w: 7.5, h: 3.5, mast: 5.6, poles: 'two', tilt: 0, sides: 'two', thick: 0.4 };
+export const resolveBoard = (b?: Partial<BoardSpec>): BoardSpec => ({ ...BOARD_DEFAULT, ...b });
 /** Longest picture data URL kept on an ad, in characters. */
 export const LED_MAX_IMAGE_CHARS = 48_000;
 
@@ -513,6 +576,9 @@ export interface LedSpec {
   ads?: LedAd[];
   /** Pixel art, one hex digit per pixel (see LED_ART_PALETTE), row by row. */
   pixels?: string;
+  /** Billboards: layers painted over the look, and the structure of the board itself. */
+  layers?: LedLayer[];
+  board?: Partial<BoardSpec>;
   /** Block index and wall it is mounted on. */
   block: number;
   side: DoorSide;
