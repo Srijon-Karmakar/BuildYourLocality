@@ -20,11 +20,25 @@ export default defineConfig({
     rollupOptions: {
       // index.html is the game; home.html, about, contact and privacy are static content pages.
       input: {
-        main: resolve(__dirname, 'index.html'),
-        home: resolve(__dirname, 'home.html'),
-        about: resolve(__dirname, 'about.html'),
-        contact: resolve(__dirname, 'contact.html'),
-        privacy: resolve(__dirname, 'privacy.html'),
+        main: resolve(import.meta.dirname, 'index.html'),
+        home: resolve(import.meta.dirname, 'home.html'),
+        about: resolve(import.meta.dirname, 'about.html'),
+        contact: resolve(import.meta.dirname, 'contact.html'),
+        privacy: resolve(import.meta.dirname, 'privacy.html'),
+      },
+    },
+    rolldownOptions: {
+      output: {
+        // Big libraries get their own files: the page shell loads first, and a game update does not
+        // make players download three.js and the physics engine again.
+        codeSplitting: {
+          groups: [
+            { name: 'three', test: /node_modules[\/](three|@types[\/]three)[\/]/, priority: 30 },
+            { name: 'physics', test: /node_modules[\/](@dimforge|@react-three[\/]rapier)[\/]/, priority: 25 },
+            { name: 'r3f', test: /node_modules[\/](@react-three|postprocessing|three-stdlib|troika|meshline|maath|camera-controls)[\/]/, priority: 20 },
+            { name: 'supabase', test: /node_modules[\/]@supabase[\/]/, priority: 20 },
+          ],
+        },
       },
     },
   },

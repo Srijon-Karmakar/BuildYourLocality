@@ -17,6 +17,7 @@ import { SimLayer } from '../sim/SimLayer';
 import { TerrainLayer } from '../terrain/TerrainLayer';
 import { Vegetation } from '../terrain/Vegetation';
 import { Water } from '../terrain/Water';
+import { useBootStore } from '../state/useBootStore';
 import { useGameStore } from '../state/useGameStore';
 import { FACADES, ROOFS } from '../city/catalog';
 import { warmTextures } from '../city/cityTextures';
@@ -38,6 +39,17 @@ import { useWeatherStore } from '../state/useWeatherStore';
 import { useTerrainStore } from '../terrain/terrain';
 
 /** Dev only: handles for the headless profiling scripts (stripped from production builds). */
+/** Tells the loading screen the first frame has been drawn. */
+function FirstFrame() {
+  const done = useRef(false);
+  useFrame(() => {
+    if (done.current) return;
+    done.current = true;
+    useBootStore.setState({ sceneReady: true });
+  });
+  return null;
+}
+
 function DevHooks() {
   const three = useThree();
   useEffect(() => {
@@ -140,25 +152,32 @@ function AdaptiveResolution({ min, max }: { min: number; max: number }) {
 function FpsMeter() {
   const show = useGameStore((s) => s.graphics.showFps);
   const [fps, setFps] = useState(0);
+  const [load, setLoad] = useState({ calls: 0, tris: 0, geos: 0, tex: 0, ms: 0 });
   const dpr = useThree((s) => s.viewport.dpr);
-  const frames = useRef({ n: 0, t: 0 });
-  useFrame((_, dt) => {
+  const frames = useRef({ n: 0, t: 0, worst: 0 });
+  useFrame((state, dt) => {
     if (!show) return;
     frames.current.n++;
     frames.current.t += dt;
+    frames.current.worst = Math.max(frames.current.worst, dt);
     if (frames.current.t >= 0.5) {
       setFps(Math.round(frames.current.n / frames.current.t));
-      frames.current = { n: 0, t: 0 };
+      // What the GPU was asked to draw last frame: lots of draw calls or triangles points at the scenery.
+      const info = state.gl.info;
+      setLoad({ calls: info.render.calls, tris: info.render.triangles, geos: info.memory.geometries, tex: info.memory.textures, ms: Math.round(frames.current.worst * 1000) });
+      frames.current = { n: 0, t: 0, worst: 0 };
     }
   });
   if (!show) return null;
   return (
     <Html fullscreen style={{ pointerEvents: 'none' }}>
       <div
-        className="absolute right-2 rounded-md bg-black/60 px-2 py-0.5 font-mono text-[11px] text-white/80"
+        className="absolute right-2 rounded-md bg-black/60 px-2 py-0.5 text-right font-mono text-[11px] text-white/80"
         style={{ bottom: 'calc(var(--safe-bottom) + 0.5rem)' }}
       >
-        {fps} fps · x{dpr.toFixed(2)}
+        {fps} fps · worst {load.ms} ms · x{dpr.toFixed(2)}
+        <br />
+        {load.calls} draws · {(load.tris / 1000).toFixed(0)}k tris · {load.geos} geo · {load.tex} tex
       </div>
     </Html>
   );
@@ -184,6 +203,7 @@ export function Scene() {
       gl={{ antialias: !touch, powerPreference: 'high-performance' }}
     >
       <DevHooks />
+      <FirstFrame />
       <AdaptiveResolution min={dprRange[0]} max={dprRange[1]} />
       <FpsMeter />
       <FogController />

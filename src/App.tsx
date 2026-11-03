@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { joinWithCode, requestJoin, startSync } from './lib/sync';
 import { useWorldsStore } from './state/useWorldsStore';
 import { useMenuStore } from './state/useMenuStore';
@@ -6,7 +6,8 @@ import { startWallet } from './lib/wallet';
 import { initAds } from './lib/rewardedAd';
 import { useAuthStore } from './state/useAuthStore';
 import { useGameStore } from './state/useGameStore';
-import { Scene } from './scenes/Scene';
+// The 3D scene (three.js and the physics engine) is the bulk of the download: it loads while the loading screen is up.
+const Scene = lazy(() => import('./scenes/Scene').then((m) => ({ default: m.Scene })));
 import { BuildingInspector } from './ui/BuildingInspector';
 import { BuildPalette } from './ui/BuildPalette';
 import { CurtainLoader } from './ui/CurtainLoader';
@@ -52,7 +53,9 @@ function App() {
 
   return (
     <div className="relative h-full w-full overflow-hidden">
-      <Scene />
+      <Suspense fallback={null}>
+        <Scene />
+      </Suspense>
       {mode === 'roam' && !touch && <Crosshair />}
       <TopBar />
       <CombatHud />

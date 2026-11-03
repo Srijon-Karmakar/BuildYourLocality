@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import {
   CELL,
   PIECES,
+  CORNER_REACH,
+  isCornerType,
   blockBox,
   pieceFootprint,
   ROAD_LIKE,
@@ -41,6 +43,8 @@ interface Hover {
   pz: number;
   /** The grid edge nearest the cursor (for walls). */
   edge: Edge;
+  /** Which corner of the hovered cell the cursor is closest to, as metres from the cell centre (for streetlights). */
+  corner: [number, number];
 }
 
 const isPlaceTool = (tool: BuilderTool): tool is PieceType =>
@@ -153,11 +157,13 @@ function hoverFromPoint(x: number, z: number): Hover {
     px: x,
     pz: z,
     edge: edgeNear(x, z, CELL),
+    corner: [x - (Math.floor(x / CELL) + 0.5) * CELL < 0 ? -CORNER_REACH : CORNER_REACH, z - (Math.floor(z / CELL) + 0.5) * CELL < 0 ? -CORNER_REACH : CORNER_REACH],
   };
 }
 
 const sameHover = (a: Hover | null, b: Hover | null) => {
   if (!a || !b || a.hx !== b.hx || a.hz !== b.hz || a.gx !== b.gx || a.gz !== b.gz) return false;
+  if (a.corner[0] !== b.corner[0] || a.corner[1] !== b.corner[1]) return false;
   if (useBuilderStore.getState().tool === 'wall') return a.edge.gx === b.edge.gx && a.edge.gz === b.edge.gz && a.edge.rot === b.edge.rot;
   // The terrain brush follows the cursor in metres, not just by cell.
   return useBuilderStore.getState().tool !== 'terrain' || (Math.abs(a.px - b.px) < 1.5 && Math.abs(a.pz - b.pz) < 1.5);
@@ -304,10 +310,12 @@ export function CityBuilder() {
       city.updateRoads([cellId], b.roadSpec);
     } else {
       const look = resolveLook(b.tool, b.facade, b.roof);
+      const corner = isCornerType(b.tool);
       city.place({
         type: b.tool,
-        gx: h.gx,
-        gz: h.gz,
+        gx: corner ? h.hx : h.gx,
+        gz: corner ? h.hz : h.gz,
+        ...(corner ? { offset: h.corner } : {}),
         rot: b.tool === 'road' ? 0 : b.rotation,
         ...look,
         ...presetStyle(b.tool),
@@ -565,7 +573,11 @@ export function CityBuilder() {
     const rot = type === 'road' ? 0 : rotation;
     const [w, d] = rotatedFootprint(PIECES[type], rot, moving?.lot);
     ghost = (
-      <group ref={ghostRef} position={[(shown.gx + w / 2) * CELL, 0.02, (shown.gz + d / 2) * CELL]} rotation={[0, (rot * Math.PI) / 2, 0]}>
+      <group
+        ref={ghostRef}
+        position={isCornerType(type) ? [(shown.hx + 0.5) * CELL + shown.corner[0], 0.02, (shown.hz + 0.5) * CELL + shown.corner[1]] : [(shown.gx + w / 2) * CELL, 0.02, (shown.gz + d / 2) * CELL]}
+        rotation={[0, (rot * Math.PI) / 2, 0]}
+      >
         {type === 'road' ? (
           <RoadModel mask={roadMaskAt(pieces, occupancy, shown.gx, shown.gz)} road={moving?.road ?? roadSpec} bridge={isWaterCell(shown.gx, shown.gz)} />
         ) : (

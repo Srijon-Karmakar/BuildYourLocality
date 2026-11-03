@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useProgress } from '@react-three/drei';
+import { useBootStore } from '../state/useBootStore';
 import { useAuthStore } from '../state/useAuthStore';
 import { useSyncStore } from '../state/useSyncStore';
 import { SiteLinks } from './SiteLinks';
@@ -54,6 +55,7 @@ const titleFont = { fontFamily: "'Bouncy Bites', 'Orbitron', 'Segoe UI', sans-se
  */
 export function CurtainLoader() {
   const authReady = useAuthStore((s) => s.ready);
+  const sceneReady = useBootStore((s) => s.sceneReady);
   const syncing = useSyncStore((s) => s.status === 'loading');
   const { progress, active } = useProgress();
   const [minDone, setMinDone] = useState(false);
@@ -76,7 +78,7 @@ export function CurtainLoader() {
     };
   }, []);
 
-  const ready = authReady && !syncing && !active;
+  const ready = authReady && sceneReady && !syncing && !active;
   const canStart = minDone && (ready || timedOut);
 
   // After Start the three layers rise away; once the last has left, the screen removes itself.

@@ -44,12 +44,14 @@ export function MenuPanel() {
               key={t.id}
               onClick={() => select(t.id)}
               aria-label={t.label}
-              className={`flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-xl px-2 text-xs transition sm:min-h-0 sm:py-1.5 ${
+              className={`flex min-h-9 min-w-0 items-center justify-center gap-1.5 rounded-xl text-xs transition sm:min-h-0 sm:py-1.5 ${
+                active === t.id ? 'flex-[2] px-2.5' : 'flex-1 px-1.5'
+              } ${
                 active === t.id ? 'bg-white text-black' : 'text-white/75 active:bg-white/20 sm:hover:bg-white/10'
               }`}
             >
               <Icon name={t.icon} />
-              <span className={active === t.id ? '' : 'hidden sm:inline'}>{t.label}</span>
+              <span className={active === t.id ? 'truncate' : 'hidden'}>{t.label}</span>
             </button>
           ))}
         </div>

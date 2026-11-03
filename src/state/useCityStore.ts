@@ -318,7 +318,7 @@ export const useCityStore = create<CityState>((set, get) => {
       if (isOverlay(type)) {
         // Trees can go over anything that is not a road, track or airfield.
         const under = pieces[occupancy[cells[0]]];
-        if (under && under.id !== ignoreId && keepsClear(under.type)) return false;
+        if (type !== 'lamp' && under && under.id !== ignoreId && keepsClear(under.type)) return false;
       } else if (!cells.every((key) => !occupancy[key] || occupancy[key] === ignoreId)) return false;
       // The ground must suit it: level for buildings, level or water (a bridge) for roads.
       const suits = ROAD_LIKE.includes(type) ? roadable : buildable;
@@ -334,6 +334,12 @@ export const useCityStore = create<CityState>((set, get) => {
 
     place: (piece) => {
       if (!get().canPlace(piece.type, piece.gx, piece.gz, piece.rot, piece.lot, undefined, piece.road)) return false;
+      // One streetlight to a corner: placing on the same corner again does nothing.
+      if (piece.type === 'lamp' && piece.offset) {
+        const [ox, oz] = piece.offset;
+        const taken = Object.values(get().pieces).some((p) => p.type === 'lamp' && p.gx === piece.gx && p.gz === piece.gz && Math.abs((p.offset?.[0] ?? 0) - ox) < 0.5 && Math.abs((p.offset?.[1] ?? 0) - oz) < 0.5);
+        if (taken) return false;
+      }
       const id = crypto.randomUUID();
       const history = record();
       set((state) => {
@@ -342,7 +348,7 @@ export const useCityStore = create<CityState>((set, get) => {
         if (isOverlay(piece.type)) {
           // Not claiming the cell; when it is already busy, step aside so the trees do not sit on top of each other.
           const key = cellKey(piece.gx, piece.gz);
-          if (occupancy[key] || overlaysByCell(state.pieces).has(key)) {
+          if (!piece.offset && (occupancy[key] || overlaysByCell(state.pieces).has(key))) {
             placed.offset = [Math.round((Math.random() - 0.5) * 4.4 * 10) / 10, Math.round((Math.random() - 0.5) * 4.4 * 10) / 10];
           }
         } else {

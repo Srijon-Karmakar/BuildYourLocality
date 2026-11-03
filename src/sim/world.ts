@@ -290,7 +290,7 @@ export function buildWorld(pieces: Piece[]): SimWorld {
     }
     if (SOLID_PROPS.has(piece.type)) for (const c of cells) world.blocked.add(c);
     if (isTreeType(piece.type) || piece.type === 'hedge' || piece.type === 'park') for (const c of cells) world.foliage.add(c);
-    if (piece.type === 'lamp') world.lamps.push({ x: cellCentre(piece.gx), z: cellCentre(piece.gz) });
+    if (piece.type === 'lamp') world.lamps.push({ x: cellCentre(piece.gx) + (piece.offset?.[0] ?? 0), z: cellCentre(piece.gz) + (piece.offset?.[1] ?? 0) });
     if (piece.type === 'trafficlight') lights.push({ gx: piece.gx, gz: piece.gz });
     if (piece.type === 'park' || piece.type === 'plaza') {
       world.pleasant.add(cells[0]);

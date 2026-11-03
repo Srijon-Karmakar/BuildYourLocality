@@ -830,7 +830,13 @@ export const GRASS_TYPES: PieceType[] = ['grass', 'tallgrass', 'wildflower'];
 /** Every plant the tree editor and the forest brush deal with. */
 export const PLANT_TYPES: PieceType[] = [...TREE_TYPES, ...GRASS_TYPES];
 export const isTreeType = (type: PieceType) => PLANT_TYPES.includes(type);
-export const OVERLAY_TYPES: PieceType[] = PLANT_TYPES;
+/** Streetlights stand over roads, pavements and plots too, at a corner of the cell. */
+export const OVERLAY_TYPES: PieceType[] = [...PLANT_TYPES, 'lamp'];
+/** Overlays that stand at a cell corner (the cursor picks which) instead of being scattered. */
+export const CORNER_TYPES: PieceType[] = ['lamp'];
+export const isCornerType = (type: PieceType) => CORNER_TYPES.includes(type);
+/** How far from the cell centre a corner piece stands, in metres (just inside the cell edge). */
+export const CORNER_REACH = CELL / 2 - 0.45;
 export const isOverlay = (type: PieceType) => OVERLAY_TYPES.includes(type);
 
 /** Pieces an overlay can never sit on: they carry traffic. */
