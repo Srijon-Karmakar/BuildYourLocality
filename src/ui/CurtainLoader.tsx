@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useProgress } from '@react-three/drei';
 import { useAuthStore } from '../state/useAuthStore';
 import { useSyncStore } from '../state/useSyncStore';
+import { SiteLinks } from './SiteLinks';
 import { audio } from '../audio/engine';
 import { playSfx } from '../audio/sounds';
 
@@ -182,6 +183,7 @@ export function CurtainLoader() {
               {LICENCES.map((line) => (
                 <div key={line}>{line}</div>
               ))}
+              <SiteLinks className="mt-1 flex flex-wrap items-center justify-center" />
             </div>
           </div>
         </div>

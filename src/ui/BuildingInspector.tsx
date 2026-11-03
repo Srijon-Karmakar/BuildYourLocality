@@ -38,6 +38,8 @@ import { WallEditor } from './WallEditor';
 import { resolveWall, wallStyleOf } from '../city/walls';
 import { FLOWER_SWATCHES, GRASS_SWATCHES, LEAF_SWATCHES, TREE_SHAPES, TRUNK_SWATCHES, resolveTree, seedFromId, type TreeSpec } from '../city/trees';
 import { LedEditor } from './LedEditor';
+import { ShapeEditor } from './ShapeEditor';
+import { LANDMARKS, type Landmark } from '../city/landmarks';
 import { useBuilderStore } from '../state/useBuilderStore';
 import { connectedRoads, useCityStore, type Piece, type PiecePatch } from '../state/useCityStore';
 import { RoadSettings } from './RoadSettings';
@@ -180,6 +182,15 @@ function SingleInspector() {
 
   const changeLot = (lot: [number, number]) => {
     setNote(setLot(piece.id, lot) ? null : 'Neighbouring cells are occupied.');
+  };
+  const applyLandmark = (l: Landmark) => {
+    if (!setLot(piece.id, l.lot)) {
+      setNote('Neighbouring cells are occupied: this landmark needs a free ' + l.lot[0] + ' x ' + l.lot[1] + ' cell lot.');
+      return;
+    }
+    setNote(null);
+    patch({ blocks: l.blocks, facade: l.facade, roof: l.roof, windows: l.windows, tint: l.tint, trim: l.trim ?? style.trim, cornice: l.cornice ?? 'none', roofStyle: 'flat', door: { ...style.door, block: 0, offset: 0 } });
+    selectBlock(0);
   };
   const applyPreset = (preset: LayoutPreset) => {
     setBlocks(layoutPreset(preset, style.lot, Math.max(...style.blocks.map((b) => b.floors))));
@@ -375,6 +386,16 @@ function SingleInspector() {
             </div>
           </Section>
 
+          <Section title="Landmarks (needs a big free lot)">
+            <div className="flex flex-wrap gap-1.5">
+              {LANDMARKS.map((l) => (
+                <button key={l.id} title={l.blurb} className={chip(false)} onClick={() => applyLandmark(l)}>
+                  {l.label}
+                </button>
+              ))}
+            </div>
+          </Section>
+
           <Section title="Layout">
             <div className="flex flex-wrap gap-1.5">
               {LAYOUT_PRESETS.map((p) => (
@@ -424,6 +445,7 @@ function SingleInspector() {
               ))}
             </div>
           </div>
+          <ShapeEditor block={block} onChange={editBlock} />
         </>
       )}
 

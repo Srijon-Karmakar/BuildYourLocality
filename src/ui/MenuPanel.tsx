@@ -1,3 +1,4 @@
+import { SiteLinks } from './SiteLinks';
 import { useGameStore } from '../state/useGameStore';
 import { useMenuStore, type MenuTab } from '../state/useMenuStore';
 import { Icon } from './icons';
@@ -59,6 +60,7 @@ export function MenuPanel() {
           {active === 'graphics' && <SettingsPanel />}
           {active === 'walk' && <RoamOptions stacked />}
         </div>
+        <SiteLinks className="flex flex-wrap justify-center border-t border-white/10 px-2 py-1.5 xl:hidden" />
       </div>
     </>
   );

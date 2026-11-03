@@ -493,7 +493,7 @@ interface Rect {
 }
 
 /** Half-width of a pointed arch at depth dy below its apex (shoulders at depth s). */
-const pointedHalf = (w: number, s: number, dy: number) => (w / 2) * Math.pow(Math.min(1, Math.max(0, dy / s)), 0.8);
+const pointedHalf = (w: number, s: number, dy: number) => (w / 2) * Math.pow(Math.min(1, Math.max(0, dy / s)), 0.5);
 
 /** Adds the rect's outline to the canvas path. */
 function tracePath(ctx: CanvasRenderingContext2D, r: Rect) {

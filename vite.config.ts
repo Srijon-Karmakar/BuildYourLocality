@@ -18,10 +18,10 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), adTestMode()],
   build: {
     rollupOptions: {
-      // index.html is the static landing page; the game itself lives at play.html.
+      // index.html is the game; home.html, about, contact and privacy are static content pages.
       input: {
         main: resolve(__dirname, 'index.html'),
-        play: resolve(__dirname, 'play.html'),
+        home: resolve(__dirname, 'home.html'),
         about: resolve(__dirname, 'about.html'),
         contact: resolve(__dirname, 'contact.html'),
         privacy: resolve(__dirname, 'privacy.html'),

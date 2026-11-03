@@ -5,6 +5,7 @@ import { AvatarMenu } from './AvatarMenu';
 import { Icon } from './icons';
 import { MenuPanel } from './MenuPanel';
 import { ModeBar, ModeToggle } from './ModeBar';
+import { SiteLinks } from './SiteLinks';
 import { SyncBadge } from './SyncBadge';
 import { WEATHER_ICONS, useClock } from './skyShared';
 import { useIsCompact } from './useMediaQuery';
@@ -50,6 +51,7 @@ export function TopBar() {
     <>
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-1.5 sm:gap-2 sm:px-4" style={inset}>
         {compact ? <ModeToggle /> : <ModeBar />}
+        <SiteLinks className="pointer-events-auto absolute left-1/2 top-[calc(var(--safe-top)+0.375rem)] hidden -translate-x-1/2 items-center rounded-full bg-black/40 px-1 backdrop-blur-[6px] xl:flex xl:h-10" />
         <div className="flex items-start gap-1.5 sm:gap-2">
           <SyncBadge compact={compact} />
           <SkyChip compact={compact} />
