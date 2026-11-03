@@ -231,7 +231,8 @@ export function BuildPalette() {
         <div className={`no-scrollbar pointer-events-auto flex w-fit max-w-full gap-1 overflow-x-auto rounded-2xl p-1 sm:p-1.5 sm:w-auto sm:max-w-[92vw] sm:flex-wrap sm:justify-center sm:overflow-visible ${glass}`}>
           {ITEMS[tab].map((item, i) => (
             <button
-              key={item.brush ?? item.id}
+              // Bridges and walls share one tool id, so the key must tell their variants apart or the row keeps stale buttons.
+              key={`${item.id}:${item.brush ?? item.wallStyle ?? item.spanPreset ?? ''}`}
               onClick={() => activate(item)}
               className={`flex min-h-10 min-w-[3.6rem] shrink-0 flex-col items-center justify-center gap-0 rounded-xl px-1.5 text-[11px] leading-tight transition sm:min-h-0 sm:min-w-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-sm ${
                 isActive(item) ? 'bg-white text-black' : 'text-white/80 active:bg-white/20 sm:hover:bg-white/10'
