@@ -65,6 +65,18 @@ function prepare(source: THREE.BufferGeometry, matrix: THREE.Matrix4, withColor:
   return geometry;
 }
 
+/** One shared vertex-coloured material per finish (roughness, metalness): plain paints merge into it, whatever their colour. */
+const paletteMaterials = new Map<string, THREE.MeshStandardMaterial>();
+function paletteFor(source: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
+  const key = `${source.roughness}|${source.metalness}`;
+  let material = paletteMaterials.get(key);
+  if (!material) {
+    material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: source.roughness, metalness: source.metalness });
+    paletteMaterials.set(key, material);
+  }
+  return material;
+}
+
 /** Can this mesh be folded into a merged one? Moving, instanced and multi-material meshes cannot. */
 function mergeable(mesh: THREE.Mesh): boolean {
   if ((mesh as THREE.InstancedMesh).isInstancedMesh || (mesh as THREE.SkinnedMesh).isSkinnedMesh) return false;
@@ -104,10 +116,19 @@ export function mergeMeshes(roots: THREE.Object3D[]): THREE.Mesh[] {
       const parts: { material: THREE.Material; range?: { start: number; count: number } }[] = Array.isArray(mesh.material)
         ? mesh.geometry.groups.flatMap((g) => (mesh.material as THREE.Material[])[g.materialIndex ?? 0] ? [{ material: (mesh.material as THREE.Material[])[g.materialIndex ?? 0], range: { start: g.start, count: g.count } }] : [])
         : [{ material: mesh.material }];
-      for (const { material, range } of parts) {
-        const withColor = (material as THREE.MeshStandardMaterial).vertexColors === true;
+      for (const part of parts) {
+        const { range } = part;
+        let material = part.material;
+        // Plain paints share one material per finish, so a city of many colours still costs few draw calls.
+        const tint = material.userData.palette === true && (material as THREE.MeshStandardMaterial).vertexColors !== true ? (material as THREE.MeshStandardMaterial).color : null;
+        if (tint) material = paletteFor(material as THREE.MeshStandardMaterial);
+        const withColor = tint !== null || (material as THREE.MeshStandardMaterial).vertexColors === true;
         const geometry = prepare(mesh.geometry, mesh.matrixWorld, withColor, range);
         if (!geometry) continue;
+        if (tint) {
+          const colours = geometry.getAttribute('color') as THREE.BufferAttribute;
+          for (let i = 0; i < colours.count; i++) colours.setXYZ(i, tint.r, tint.g, tint.b);
+        }
         const key = `${material.uuid}|${mesh.castShadow ? 1 : 0}${mesh.receiveShadow ? 1 : 0}|${mesh.renderOrder}`;
         let bucket = buckets.get(key);
         if (!bucket) {

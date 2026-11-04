@@ -21,6 +21,8 @@ export function solidMaterial(color: string, roughness = 0.85, metalness = 0): T
   let material = solidCache.get(key);
   if (!material) {
     material = new THREE.MeshStandardMaterial({ color, roughness, metalness });
+    // Plain paint: when scenery is merged, all such materials with the same finish share one, with their colour stored in the vertices.
+    material.userData.palette = true;
     solidCache.set(key, material);
   }
   return material;

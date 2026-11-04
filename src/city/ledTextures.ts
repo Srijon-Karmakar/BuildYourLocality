@@ -15,7 +15,9 @@ const PITCH = { low: 0.32, medium: 0.16, high: 0.08 } as const;
 const MAX_PIXELS = 26000;
 const MAX_SIDE = 520;
 /** Repaint rates (frames per second) by how much the picture moves. */
-const FAST_FPS = 20;
+const FAST_FPS = 15;
+/** Most screens repainted in one frame, so a city full of screens never costs more than a couple of paints per frame. */
+const MAX_PAINTS_PER_FRAME = 2;
 const SLOW_FPS = 2;
 /** A screen only repaints while something drew it in the last moment (it is on screen). */
 const SEEN_WINDOW_MS = 400;
@@ -855,7 +857,7 @@ function render(screen: LedScreenTexture, now: number) {
     }
   }
   drawLayers(screen.lctx, screen.cols, screen.rows, spec, clock);
-  if (now - screen.averageAt > 500) {
+  if (now - screen.averageAt > 1500) {
     screen.averageAt = now;
     averageCtx.drawImage(screen.logical, 0, 0, 6, 6);
     const px = averageCtx.getImageData(0, 0, 6, 6).data;
@@ -926,6 +928,7 @@ function updateGlows(now: number) {
 function tick(now: number) {
   timer = requestAnimationFrame(tick);
   updateGlows(now);
+  const due: LedScreenTexture[] = [];
   for (const screen of active) {
     if (now - screen.seen > SEEN_WINDOW_MS) {
       active.delete(screen); // off screen: stop repainting until something draws it again
@@ -933,8 +936,11 @@ function tick(now: number) {
     }
     if (screen.rate === 0) continue;
     if (now - screen.lastPaint < 1000 / screen.rate) continue;
-    render(screen, now);
+    due.push(screen);
   }
+  // The screens that have waited longest go first; the rest catch up on the next frames.
+  if (due.length > MAX_PAINTS_PER_FRAME) due.sort((a, b) => a.lastPaint - b.lastPaint);
+  for (let i = 0; i < due.length && i < MAX_PAINTS_PER_FRAME; i++) render(due[i], now);
 }
 
 /** The part of a spec that decides what the texture looks like (placement and glow are not part of it). */
@@ -995,7 +1001,8 @@ function getScreen(spec: ResolvedLed, cols: number, rows: number): LedScreenText
     cols,
     rows,
     logical,
-    lctx: logical.getContext('2d')!,
+    // Kept in memory rather than on the GPU: reading it back for the average colour would otherwise stall the graphics card.
+    lctx: logical.getContext('2d', { willReadFrequently: true })!,
     output,
     octx,
     texture,

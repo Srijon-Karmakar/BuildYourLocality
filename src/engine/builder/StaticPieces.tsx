@@ -11,7 +11,7 @@ import { useTerrainStore } from '../../terrain/terrain';
 import { fingerprint, mergeMeshes } from './batching';
 
 /** Map is cut into square chunks of this many cells; each chunk is merged separately so far-away chunks can be culled. */
-const CHUNK_CELLS = 8;
+const CHUNK_CELLS = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches ? 16 : 12;
 /** Milliseconds per frame that merging may use, so a big edit never freezes the game. */
 const BAKE_BUDGET_MS = 8;
 /** The very first merge (loading a saved city) may take longer, to avoid buildings popping in one chunk at a time. */

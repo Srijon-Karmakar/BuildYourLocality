@@ -416,7 +416,7 @@ export function PieceModel({
   }
   return (
     <group scale={scale}>
-      <PropModel type={type} seed={seed} accent={accent} led={style.led} rot={rot} tree={tree} />
+      <PropModel type={type} seed={seed} accent={accent} led={style.led} rot={rot} tree={tree} zone={`${Math.floor((gx ?? 0) / 3)},${Math.floor((gz ?? 0) / 3)}`} />
     </group>
   );
 }

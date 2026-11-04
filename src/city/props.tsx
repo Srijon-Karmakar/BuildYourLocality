@@ -77,6 +77,8 @@ const DEFAULT_LED: Record<string, LedSpec> = {
 
 interface PropProps {
   seed: number;
+  /** Which block of cells the piece stands in (lamps in one zone share a bulb). */
+  zone?: string;
   /** Player-chosen main colour; each prop falls back to its own default. */
   accent?: string;
   led?: LedSpec | null;
@@ -179,31 +181,59 @@ function Fountain({ accent }: PropProps) {
   );
 }
 
+/**
+ * Streetlight bulbs are shared by every lamp in the same 3x3-cell zone: one material (so one draw call) and one
+ * motion check per zone instead of per lamp. The whole zone brightens when anyone is nearby.
+ */
+interface BulbZone {
+  material: THREE.MeshStandardMaterial;
+  level: number;
+  stamp: number;
+  users: number;
+}
+const bulbZones = new Map<string, BulbZone>();
+function acquireBulb(key: string): BulbZone {
+  let zone = bulbZones.get(key);
+  if (!zone) {
+    const material = bulbMat.clone();
+    material.emissiveIntensity = 0;
+    zone = { material, level: 0, stamp: -1, users: 0 };
+    bulbZones.set(key, zone);
+  }
+  zone.users++;
+  return zone;
+}
+function releaseBulb(key: string) {
+  const zone = bulbZones.get(key);
+  if (zone && --zone.users <= 0) bulbZones.delete(key);
+}
+
 /** Motion-sensing streetlight: idles dim and brightens when a person or vehicle is nearby. */
-function ClassicLamp({ accent }: PropProps) {
+function ClassicLamp({ accent, zone }: PropProps) {
   const pole = accent ? solidMaterial(accent, 0.45, 0.6) : darkMetalMaterial;
   const group = useRef<THREE.Group>(null);
-  const bulb = useMemo(() => {
-    const m = bulbMat.clone();
-    m.emissiveIntensity = 0;
-    return m;
-  }, []);
-  const level = useRef(0);
+  const key = zone ?? 'solo';
+  const shared = useMemo(() => acquireBulb(key), [key]);
+  useEffect(() => () => releaseBulb(key), [key]);
+  const bulb = shared.material;
   const here = useMemo(() => new THREE.Vector3(), []);
   const placed = useRef(false);
 
   // Off by day. After dark it idles at a soft glow and brightens when someone or something comes near.
-  useFrame((_, dt) => {
+  useFrame((state, dt) => {
     if (!group.current) return;
     if (!placed.current) {
       group.current.getWorldPosition(here);
       placed.current = true;
     }
+    // One lamp per zone does the work each frame.
+    if (shared.stamp === state.clock.elapsedTime) return;
+    shared.stamp = state.clock.elapsedTime;
     const dark = atmo.lamps;
-    if (dark < 0.01 && level.current < 0.01) return;
-    const target = dark * (sim.activityNear(here.x, here.z, 14) ? 3 : 1.25);
-    level.current += (target - level.current) * Math.min(1, dt * 6);
-    bulb.emissiveIntensity = level.current;
+    if (dark < 0.01 && shared.level < 0.01) return;
+    const target = dark * (sim.activityNear(here.x, here.z, 20) ? 3 : 1.25);
+    shared.level += (target - shared.level) * Math.min(1, dt * 6);
+    bulb.emissiveIntensity = shared.level;
   });
 
   return (
@@ -226,29 +256,30 @@ function ClassicLamp({ accent }: PropProps) {
 }
 
 /** Modern angled low-poly streetlight with cantilever arm and rectangular LED luminaire. */
-function ModernLamp({ accent }: PropProps) {
+function ModernLamp({ accent, zone }: PropProps) {
   const pole = accent ? solidMaterial(accent, 0.45, 0.6) : darkMetalMaterial;
   const group = useRef<THREE.Group>(null);
-  const bulb = useMemo(() => {
-    const m = bulbMat.clone();
-    m.emissiveIntensity = 0;
-    return m;
-  }, []);
-  const level = useRef(0);
+  const key = zone ?? 'solo';
+  const shared = useMemo(() => acquireBulb(key), [key]);
+  useEffect(() => () => releaseBulb(key), [key]);
+  const bulb = shared.material;
   const here = useMemo(() => new THREE.Vector3(), []);
   const placed = useRef(false);
 
-  useFrame((_, dt) => {
+  useFrame((state, dt) => {
     if (!group.current) return;
     if (!placed.current) {
       group.current.getWorldPosition(here);
       placed.current = true;
     }
+    // One lamp per zone does the work each frame.
+    if (shared.stamp === state.clock.elapsedTime) return;
+    shared.stamp = state.clock.elapsedTime;
     const dark = atmo.lamps;
-    if (dark < 0.01 && level.current < 0.01) return;
-    const target = dark * (sim.activityNear(here.x, here.z, 14) ? 3.2 : 1.35);
-    level.current += (target - level.current) * Math.min(1, dt * 6);
-    bulb.emissiveIntensity = level.current;
+    if (dark < 0.01 && shared.level < 0.01) return;
+    const target = dark * (sim.activityNear(here.x, here.z, 20) ? 3.2 : 1.35);
+    shared.level += (target - shared.level) * Math.min(1, dt * 6);
+    bulb.emissiveIntensity = shared.level;
   });
 
   return (
