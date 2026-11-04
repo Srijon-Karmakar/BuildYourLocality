@@ -18,6 +18,7 @@ import { SyncConflictDialog } from './ui/SyncConflictDialog';
 import { SampleAdOverlay } from './ui/SampleAdOverlay';
 import { ShopModal } from './ui/ShopModal';
 import { PhotoMode } from './ui/PhotoMode';
+import { RotateControl } from './ui/RotateControl';
 import { usePhotoStore } from './state/usePhotoStore';
 import { CityStatsModal } from './ui/CityStatsModal';
 import { IncidentBanner } from './ui/IncidentBanner';
@@ -73,6 +74,7 @@ function App() {
         <CombatHud />
         <VehicleHud />
         <BuildPalette />
+        <RotateControl />
         <BuildingInspector />
         {touch && mode === 'build' && (
           <>

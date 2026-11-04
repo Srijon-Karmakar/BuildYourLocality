@@ -1,6 +1,6 @@
 import { useFrame } from '@react-three/fiber';
 import { CuboidCollider, RigidBody } from '@react-three/rapier';
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { CELL } from '../city/catalog';
 import { getGroundTextures, getGroundVariationTexture, getTerrainTextures } from '../city/cityTextures';
@@ -237,16 +237,22 @@ export function TerrainLayer() {
   const drawDistance = useGameStore((s) => s.graphics.drawDistance);
   useCityStore((s) => s.pieces); // re-mesh when buildings/roads flatten the ground beneath them
   const [view, setView] = useState({ cx: 0, cz: 0, r: 5 });
+  const lastView = useRef(view);
 
   const material = useMemo(() => terrainMaterial(quality), [quality]);
   const edited = useMemo(() => editedChunks(cells), [cells]);
   const active = Object.keys(cells).length > 0;
 
   useFrame(() => {
+    if (!active) return;
     const cx = Math.floor(viewState.x / CHUNK_SIZE);
     const cz = Math.floor(viewState.z / CHUNK_SIZE);
     const r = mode === 'build' ? Math.min(8, 4 + Math.floor(viewState.dist / 180)) : Math.max(2, Math.ceil((drawDistance * 16) / CHUNK_SIZE) + 1);
-    setView((v) => (v.cx === cx && v.cz === cz && v.r === r ? v : { cx, cz, r }));
+    const previous = lastView.current;
+    if (previous.cx !== cx || previous.cz !== cz || previous.r !== r) {
+      lastView.current = { cx, cz, r };
+      setView(lastView.current);
+    }
   });
 
   if (!active) return null;

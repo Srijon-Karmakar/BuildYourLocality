@@ -1,4 +1,5 @@
 import { useFrame } from '@react-three/fiber';
+import { uploadInstances } from '../engine/instanceUploads';
 import { Fragment, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { heightAt } from '../terrain/terrain';
@@ -398,8 +399,7 @@ export function PeopleLayer() {
       }
       for (const id of pets.current.keys()) if (!seen.has(id)) pets.current.delete(id);
       dog.count = nd;
-      dog.instanceMatrix.needsUpdate = true;
-      if (dog.instanceColor) dog.instanceColor.needsUpdate = true;
+      uploadInstances(dog);
     }
 
     tor.count = hed.count = hai.count = n;
@@ -415,8 +415,7 @@ export function PeopleLayer() {
     muz.count = muzzleCount;
 
     for (const mesh of [tor, hed, hai, eye, arm, han, leg, sho, bag, led, hod, hat, pon, gea, muz]) {
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      uploadInstances(mesh);
     }
   });
 

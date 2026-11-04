@@ -24,7 +24,9 @@ function slice(source: THREE.BufferGeometry, start: number, count: number): THRE
 function prepare(source: THREE.BufferGeometry, matrix: THREE.Matrix4, withColor: boolean, range?: { start: number; count: number }): THREE.BufferGeometry | null {
   const position = source.getAttribute('position');
   if (!position || position.count === 0) return null;
-  let geometry = source.index ? source.toNonIndexed() : source.clone();
+  // Preserve shared vertices for single-material geometry (especially spheres and foliage).
+  // Material groups address triangle indices; missing normals retain the original flat shading.
+  let geometry = source.index && (range || !source.getAttribute('normal')) ? source.toNonIndexed() : source.clone();
   if (range) {
     const part = slice(geometry, range.start, range.count);
     geometry.dispose();
@@ -45,21 +47,20 @@ function prepare(source: THREE.BufferGeometry, matrix: THREE.Matrix4, withColor:
 
   geometry.applyMatrix4(matrix);
 
+  // Every bucket must use the same index representation, including non-indexed input.
+  if (!geometry.index) {
+    const indices = count > 65535 ? new Uint32Array(count) : new Uint16Array(count);
+    for (let i = 0; i < count; i++) indices[i] = i;
+    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  }
+
   // A mirrored transform turns triangles inside out: swap two vertices of each to restore the winding.
   if (matrix.determinant() < 0) {
-    for (const name of Object.keys(geometry.attributes)) {
-      const attribute = geometry.getAttribute(name);
-      const size = attribute.itemSize;
-      const array = attribute.array as Float32Array;
-      for (let t = 0; t < count; t += 3) {
-        for (let k = 0; k < size; k++) {
-          const a = (t + 1) * size + k;
-          const b = (t + 2) * size + k;
-          const tmp = array[a];
-          array[a] = array[b];
-          array[b] = tmp;
-        }
-      }
+    const indices = geometry.index!;
+    for (let t = 0; t < indices.count; t += 3) {
+      const b = indices.getX(t + 1);
+      indices.setX(t + 1, indices.getX(t + 2));
+      indices.setX(t + 2, b);
     }
   }
   return geometry;
@@ -169,7 +170,8 @@ export function mergeMeshes(roots: THREE.Object3D[]): THREE.Mesh[] {
   }
   // Anything that could not be merged still has to be drawn: put a fixed copy in the live scene.
   for (const mesh of leftovers) {
-    const copy = new THREE.Mesh(mesh.geometry, mesh.material);
+    // Preserve instance transforms and colours in unbatchable scenery.
+    const copy = mesh.clone(false);
     copy.castShadow = mesh.castShadow;
     copy.receiveShadow = mesh.receiveShadow;
     copy.renderOrder = mesh.renderOrder;
@@ -201,6 +203,12 @@ export function fingerprint(root: THREE.Object3D): number {
       // re-colouring or re-texturing a building would never be noticed and it would keep its old look.
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       for (const material of materials) h = (h * 31 + ((material as { id?: number } | undefined)?.id ?? 0)) | 0;
+      const instanced = mesh as THREE.InstancedMesh;
+      if (instanced.isInstancedMesh) {
+        h = (h * 31 + instanced.count) | 0;
+        h = (h * 31 + instanced.instanceMatrix.version) | 0;
+        h = (h * 31 + (instanced.instanceColor?.version ?? 0)) | 0;
+      }
       h = (h * 31 + (mesh.castShadow ? 1 : 0) + (mesh.receiveShadow ? 2 : 0)) | 0;
     }
   });

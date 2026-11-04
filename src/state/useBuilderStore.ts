@@ -53,6 +53,12 @@ interface BuilderState {
   setHand: (hand: boolean) => void;
   setTool: (tool: BuilderTool) => void;
   rotate: () => void;
+  /** One quarter-turn the other way. */
+  rotateBack: () => void;
+  /** Back to the default turn (and, for streetlights, to automatic). */
+  resetRotation: () => void;
+  /** True until the player turns the piece by hand: streetlights then point their arm over the nearest road. */
+  rotationAuto: boolean;
   setFacade: (facade: FacadeId | 'preset') => void;
   setRoof: (roof: RoofId | 'preset') => void;
   setRoadSpec: (patch: Partial<RoadSpec>) => void;
@@ -104,8 +110,11 @@ export const useBuilderStore = create<BuilderState>((set) => ({
   movingId: null,
   hand: false,
   setHand: (hand) => set({ hand }),
-  setTool: (tool) => set((state) => ({ tool, spanDraft: tool === 'span' ? state.spanDraft : [] })),
-  rotate: () => set((state) => ({ rotation: (state.rotation + 1) % 4 })),
+  setTool: (tool) => set((state) => ({ tool, rotationAuto: tool === state.tool ? state.rotationAuto : true, spanDraft: tool === 'span' ? state.spanDraft : [] })),
+  rotationAuto: true,
+  rotate: () => set((state) => ({ rotation: (state.rotation + 1) % 4, rotationAuto: false })),
+  rotateBack: () => set((state) => ({ rotation: (state.rotation + 3) % 4, rotationAuto: false })),
+  resetRotation: () => set({ rotation: 0, rotationAuto: true }),
   setFacade: (facade) => set({ facade }),
   setRoof: (roof) => set({ roof }),
   setRoadSpec: (patch) => set((state) => ({ roadSpec: { ...state.roadSpec, ...patch }, roadPreset: 'custom' })),

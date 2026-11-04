@@ -1,4 +1,5 @@
 import { useFrame } from '@react-three/fiber';
+import { uploadInstances } from '../engine/instanceUploads';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { viewState } from '../engine/viewState';
@@ -384,28 +385,24 @@ export function SimLayer() {
 
       if (signals) {
         signals.count = drawnSignals;
-        signals.instanceMatrix.needsUpdate = true;
-        if (signals.instanceColor) signals.instanceColor.needsUpdate = true;
+        uploadInstances(signals);
       }
-      if (carCabin.current.instanceColor) carCabin.current.instanceColor.needsUpdate = true;
 
       carBody.current.count = drawnCars;
       carCabin.current.count = drawnCars;
       carWheels.current.count = drawnWheels;
-      for (const mesh of [carBody.current, carCabin.current, carWheels.current]) mesh.instanceMatrix.needsUpdate = true;
-      if (carBody.current.instanceColor) carBody.current.instanceColor.needsUpdate = true;
+      for (const mesh of [carBody.current, carCabin.current, carWheels.current]) uploadInstances(mesh);
       if (carSirens.current) {
         carSirens.current.count = drawnSirens;
-        carSirens.current.instanceMatrix.needsUpdate = true;
-        if (carSirens.current.instanceColor) carSirens.current.instanceColor.needsUpdate = true;
+        uploadInstances(carSirens.current);
       }
       if (carLamps.current && carBeams.current) {
         carLamps.current.visible = carBeams.current.visible = night;
         if (night) {
           carLamps.current.count = drawnLamps;
           carBeams.current.count = drawnBeams;
-          carLamps.current.instanceMatrix.needsUpdate = true;
-          carBeams.current.instanceMatrix.needsUpdate = true;
+          uploadInstances(carLamps.current, false);
+          uploadInstances(carBeams.current, false);
         }
       }
     }
@@ -437,8 +434,7 @@ export function SimLayer() {
       trainBand.current.count = n;
       trainWindows.current.count = n;
       trainBogies.current.count = b;
-      for (const mesh of [trainBody.current, trainBand.current, trainWindows.current, trainBogies.current]) mesh.instanceMatrix.needsUpdate = true;
-      for (const mesh of [trainBody.current, trainBand.current]) if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      for (const mesh of [trainBody.current, trainBand.current, trainWindows.current, trainBogies.current]) uploadInstances(mesh);
     }
 
     // --- Ships ------------------------------------------------------------------
@@ -452,8 +448,7 @@ export function SimLayer() {
         shipMesh.current!.setColorAt(i, _colour.setHex(ship.color));
       });
       shipMesh.current.count = ships.length;
-      shipMesh.current.instanceMatrix.needsUpdate = true;
-      if (shipMesh.current.instanceColor) shipMesh.current.instanceColor.needsUpdate = true;
+      uploadInstances(shipMesh.current);
     }
 
     // --- Aircraft ---------------------------------------------------------------
@@ -472,8 +467,7 @@ export function SimLayer() {
       });
       for (const mesh of [planeBody.current, planeWings.current, planeFin.current, planeGear.current]) {
         mesh.count = planes.length;
-        mesh.instanceMatrix.needsUpdate = true;
-        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        uploadInstances(mesh);
       }
     }
   });

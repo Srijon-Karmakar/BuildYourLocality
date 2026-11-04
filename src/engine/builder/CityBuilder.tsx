@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { BlockGhost } from './BlockGhost';
 import { PiecesGhost } from './PiecesGhost';
+import { autoCornerRot } from './autoRotate';
 import { useBlueprintStore } from '../../state/useBlueprintStore';
 import { generateBlock } from '../../lib/blockGen';
 import { useBlockGenStore } from '../../state/useBlockGenStore';
@@ -226,6 +227,7 @@ export function CityBuilder() {
   const mode = useGameStore((s) => s.mode);
   const tool = useBuilderStore((s) => s.tool);
   const rotation = useBuilderStore((s) => s.rotation);
+  const rotationAuto = useBuilderStore((s) => s.rotationAuto);
   const facade = useBuilderStore((s) => s.facade);
   const roof = useBuilderStore((s) => s.roof);
   const roadSpec = useBuilderStore((s) => s.roadSpec);
@@ -360,7 +362,7 @@ export function CityBuilder() {
         gx: corner ? h.hx : h.gx,
         gz: corner ? h.hz : h.gz,
         ...(corner ? { offset: h.corner } : {}),
-        rot: b.tool === 'road' ? 0 : b.rotation,
+        rot: b.tool === 'road' ? 0 : corner && b.rotationAuto ? autoCornerRot(city.pieces, city.occupancy, h.hx, h.hz, h.corner) : b.rotation,
         ...look,
         ...presetStyle(b.tool),
         ...(b.tool === 'road' ? { road: b.roadSpec } : {}),
@@ -533,7 +535,10 @@ export function CityBuilder() {
           return;
         }
       }
-      if (e.code === 'KeyR' && !e.repeat) b.rotate();
+      if (e.code === 'KeyR' && !e.repeat) {
+        if (e.shiftKey) b.rotateBack();
+        else b.rotate();
+      }
       if (e.code === 'Escape') {
         if (b.movingId) b.cancelMove();
         else b.select(null);
@@ -634,7 +639,7 @@ export function CityBuilder() {
   let ghost = null;
   if (shown && (placeType || moving)) {
     const type = (placeType ?? moving?.type) as PieceType;
-    const rot = type === 'road' ? 0 : rotation;
+    const rot = type === 'road' ? 0 : !moving && isCornerType(type) && rotationAuto ? autoCornerRot(pieces, occupancy, shown.hx, shown.hz, shown.corner) : rotation;
     const [w, d] = rotatedFootprint(PIECES[type], rot, moving?.lot);
     ghost = (
       <group

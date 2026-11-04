@@ -1,7 +1,7 @@
 import { Physics, type RapierRigidBody } from '@react-three/rapier';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Html, PerformanceMonitor, PointerLockControls } from '@react-three/drei';
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { Html, PointerLockControls } from '@react-three/drei';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import * as THREE from 'three';
 import { BuilderCamera } from '../engine/builder/BuilderCamera';
 import { CityBuilder } from '../engine/builder/CityBuilder';
@@ -41,6 +41,7 @@ import { useCityStore } from '../state/useCityStore';
 import { useBuilderStore } from '../state/useBuilderStore';
 import { useWeatherStore } from '../state/useWeatherStore';
 import { useTerrainStore } from '../terrain/terrain';
+import { RenderBudget } from '../engine/renderBudget';
 
 /** Dev only: handles for the headless profiling scripts (stripped from production builds). */
 /** Tells the loading screen the first frame has been drawn. */
@@ -145,11 +146,20 @@ function FogController() {
 function AdaptiveResolution({ min, max }: { min: number; max: number }) {
   const setDpr = useThree((s) => s.setDpr);
   const adaptive = useGameStore((s) => s.graphics.adaptive);
+  const budget = useMemo(() => new RenderBudget(min, max), [min, max]);
   useEffect(() => {
-    if (!adaptive) setDpr(max);
-  }, [adaptive, max, setDpr]);
-  if (!adaptive) return null;
-  return <PerformanceMonitor bounds={() => [30, 55]} flipflops={4} onChange={({ factor }) => setDpr(Math.round((min + (max - min) * factor) * 20) / 20)} />;
+    budget.resetSamples(max);
+    setDpr(max);
+    const reset = () => budget.resetSamples();
+    document.addEventListener('visibilitychange', reset);
+    return () => document.removeEventListener('visibilitychange', reset);
+  }, [adaptive, budget, max, setDpr]);
+  useFrame((_, dt) => {
+    if (!adaptive || document.hidden) return;
+    const dpr = budget.sample(dt);
+    if (dpr !== undefined) setDpr(dpr);
+  });
+  return null;
 }
 
 /** Small frames-per-second readout, shown from Settings when you want to see how the device copes. */
