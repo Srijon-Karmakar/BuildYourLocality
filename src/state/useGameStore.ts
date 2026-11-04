@@ -26,6 +26,8 @@ export interface GraphicsSettings {
   bloom: boolean;
   /** Gentle camera sway while walking. */
   headBob: boolean;
+  /** The stylised look: warm sunset colours, chunky faceted people, rounded cars. */
+  stylised: boolean;
 }
 
 interface GameState {
@@ -68,7 +70,7 @@ function savedGraphics(): Partial<GraphicsSettings> {
 export const useGameStore = create<GameState>((set) => ({
   mode: 'build',
   roamSubMode: 'peaceful',
-  graphics: { ...PRESETS[startPreset], preset: startPreset, adaptive: true, showFps: false, bloom: !isCoarsePointer, headBob: true, ...savedGraphics() },
+  graphics: { ...PRESETS[startPreset], preset: startPreset, adaptive: true, showFps: false, bloom: !isCoarsePointer, headBob: true, stylised: false, ...savedGraphics() },
   flying: false,
   // A world that can only be explored (community world with building turned off) never enters build mode.
   setMode: (mode) => set({ mode: mode === 'build' && useWorldsStore.getState().readOnly ? 'roam' : mode }),
@@ -76,7 +78,7 @@ export const useGameStore = create<GameState>((set) => ({
   setGraphics: (patch) =>
     set((state) => {
       // Toggling the resolution governor or the FPS meter does not make the preset "custom".
-      const changesLook = Object.keys(patch).some((k) => k !== 'adaptive' && k !== 'showFps' && k !== 'preset' && k !== 'bloom' && k !== 'headBob');
+      const changesLook = Object.keys(patch).some((k) => k !== 'adaptive' && k !== 'showFps' && k !== 'preset' && k !== 'bloom' && k !== 'headBob' && k !== 'stylised');
       return { graphics: { ...state.graphics, ...(changesLook ? { preset: 'custom' as const } : {}), ...patch } };
     }),
   setPreset: (preset) => set((state) => ({ graphics: { ...state.graphics, ...PRESETS[preset], preset } })),

@@ -609,7 +609,7 @@ export class Simulation {
       watching: null,
       hair: pick(HAIRS),
       hairStyle: Math.random() < 0.12 ? 0 : 1 + Math.floor(Math.random() * 3),
-      bag: Math.random() < 0.28,
+      bag: Math.random() < 0.12,
       bagColour: pick(BAGS),
       coat: Math.random() < 0.22,
       height: trait === 'kid' ? range(0.7, 0.78) : range(0.92, 1.08),

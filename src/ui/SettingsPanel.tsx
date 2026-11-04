@@ -72,6 +72,7 @@ export function SettingsPanel() {
         checked={graphics.adaptive}
         onChange={(adaptive) => setGraphics({ adaptive })}
       />
+      <Toggle label="Stylised look" hint="Warm sunset colours, chunky low-poly people, rounded cars" checked={graphics.stylised} onChange={(stylised) => setGraphics({ stylised })} />
       <Toggle label="Night glow" hint="Windows, signs and lamps bloom after dark" checked={graphics.bloom} onChange={(bloom) => setGraphics({ bloom })} />
       <Toggle label="Walking sway" hint="Camera bob while you walk" checked={graphics.headBob} onChange={(headBob) => setGraphics({ headBob })} />
       <div className="border-t border-white/10 pt-3">

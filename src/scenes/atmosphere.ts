@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { applyLevels } from '../city/nightLights';
+import { useGameStore } from '../state/useGameStore';
 import { TIME_RATE, saveSky, useWeatherStore, type WeatherKind } from '../state/useWeatherStore';
 
 /**
@@ -58,6 +59,8 @@ export const atmo = {
   windows: 0,
   /** How busy the streets are (quiet at night and in bad weather). */
   crowd: 1,
+  /** 0..1: the stylised look's warm orange grade (eases in and out). */
+  warm: 0,
 
   cloud: 0.1,
   rain: 0,
@@ -112,6 +115,12 @@ const CLOUD_DAY = new THREE.Color('#ffffff');
 const CLOUD_NIGHT = new THREE.Color('#1b2236');
 const CLOUD_DUSK = new THREE.Color('#ffb98a');
 const CLOUD_STORM = new THREE.Color('#4a5563');
+const WARM_H = new THREE.Color('#f7a15a');
+const WARM_Z = new THREE.Color('#ee9660');
+const WARM_SUN = new THREE.Color('#ffb36e');
+const WARM_SKY = new THREE.Color('#ffd2a6');
+const WARM_GROUND = new THREE.Color('#9a6a46');
+const WARM_CLOUD = new THREE.Color('#ffc79a');
 
 let autoTimer = 0;
 let autoKind: WeatherKind = 'clear';
@@ -220,11 +229,21 @@ export function updateAtmosphere(dt: number) {
   atmo.horizon.lerp(GREY.copy(atmo.snow > atmo.fog ? SNOW_TINT : FOG_TINT).multiplyScalar(hazeTone), haze * 0.85);
   atmo.zenith.lerp(GREY.copy(FOG_TINT).multiplyScalar(hazeTone), haze * 0.7);
 
+  // The stylised look pulls the daytime sky towards a warm orange haze (it fades away at night and in storms).
+  atmo.warm = approach(atmo.warm, useGameStore.getState().graphics.stylised ? 1 : 0, dt * 1.5);
+  if (atmo.warm > 0.001) {
+    const k = atmo.warm * (0.25 + 0.75 * atmo.daylight) * (1 - 0.6 * Math.max(atmo.storm, atmo.rain * 0.6));
+    atmo.horizon.lerp(WARM_H, 0.62 * k * (1 - haze * 0.6));
+    atmo.zenith.lerp(WARM_Z, 0.5 * k * (1 - haze * 0.6));
+  }
+
   atmo.cloudColor.copy(CLOUD_NIGHT).lerp(CLOUD_DAY, atmo.daylight).lerp(CLOUD_DUSK, atmo.twilight * 0.55 * (1 - atmo.storm));
+  atmo.cloudColor.lerp(WARM_CLOUD, 0.5 * atmo.warm * atmo.daylight * (1 - atmo.storm));
   atmo.cloudColor.lerp(CLOUD_STORM, Math.max(atmo.storm * 0.7, atmo.rain * 0.4) * (0.35 + 0.65 * atmo.daylight));
 
   // --- Lights --------------------------------------------------------------------------
   atmo.sunColor.copy(SUN_LOW).lerp(SUN_HIGH, smooth(0.05, 0.45, s));
+  atmo.sunColor.lerp(WARM_SUN, 0.55 * atmo.warm);
   const overcast = 1 - 0.78 * atmo.cloud - 0.15 * atmo.fog;
   atmo.sunIntensity = 3.2 * smooth(-0.03, 0.22, s) * Math.max(0.05, overcast);
   const moonUp = smooth(0, 0.15, atmo.moonDir.y) * (1 - smooth(-0.1, 0.12, s));
@@ -232,6 +251,8 @@ export function updateAtmosphere(dt: number) {
 
   atmo.skyLight.copy(HEMI_SKY_NIGHT).lerp(HEMI_SKY_DAY, atmo.daylight);
   atmo.groundLight.copy(HEMI_GROUND_NIGHT).lerp(HEMI_GROUND_DAY, atmo.daylight);
+  atmo.skyLight.lerp(WARM_SKY, 0.45 * atmo.warm * atmo.daylight);
+  atmo.groundLight.lerp(WARM_GROUND, 0.5 * atmo.warm * atmo.daylight);
   atmo.hemiIntensity = 0.4 + 0.15 * atmo.daylight + 0.14 * atmo.cloud * atmo.daylight + 0.1 * atmo.twilight + atmo.flash * 2.2;
 
   // One shadow-casting directional light: the sun by day, the moon by night. Both are dim

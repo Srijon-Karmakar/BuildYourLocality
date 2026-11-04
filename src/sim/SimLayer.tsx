@@ -12,6 +12,7 @@ import { construction } from './construction';
 import { MonsterLayer } from './MonsterLayer';
 import { PeopleLayer } from './PeopleLayer';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { WATER_LEVEL } from '../terrain/terrain';
 import { MAX_PLANES } from './aircraft';
 import { MAX_SHIPS, SHIP_LENGTH } from './ships';
@@ -124,6 +125,10 @@ const OFF_WHITE = 0xe9eaec;
  */
 export function SimLayer() {
   const density = useGameStore((s) => s.graphics.population);
+  const stylised = useGameStore((s) => s.graphics.stylised);
+  // The stylised look: cars with rounded, chunky bodies and a softer, less shiny paint.
+  const bodyGeometry = useMemo(() => (stylised ? new RoundedBoxGeometry(1.9, 0.7, 4, 2, 0.24) : new THREE.BoxGeometry(1.9, 0.7, 4)), [stylised]);
+  const cabinGeometry = useMemo(() => (stylised ? new RoundedBoxGeometry(1.6, 0.55, 2.1, 2, 0.2) : new THREE.BoxGeometry(1.6, 0.55, 2.1)), [stylised]);
   useEffect(() => sim.setDensity(density), [density]);
 
   const carBody = useRef<THREE.InstancedMesh>(null);
@@ -320,13 +325,10 @@ export function SimLayer() {
 
   return (
     <>
-      <instancedMesh ref={carBody} args={[undefined, undefined, MAX_DRAWN_CARS]} frustumCulled={false} castShadow receiveShadow>
-        <boxGeometry args={[1.9, 0.7, 4]} />
-        <meshStandardMaterial roughness={0.3} metalness={0.5} />
+      <instancedMesh key={`body-${stylised}`} ref={carBody} args={[bodyGeometry, undefined, MAX_DRAWN_CARS]} frustumCulled={false} castShadow receiveShadow>
+        <meshStandardMaterial roughness={stylised ? 0.55 : 0.3} metalness={stylised ? 0.12 : 0.5} />
       </instancedMesh>
-      <instancedMesh ref={carCabin} args={[undefined, undefined, MAX_DRAWN_CARS]} frustumCulled={false} castShadow material={glass}>
-        <boxGeometry args={[1.6, 0.55, 2.1]} />
-      </instancedMesh>
+      <instancedMesh key={`cabin-${stylised}`} ref={carCabin} args={[cabinGeometry, undefined, MAX_DRAWN_CARS]} frustumCulled={false} castShadow material={glass} />
       <instancedMesh ref={carWheels} args={[wheelGeometry, undefined, MAX_DRAWN_CARS * 4]} frustumCulled={false} castShadow material={rubber} />
       <instancedMesh ref={carLamps} args={[lampGeometry, undefined, MAX_DRAWN_CARS * LAMPS_PER_CAR]} frustumCulled={false} visible={false}>
         <meshBasicMaterial toneMapped={false} />
