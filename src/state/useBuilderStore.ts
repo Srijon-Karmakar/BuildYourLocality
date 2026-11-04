@@ -6,7 +6,7 @@ import { DEFAULT_SPAN, SPAN_PRESETS, type SpanSpec } from '../city/spans';
 import { ROAD_PRESETS, type FacadeId, type PieceType, type RoadSpec, type RoofId } from '../city/catalog';
 
 /** `select` opens a building in the inspector; `bulldoze` deletes what you click or drag over. */
-export type BuilderTool = PieceType | 'bulldoze' | 'paint' | 'select' | 'move' | 'terrain' | 'forest' | 'wall';
+export type BuilderTool = PieceType | 'bulldoze' | 'paint' | 'select' | 'move' | 'terrain' | 'forest' | 'wall' | 'blockgen';
 
 interface BuilderState {
   tool: BuilderTool;

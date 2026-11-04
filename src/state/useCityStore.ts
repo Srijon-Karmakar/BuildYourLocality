@@ -251,6 +251,8 @@ interface CityState extends Snapshot {
   removeAt: (gx: number, gz: number) => boolean;
   /** Plants many trees as one undo step; each must pass the usual placement rules. Returns how many were planted. */
   placeMany: (pieces: Omit<Piece, 'id'>[]) => number;
+  /** Places a whole generated block as one undo step. Pieces that do not fit are skipped. */
+  placeBlock: (pieces: Omit<Piece, 'id'>[]) => { placed: number; skipped: number };
   /** Removes many pieces as one undo step. Returns how many went. */
   removeMany: (ids: string[]) => number;
   removeById: (id: string) => boolean;
@@ -379,6 +381,29 @@ export const useCityStore = create<CityState>((set, get) => {
         return { ...history, pieces, occupancy };
       });
       return true;
+    },
+
+    placeBlock: (list) => {
+      const accepted = list.filter((p) => get().canPlace(p.type, p.gx, p.gz, p.rot, p.lot, undefined, p.road));
+      if (accepted.length === 0) return { placed: 0, skipped: list.length };
+      const history = record();
+      const made: Piece[] = [];
+      set((state) => {
+        const pieces = { ...state.pieces };
+        const occupancy = { ...state.occupancy };
+        for (const piece of accepted) {
+          const id = crypto.randomUUID();
+          const placed: Piece = { ...piece, id };
+          pieces[id] = placed;
+          made.push(placed);
+          if (claimsCell(piece.type)) for (const key of footprintCells(piece.type, piece.gx, piece.gz, piece.rot, piece.lot)) occupancy[key] = id;
+        }
+        return { ...history, pieces, occupancy };
+      });
+      const cells = made.filter((p) => claimsCell(p.type)).flatMap((p) => footprintCells(p.type, p.gx, p.gz, p.rot, p.lot));
+      useTerrainStore.getState().clearCover(cells);
+      for (const piece of made) for (const listener of placeListeners) listener(piece);
+      return { placed: made.length, skipped: list.length - made.length };
     },
 
     placeMany: (list) => {

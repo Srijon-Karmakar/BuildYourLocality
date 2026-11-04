@@ -21,6 +21,7 @@ import { RoadSettings } from './RoadSettings';
 import { ForestSettings } from './ForestSettings';
 import { TerrainSettings } from './TerrainSettings';
 import { Icon } from './icons';
+import { BlockGenPanel } from './BlockGenPanel';
 import { SidePanel } from './SidePanel';
 import { useIsCompact, useIsTouch } from './useMediaQuery';
 
@@ -60,6 +61,7 @@ const ITEMS: Record<Tab, Item[]> = {
     { id: 'select', label: 'Edit' },
     { id: 'paint', label: 'Paint' },
     { id: 'bulldoze', label: 'Delete' },
+    { id: 'blockgen', label: 'Block', icon: 'apartment' },
   ],
 };
 for (const type of PIECE_TYPES) if (type !== 'span') ITEMS[PIECES[type].category].push({ id: type, label: PIECES[type].label });
@@ -158,11 +160,14 @@ export function BuildPalette() {
   const forestTool = tool === 'forest';
   const wallTool = tool === 'wall';
   const spanTool = tool === 'span';
-  const showMaterials = roadTool || terrainTool || forestTool || wallTool || spanTool || tool === 'paint' || (tool in PIECES && PIECES[tool as PieceType].paintable);
+  const blockTool = tool === 'blockgen';
+  const showMaterials = blockTool || roadTool || terrainTool || forestTool || wallTool || spanTool || tool === 'paint' || (tool in PIECES && PIECES[tool as PieceType].paintable);
   const presetChip = (active: boolean) =>
     `col-span-4 rounded-md px-2 py-2 text-xs transition sm:py-1 ${active ? 'bg-white text-black' : 'bg-white/10 text-white/80 hover:bg-white/20'}`;
 
-  const materials = spanTool ? (
+  const materials = blockTool ? (
+    <BlockGenPanel />
+  ) : spanTool ? (
     <SpanSettings />
   ) : wallTool ? (
     <WallSettings />
@@ -208,8 +213,8 @@ export function BuildPalette() {
         <SidePanel
           id="materials"
           side="left"
-          title={spanTool ? 'Bridge options' : roadTool ? 'Road options' : terrainTool ? 'Terrain' : forestTool ? 'Forest brush' : wallTool ? 'Wall options' : 'Materials'}
-          className={`pointer-events-auto absolute left-4 top-1/2 flex max-h-[80vh] flex-col gap-2 ${roadTool || terrainTool || forestTool || wallTool || spanTool ? 'w-64' : ''} -translate-y-1/2 overflow-y-auto rounded-2xl p-3 ${glass}`}
+          title={blockTool ? 'Block generator' : spanTool ? 'Bridge options' : roadTool ? 'Road options' : terrainTool ? 'Terrain' : forestTool ? 'Forest brush' : wallTool ? 'Wall options' : 'Materials'}
+          className={`pointer-events-auto absolute left-4 top-1/2 flex max-h-[80vh] flex-col gap-2 ${blockTool || roadTool || terrainTool || forestTool || wallTool || spanTool ? 'w-64' : ''} -translate-y-1/2 overflow-y-auto rounded-2xl p-3 ${glass}`}
         >
           {materials}
         </SidePanel>

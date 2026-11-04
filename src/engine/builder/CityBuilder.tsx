@@ -1,6 +1,9 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { BlockGhost } from './BlockGhost';
+import { generateBlock } from '../../lib/blockGen';
+import { useBlockGenStore } from '../../state/useBlockGenStore';
 import {
   CELL,
   PIECES,
@@ -52,7 +55,7 @@ interface Hover {
 }
 
 const isPlaceTool = (tool: BuilderTool): tool is PieceType =>
-  tool !== 'bulldoze' && tool !== 'paint' && tool !== 'select' && tool !== 'move' && tool !== 'terrain' && tool !== 'forest' && tool !== 'wall' && tool !== 'span';
+  tool !== 'bulldoze' && tool !== 'paint' && tool !== 'select' && tool !== 'move' && tool !== 'terrain' && tool !== 'forest' && tool !== 'wall' && tool !== 'span' && tool !== 'blockgen';
 
 /** Turns a model translucent and tints it green (can place) or red (blocked). */
 function ghostify(root: THREE.Object3D, valid: boolean) {
@@ -273,7 +276,14 @@ export function CityBuilder() {
     // A bridge is picked by its deck, which can pass over a road or a building.
     const spanHit = !wallHit && (b.tool === 'select' || b.tool === 'bulldoze') ? spanNear(h.px, h.pz, 1) : undefined;
     const topId = wallHit?.id ?? spanHit?.id ?? topIdAt(city.pieces, city.occupancy, h.hx, h.hz);
-    if (b.tool === 'span') {
+    if (b.tool === 'blockgen') {
+      const cfg = useBlockGenStore.getState().config;
+      const res = city.placeBlock(generateBlock(cfg, h.hx - Math.floor(cfg.w / 2), h.hz - Math.floor(cfg.d / 2)));
+      useBlockGenStore.setState((st) => ({
+        last: res.placed === 0 ? 'Nothing fits here: the ground is uneven or taken.' : `Built ${res.placed} pieces${res.skipped ? `, ${res.skipped} skipped (in the way)` : ''}.`,
+        config: st.config.reroll ? { ...st.config, seed: Math.floor(Math.random() * 99999) + 1 } : st.config,
+      }));
+    } else if (b.tool === 'span') {
       const [sx, sz] = snapSpanPoint(h.px, h.pz);
       if (SPAN_PRESETS.find((p) => p.id === b.spanPreset)?.template) placeTemplate(h.px, h.pz, b.rotation);
       else {
@@ -560,9 +570,10 @@ export function CityBuilder() {
     setPending(null);
   }, [tool, movingId, mode]);
 
+  const blockConfig = useBlockGenStore((st) => st.config);
   const placeType = isPlaceTool(tool) ? tool : null;
   const moving = tool === 'move' && movingId ? pieces[movingId] : undefined;
-  const touchGhost = touchMode.current && (placeType || moving);
+  const touchGhost = touchMode.current && (placeType || moving || tool === 'blockgen');
   // On touch the ghost sits where the player tapped; with a mouse it follows the cursor.
   const shown: Hover | null = touchGhost ? (pendingPoint ? hoverFromPoint(pendingPoint.x, pendingPoint.z) : null) : hover;
 
@@ -574,6 +585,8 @@ export function CityBuilder() {
       existing?.type === 'road' && (placeType === 'road' || placeType === 'crossing')
         ? true // restyle the road that is already here (or turn it into a level crossing)
         : city.canPlace(placeType, shown.gx, shown.gz, placeType === 'road' ? 0 : rotation, undefined, undefined, roadSpec);
+  } else if (shown && tool === 'blockgen') {
+    valid = true;
   } else if (shown && moving) {
     valid = useCityStore.getState().canPlace(moving.type, shown.gx, shown.gz, rotation, moving.lot, moving.id);
   }
@@ -706,6 +719,7 @@ export function CityBuilder() {
       {hover && tool === 'terrain' && <BrushRing x={hover.px} z={hover.pz} radius={brushRadius * CELL} />}
       {hover && tool === 'forest' && <BrushRing x={hover.px} z={hover.pz} radius={forestRadius * CELL} />}
       {ghost}
+      {tool === 'blockgen' && shown && <BlockGhost config={blockConfig} hx={shown.hx} hz={shown.hz} />}
       {wallGhost}
       {spanGhost}
       {spanMarkers}
