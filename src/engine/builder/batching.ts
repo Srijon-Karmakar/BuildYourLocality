@@ -79,7 +79,10 @@ function paletteFor(source: THREE.MeshStandardMaterial): THREE.MeshStandardMater
 
 /** Can this mesh be folded into a merged one? Moving, instanced and multi-material meshes cannot. */
 function mergeable(mesh: THREE.Mesh): boolean {
-  if ((mesh as THREE.InstancedMesh).isInstancedMesh || (mesh as THREE.SkinnedMesh).isSkinnedMesh) return false;
+  if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) return false;
+  // Instanced scenery (balconies and the like) is expanded into the merged mesh, unless each instance has its own colour.
+  const instanced = mesh as THREE.InstancedMesh;
+  if (instanced.isInstancedMesh && (instanced.instanceColor || instanced.count > 600)) return false;
   if (!mesh.material || !mesh.geometry) return false;
   // A multi-material mesh (a box with a different material per face) can only be split along its groups.
   if (Array.isArray(mesh.material) && mesh.geometry.groups.length === 0) return false;
@@ -116,14 +119,25 @@ export function mergeMeshes(roots: THREE.Object3D[]): THREE.Mesh[] {
       const parts: { material: THREE.Material; range?: { start: number; count: number } }[] = Array.isArray(mesh.material)
         ? mesh.geometry.groups.flatMap((g) => (mesh.material as THREE.Material[])[g.materialIndex ?? 0] ? [{ material: (mesh.material as THREE.Material[])[g.materialIndex ?? 0], range: { start: g.start, count: g.count } }] : [])
         : [{ material: mesh.material }];
-      for (const part of parts) {
+      const matrices: THREE.Matrix4[] = [];
+      const instanced = mesh as THREE.InstancedMesh;
+      if (instanced.isInstancedMesh) {
+        for (let i = 0; i < instanced.count; i++) {
+          const local = new THREE.Matrix4();
+          instanced.getMatrixAt(i, local);
+          matrices.push(local.premultiply(mesh.matrixWorld));
+        }
+      } else {
+        matrices.push(mesh.matrixWorld);
+      }
+      for (const matrix of matrices) for (const part of parts) {
         const { range } = part;
         let material = part.material;
         // Plain paints share one material per finish, so a city of many colours still costs few draw calls.
         const tint = material.userData.palette === true && (material as THREE.MeshStandardMaterial).vertexColors !== true ? (material as THREE.MeshStandardMaterial).color : null;
         if (tint) material = paletteFor(material as THREE.MeshStandardMaterial);
         const withColor = tint !== null || (material as THREE.MeshStandardMaterial).vertexColors === true;
-        const geometry = prepare(mesh.geometry, mesh.matrixWorld, withColor, range);
+        const geometry = prepare(mesh.geometry, matrix, withColor, range);
         if (!geometry) continue;
         if (tint) {
           const colours = geometry.getAttribute('color') as THREE.BufferAttribute;

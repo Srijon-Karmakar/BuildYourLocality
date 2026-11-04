@@ -6,6 +6,7 @@ import {
   type LedAd,
   type LedFit,
   type LedLayout,
+  type LedLink,
   type LedPanels,
   type LedSync,
   type LedTransition,
@@ -24,6 +25,7 @@ import {
   type LedScroll,
   type LedSpec,
 } from '../city/catalog';
+import { useTownMaster } from '../city/ledNet';
 import { Icon } from './icons';
 
 export const chip = (active: boolean) =>
@@ -362,14 +364,48 @@ function AdsEditor({ spec, onChange }: { spec: LedSpec; onChange: (change: Parti
  * Everything about what an LED screen shows and how it looks: content, colours, motion, text style,
  * pixel style, frame and glow. Where the screen sits on a building is handled by the caller.
  */
-export function LedEditor({ spec, onChange }: { spec: LedSpec; onChange: (change: Partial<LedSpec>) => void }) {
+export function LedEditor({ spec, onChange, onMaster }: { spec: LedSpec; onChange: (change: Partial<LedSpec>) => void; onMaster?: (on: boolean) => void }) {
   const look = resolveLed(spec);
   const mode = spec.mode;
   const [text, setText] = useDraft(spec.text ?? LED_DEFAULT_TEXT, (v) => onChange({ text: v }), 300);
   const [advanced, setAdvanced] = useState(false);
+  const link = spec.link ?? 'none';
+  const town = useTownMaster(link === 'town');
+
+  const linkGroup = (
+    <Group title="Same picture as">
+      <Chips<LedLink>
+        value={link}
+        options={[
+          { id: 'none', label: 'Its own' },
+          { id: 'building', label: "Building's main screen" },
+          { id: 'town', label: 'Town broadcast' },
+        ]}
+        onChange={(next) => onChange({ link: next === 'none' ? undefined : next, ...(next !== 'none' ? { master: false } : {}) })}
+      />
+      {link === 'none' && onMaster && (
+        <label className="flex min-h-9 items-center justify-between sm:min-h-0">
+          <span className="text-white/80">Broadcast this to the whole town</span>
+          <input type="checkbox" className="h-5 w-5" checked={!!spec.master} onChange={(e) => onMaster(e.target.checked)} />
+        </label>
+      )}
+      <p className="text-white/45">
+        {link === 'building'
+          ? "Shows what the first screen on this building with its own look shows, at this screen's size."
+          : link === 'town'
+            ? town
+              ? 'Shows what the broadcasting screen shows. Change that one and every linked screen follows.'
+              : 'No screen is broadcasting yet. Pick one and tick "Broadcast this to the whole town", then every town-linked screen will copy it.'
+            : 'Screens linked to this one (on this building, or all over town) copy its picture and stay in step.'}
+      </p>
+    </Group>
+  );
+  // A linked screen has no look of its own to edit: it is the picture of the one it follows.
+  if (link !== 'none') return <div className="flex flex-col gap-3">{linkGroup}</div>;
 
   return (
     <div className="flex flex-col gap-3">
+      {linkGroup}
       <Group title="Quick looks">
         <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
           {LED_PRESETS.map((p) => (

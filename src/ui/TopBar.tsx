@@ -8,6 +8,7 @@ import { ModeBar, ModeToggle } from './ModeBar';
 import { MoneyChip } from './MoneyChip';
 import { ShopButton } from './ShopButton';
 import { StatsButton } from './StatsButton';
+import { PhotoButton } from './PhotoMode';
 import { OnlineChip } from './OnlineChip';
 import { SiteLinks } from './SiteLinks';
 import { SyncBadge } from './SyncBadge';
@@ -61,6 +62,7 @@ export function TopBar() {
           <MoneyChip />
           {/* On a phone the shop, save status and clock live inside the menu sheet. */}
           {!compact && <StatsButton />}
+          {!compact && <PhotoButton className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-black/40 text-lg text-white backdrop-blur-[6px] active:bg-white/20 sm:h-10 sm:w-10 sm:text-xl sm:hover:bg-black/48" />}
           {!compact && <ShopButton />}
           {!compact && <SyncBadge compact={compact} />}
           {!compact && <SkyChip compact={compact} />}

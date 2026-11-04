@@ -1664,6 +1664,19 @@ class Combat {
     }
   }
 
+  /** A loud accident: nearby civilians run from it when danger is on, or stop and stare when it is not. */
+  scare(x: number, z: number, radius: number) {
+    for (const ped of sim.peds) {
+      if (ped.role !== 'civilian' || ped.state === 'inside' || ped.state === 'entering' || ped.state === 'down') continue;
+      if (Math.hypot(ped.x - x, ped.z - z) > radius) continue;
+      if (this.active) this.flee(ped, 'scared');
+      else {
+        ped.emote = 'scared';
+        ped.emoteTimer = 2.5;
+      }
+    }
+  }
+
   /** A person takes a hit: they fight back, run, or go down. Witnesses react too. */
   private hurtPed(ped: Ped, damage: number, fx: number, fz: number, knock: number, stun: number, byPlayer: boolean) {
     ped.hp -= damage;

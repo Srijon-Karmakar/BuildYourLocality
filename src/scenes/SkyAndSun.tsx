@@ -270,14 +270,14 @@ export function SkyAndSun() {
 }
 
 /** Builds a small scene shaped like the daytime sky (ground, horizon, zenith, bright sun) for reflections. */
-function buildSkyEnvironment(): THREE.Scene {
+function buildSkyEnvironment(stylised = false): THREE.Scene {
   const env = new THREE.Scene();
   const geometry = new THREE.SphereGeometry(50, 48, 24);
   const colors: number[] = [];
   const position = geometry.getAttribute('position');
-  const ground = new THREE.Color('#8b8a7c');
-  const horizon = new THREE.Color(HORIZON_COLOR).multiplyScalar(1.15);
-  const zenith = new THREE.Color('#3f7fc4');
+  const ground = stylised ? new THREE.Color('#38283a') : new THREE.Color('#8b8a7c');
+  const horizon = (stylised ? new THREE.Color('#ffa04a') : new THREE.Color(HORIZON_COLOR)).multiplyScalar(1.15);
+  const zenith = stylised ? new THREE.Color('#8a688a') : new THREE.Color('#3f7fc4');
   const c = new THREE.Color();
   for (let i = 0; i < position.count; i++) {
     const y = position.getY(i) / 50;
@@ -290,7 +290,7 @@ function buildSkyEnvironment(): THREE.Scene {
 
   const sun = new THREE.Mesh(
     new THREE.SphereGeometry(4, 16, 8),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff2d0').multiplyScalar(40), toneMapped: false }),
+    new THREE.MeshBasicMaterial({ color: (stylised ? new THREE.Color('#ffe2b0') : new THREE.Color('#fff2d0')).multiplyScalar(40), toneMapped: false }),
   );
   sun.position.copy(SUN_OFFSET).normalize().multiplyScalar(44);
   env.add(sun);
@@ -304,10 +304,11 @@ function buildSkyEnvironment(): THREE.Scene {
 export function Environment() {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
+  const stylised = useGameStore((s) => s.graphics.stylised);
 
   useEffect(() => {
     const pmrem = new THREE.PMREMGenerator(gl);
-    const target = pmrem.fromScene(buildSkyEnvironment(), 0.02);
+    const target = pmrem.fromScene(buildSkyEnvironment(stylised), 0.02);
     scene.environment = target.texture;
     scene.environmentIntensity = 0.5;
     setReflectionEnvironment(target.texture);
@@ -317,7 +318,7 @@ export function Environment() {
       target.dispose();
       pmrem.dispose();
     };
-  }, [gl, scene]);
+  }, [gl, scene, stylised]);
 
   // Reflections fade with the daylight so mirror glass does not mirror a noon sky at midnight.
   useFrame(() => {

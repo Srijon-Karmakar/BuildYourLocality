@@ -182,7 +182,7 @@ function Fountain({ accent }: PropProps) {
 }
 
 /**
- * Streetlight bulbs are shared by every lamp in the same 3x3-cell zone: one material (so one draw call) and one
+ * Streetlight bulbs are shared by every lamp in the same 8x8-cell zone: one material (so one draw call) and one
  * motion check per zone instead of per lamp. The whole zone brightens when anyone is nearby.
  */
 interface BulbZone {
@@ -231,7 +231,7 @@ function ClassicLamp({ accent, zone }: PropProps) {
     shared.stamp = state.clock.elapsedTime;
     const dark = atmo.lamps;
     if (dark < 0.01 && shared.level < 0.01) return;
-    const target = dark * (sim.activityNear(here.x, here.z, 20) ? 3 : 1.25);
+    const target = dark * (sim.activityNear(here.x, here.z, 32) ? 3 : 1.25);
     shared.level += (target - shared.level) * Math.min(1, dt * 6);
     bulb.emissiveIntensity = shared.level;
   });
@@ -277,7 +277,7 @@ function ModernLamp({ accent, zone }: PropProps) {
     shared.stamp = state.clock.elapsedTime;
     const dark = atmo.lamps;
     if (dark < 0.01 && shared.level < 0.01) return;
-    const target = dark * (sim.activityNear(here.x, here.z, 20) ? 3.2 : 1.35);
+    const target = dark * (sim.activityNear(here.x, here.z, 32) ? 3.2 : 1.35);
     shared.level += (target - shared.level) * Math.min(1, dt * 6);
     bulb.emissiveIntensity = shared.level;
   });

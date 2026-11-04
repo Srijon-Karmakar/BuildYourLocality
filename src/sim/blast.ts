@@ -214,6 +214,18 @@ class BlastSim {
     else this.bombs.push({ x, y, z, vx: dx * MUZZLE_SPEED, vy: dy * MUZZLE_SPEED + 2.5, vz: dz * MUZZLE_SPEED, age: 0 });
   }
 
+  /** A meteor falling out of the sky onto (x, z): the same blast as a rocket, with a long way to fall. */
+  meteor(x: number, z: number): boolean {
+    if (this.bombs.length >= MAX_BOMBS) return false;
+    this.bombs.push({ x: x + rnd(-14, 14), y: 170, z: z + rnd(-14, 14), vx: rnd(-8, 8), vy: -70, vz: rnd(-8, 8), age: 0, rocket: true });
+    return true;
+  }
+
+  /** A blast on the ground at (x, z) of radius `R` metres (the quake and the tornado tear things up with these). */
+  strike(x: number, z: number, R: number) {
+    this.detonate(x, this.groundAt(x, z) + 0.3, z, R, 'ground');
+  }
+
   private at(delay: number, run: () => void) {
     this.events.push({ t: this.time + delay, run });
   }
@@ -732,32 +744,103 @@ class BlastSim {
   }
 
   /** The flash, the rising ball of fire, the smoke column and the ring of dust along the ground. */
-  private fireball(x: number, y: number, z: number) {
-    for (let i = 0; i < 30; i++) {
+  /** The flash, the rising ball of fire, the smoke column and the ring of dust along the ground. `k` shrinks it for smaller blasts (a car is about 0.35). */
+  private fireball(x: number, y: number, z: number, k = 1) {
+    const count = (n: number) => Math.max(5, Math.round(n * Math.sqrt(k)));
+    for (let i = 0, n = count(30); i < n; i++) {
       const a = Math.random() * Math.PI * 2;
       const e = rnd(-0.2, 1);
-      const sp = rnd(2, 12);
+      const sp = rnd(2, 12) * k;
       const hot = Math.random();
-      this.puff(x, y + 0.6, z, Math.cos(a) * sp * (1 - e * 0.5), e * sp + rnd(0, 4), Math.sin(a) * sp * (1 - e * 0.5), rnd(0.5, 1.2), rnd(2, 4), rnd(8, 14), 1, 0.45 + hot * 0.4, 0.1 + hot * 0.15, 0.95, true, 1.5);
+      this.puff(x, y + 0.6 * k, z, Math.cos(a) * sp * (1 - e * 0.5), e * sp + rnd(0, 4) * k, Math.sin(a) * sp * (1 - e * 0.5), rnd(0.5, 1.2), rnd(2, 4) * k, rnd(8, 14) * k, 1, 0.45 + hot * 0.4, 0.1 + hot * 0.15, 0.95, true, 1.5);
     }
-    this.puff(x, y + 1, z, 0, 0, 0, 0.22, 6, 26, 1, 0.95, 0.8, 1, true, 0);
-    for (let i = 0; i < 34; i++) {
+    this.puff(x, y + k, z, 0, 0, 0, 0.22, 6 * k, 26 * k, 1, 0.95, 0.8, 1, true, 0);
+    for (let i = 0, n = count(34); i < n; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = rnd(1, 7);
+      const sp = rnd(1, 7) * k;
       const sh = rnd(0.14, 0.26);
-      this.puff(x + rnd(-1, 1), y + rnd(0.5, 2), z + rnd(-1, 1), Math.cos(a) * sp, rnd(4, 11), Math.sin(a) * sp, rnd(6, 11), rnd(3, 5), rnd(10, 20), sh, sh, sh, 0.7, false, rnd(0.2, 1.2));
+      this.puff(x + rnd(-1, 1) * k, y + rnd(0.5, 2) * k, z + rnd(-1, 1) * k, Math.cos(a) * sp, rnd(4, 11) * Math.sqrt(k), Math.sin(a) * sp, rnd(6, 11), rnd(3, 5) * k, rnd(10, 20) * k, sh, sh, sh, 0.7, false, rnd(0.2, 1.2));
     }
     // A ring of dust racing out along the ground ahead of the wave.
-    for (let i = 0; i < 28; i++) {
-      const a = (i / 28) * Math.PI * 2 + rnd(-0.1, 0.1);
+    for (let i = 0, n = count(28); i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + rnd(-0.1, 0.1);
       const sh = rnd(0.5, 0.62);
-      this.puff(x, y + 0.4, z, Math.cos(a) * 22, rnd(0, 1.5), Math.sin(a) * 22, rnd(1.2, 2.2), 2, rnd(7, 11), sh, sh * 0.92, sh * 0.8, 0.5, false, -0.5);
+      this.puff(x, y + 0.4, z, Math.cos(a) * 22 * k, rnd(0, 1.5), Math.sin(a) * 22 * k, rnd(1.2, 2.2), 2 * k, rnd(7, 11) * k, sh, sh * 0.92, sh * 0.8, 0.5, false, -0.5);
     }
-    if (this.chunks.length + 30 > MAX_CHUNKS) this.chunks.splice(0, 30);
-    for (let i = 0; i < 26; i++) {
+    const bits = count(26);
+    if (this.chunks.length + bits > MAX_CHUNKS) this.chunks.splice(0, bits);
+    for (let i = 0; i < bits; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = rnd(4, 15);
-      this.chunks.push({ x, y: y + 0.4, z, vx: Math.cos(a) * sp, vy: rnd(8, 20), vz: Math.sin(a) * sp, rx: 0, ry: 0, vrx: rnd(-10, 10), vry: rnd(-10, 10), size: rnd(0.1, 0.4), colour: Math.random() < 0.6 ? 0x4a3b2c : 0x2a2622, life: rnd(3, 5.5), settled: false });
+      const sp = rnd(4, 15) * k;
+      this.chunks.push({ x, y: y + 0.4, z, vx: Math.cos(a) * sp, vy: rnd(8, 20) * Math.sqrt(k), vz: Math.sin(a) * sp, rx: 0, ry: 0, vrx: rnd(-10, 10), vry: rnd(-10, 10), size: rnd(0.1, 0.4) * Math.sqrt(k), colour: Math.random() < 0.6 ? 0x4a3b2c : 0x2a2622, life: rnd(3, 5.5), settled: false });
+    }
+  }
+
+  private addChunk(c: { x: number; y: number; z: number; vx: number; vy: number; vz: number; size: number; colour: number; life: number }) {
+    if (this.chunks.length >= MAX_CHUNKS) this.chunks.shift();
+    this.chunks.push({ ...c, rx: Math.random() * 6, ry: Math.random() * 6, vrx: rnd(-12, 12), vry: rnd(-12, 12), settled: false });
+  }
+
+  /**
+   * Small particle effects for trouble on the road (see sim/carFx.ts): glass, sparks, smoke, soot, flames,
+   * rubber and dust. `dx`/`dz` say which way things fly; `count` is how many.
+   */
+  effect(kind: 'glass' | 'sparks' | 'smoke' | 'soot' | 'flame' | 'rubber' | 'dust', x: number, y: number, z: number, dx = 0, dz = 0, count = 1) {
+    for (let i = 0; i < count; i++) {
+      switch (kind) {
+        case 'glass':
+          this.addChunk({ x: x + rnd(-0.5, 0.5), y: y + rnd(-0.2, 0.3), z: z + rnd(-0.5, 0.5), vx: dx * rnd(0.5, 3) + rnd(-3, 3), vy: rnd(1.5, 5), vz: dz * rnd(0.5, 3) + rnd(-3, 3), size: rnd(0.04, 0.12), colour: Math.random() < 0.5 ? 0xcfe8f5 : 0xf4fbff, life: rnd(2, 3.5) });
+          break;
+        case 'rubber':
+          this.addChunk({ x: x + rnd(-0.2, 0.2), y: y + rnd(0, 0.3), z: z + rnd(-0.2, 0.2), vx: dx * rnd(0.5, 3) + rnd(-3, 3), vy: rnd(2, 6), vz: dz * rnd(0.5, 3) + rnd(-3, 3), size: rnd(0.08, 0.22), colour: 0x15171a, life: rnd(2.5, 4) });
+          break;
+        case 'sparks':
+          this.puff(x, y, z, dx * rnd(2, 6) + rnd(-3, 3), rnd(0.5, 3.5), dz * rnd(2, 6) + rnd(-3, 3), rnd(0.2, 0.45), 0.16, 0.03, 1, 0.8, 0.35, 0.95, true, -9);
+          break;
+        case 'smoke': {
+          const sh = rnd(0.42, 0.58);
+          this.puff(x + rnd(-0.2, 0.2), y, z + rnd(-0.2, 0.2), rnd(-0.3, 0.3), rnd(1.2, 2.2), rnd(-0.3, 0.3), rnd(1.6, 2.6), 0.5, rnd(2.2, 3.4), sh, sh, sh, 0.45, false, 0.5);
+          break;
+        }
+        case 'soot': {
+          const sh = rnd(0.08, 0.18);
+          this.puff(x + rnd(-0.3, 0.3), y, z + rnd(-0.3, 0.3), rnd(-0.4, 0.4), rnd(1.8, 3.2), rnd(-0.4, 0.4), rnd(2.2, 3.6), 0.7, rnd(3, 4.8), sh, sh, sh, 0.62, false, 0.6);
+          break;
+        }
+        case 'flame': {
+          const hot = Math.random();
+          this.puff(x + rnd(-0.35, 0.35), y, z + rnd(-0.35, 0.35), rnd(-0.3, 0.3), rnd(1.2, 2.6), rnd(-0.3, 0.3), rnd(0.4, 0.8), rnd(0.5, 0.8), 0.12, 1, 0.35 + hot * 0.45, 0.06, 0.85, true, 1.2);
+          break;
+        }
+        case 'dust': {
+          const sh = rnd(0.5, 0.62);
+          this.puff(x + rnd(-0.4, 0.4), y, z + rnd(-0.4, 0.4), dx * rnd(0.5, 2) + rnd(-1, 1), rnd(0.4, 1.4), dz * rnd(0.5, 2) + rnd(-1, 1), rnd(0.8, 1.6), 0.5, rnd(1.8, 2.8), sh, sh * 0.92, sh * 0.8, 0.4, false, 0.1);
+          break;
+        }
+      }
+    }
+  }
+
+  /**
+   * A car blowing up: a small fireball and a burst of twisted metal. It hurts people close by, scorches the ground and
+   * leaves flames, but does not dig, break roads or knock buildings about like a bomb does.
+   */
+  carExplosion(x: number, y: number, z: number) {
+    playSfx('explosion', 0.85, { x, y, z });
+    const away = Math.hypot(sim.player.x - x, sim.player.z - z);
+    this.shake = Math.max(this.shake, clamp(1 - away / 45, 0, 0.6));
+    this.fireball(x, y, z, 0.36);
+    for (let i = 0; i < 16; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = rnd(3, 9);
+      this.addChunk({ x, y: y + 0.3, z, vx: Math.cos(a) * sp, vy: rnd(5, 12), vz: Math.sin(a) * sp, size: rnd(0.12, 0.4), colour: Math.random() < 0.5 ? 0x2b2f35 : Math.random() < 0.5 ? 0x8b9096 : 0x4a3b2c, life: rnd(3, 5) });
+    }
+    if (!useWorldsStore.getState().readOnly) {
+      this.scar(x, z, 3.4, 0.7);
+      this.at(0.1, () => combat.blastDamage(x, z, 7, 0.45));
+      this.at(0.6, () => this.ignite(x, z, 1.5, rnd(9, 15), 'ground'));
+    } else {
+      this.at(0.1, () => combat.blastDamage(x, z, 7, 0.45));
     }
   }
 

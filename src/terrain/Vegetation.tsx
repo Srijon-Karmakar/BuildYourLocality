@@ -3,12 +3,14 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { CELL } from '../city/catalog';
 import { viewState } from '../engine/viewState';
+import { useIsTouch } from '../ui/useMediaQuery';
 import { heightAt, useTerrainStore } from './terrain';
 
 const MAX_TREES = 7000;
 const MAX_BUSHES = 4000;
 /** Trees are only drawn this many cells around the view. */
 const RANGE = 48;
+const TOUCH_RANGE = 22;
 
 const hash = (x: number, z: number, i: number) => {
   const n = Math.sin(x * 127.1 + z * 311.7 + i * 74.7) * 43758.5453;
@@ -27,6 +29,7 @@ const JUNGLE = ['#1f7a34', '#2a8f3a', '#15692c', '#3aa047', '#1b5f2a'];
  */
 export function Vegetation() {
   const cells = useTerrainStore((s) => s.cells);
+  const touch = useIsTouch();
   const trunks = useRef<THREE.InstancedMesh>(null);
   const cones = useRef<THREE.InstancedMesh>(null);
   const crowns = useRef<THREE.InstancedMesh>(null);
@@ -44,12 +47,13 @@ export function Vegetation() {
     let nCone = 0;
     let nCrown = 0;
     let nBush = 0;
+    const activeRange = touch ? TOUCH_RANGE : RANGE;
 
     for (const key in cells) {
       const cover = cells[key].cover;
       if (cover !== 'forest' && cover !== 'jungle') continue;
       const [gx, gz] = key.split(',').map(Number);
-      if (Math.abs(gx - cx) > RANGE || Math.abs(gz - cz) > RANGE) continue;
+      if (Math.abs(gx - cx) > activeRange || Math.abs(gz - cz) > activeRange) continue;
 
       const perCell = cover === 'jungle' ? 5 : 3;
       for (let i = 0; i < perCell && nTrunk < MAX_TREES; i++) {

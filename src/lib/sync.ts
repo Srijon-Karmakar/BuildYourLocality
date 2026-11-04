@@ -7,6 +7,7 @@ import { broadcastPatch, joinWorldChannel, leaveWorldChannel } from './collab';
 import { isSupabaseConfigured } from './supabaseClient';
 import { useTerrainStore, type TerrainCell } from '../terrain/terrain';
 import {
+  canBuildWorld,
   deleteWorldRow,
   fetchExtraSlots,
   fetchWorld,
@@ -258,6 +259,25 @@ function myName(): string {
 
 const isReadOnly = () => useWorldsStore.getState().readOnly;
 
+/**
+ * For a world that is not the player's own (a friend's, or a community world), asks the server whether
+ * they may build and follows the answer in both directions: building opens up when the owner allows it,
+ * and closes when they turn it off. The player's own worlds are never touched.
+ */
+async function checkBuildRights(id: string, token: number): Promise<void> {
+  const meta = activeMeta();
+  if (!identity || !meta || meta.owned !== false) return;
+  const allowed = await canBuildWorld(id);
+  if (allowed === null || token !== worldToken || id !== activeWorldId) return;
+  if (allowed === !isReadOnly()) return; // nothing changed
+  if (allowed) {
+    useWorldsStore.setState({ readOnly: false, error: 'You can build in this world now.' });
+  } else {
+    useWorldsStore.setState({ readOnly: true, error: 'The owner turned building off in this world.' });
+    useGameStore.getState().setMode('roam');
+  }
+}
+
 /** Other builders may be writing to this world, so save only our changes instead of replacing it all. */
 const patchMode = () => {
   const m = activeMeta();
@@ -395,11 +415,17 @@ async function pushNow(): Promise<void> {
   if (uid !== identity || wid !== activeWorldId) return; // signed out / switched world while saving
 
   if (error && /cannot build/i.test(error)) {
-    // The owner turned building off (or removed us): keep looking around, stop saving.
-    useWorldsStore.setState({ readOnly: true, error: 'The owner turned building off in this world.' });
-    useGameStore.getState().setMode('roam');
-    setStatus({ status: 'saved', error: null });
-    return;
+    // Only believe it if the server says so too: an expired login or a dropped connection also looks like "cannot build",
+    // and must not lock a player out for the rest of the session. Otherwise this falls through to a normal retry.
+    const allowed = await canBuildWorld(wid);
+    if (uid !== identity || wid !== activeWorldId) return;
+    if (allowed === false) {
+      // The owner turned building off (or removed us): keep looking around, stop saving.
+      useWorldsStore.setState({ readOnly: true, error: 'The owner turned building off in this world.' });
+      useGameStore.getState().setMode('roam');
+      setStatus({ status: 'saved', error: null });
+      return;
+    }
   }
   if (error) {
     setStatus({ status: navigator.onLine ? 'error' : 'offline', error });
@@ -461,6 +487,8 @@ async function loadCloudWorld(
 
   blocked = false;
   loadedWorld = id;
+  // A world that is not the player's own: ask the server whether building is allowed, not a cached row.
+  void checkBuildRights(id, token);
   if (mine && !mine.synced && !patchMode() && !isReadOnly()) {
     // This device has edits that never reached the cloud: they win over the older copy.
     applyWorld(mine.pieces, mine.terrain);
@@ -879,9 +907,12 @@ export async function visitWorld(id: string): Promise<string | null> {
   try {
     const info = await fetchWorldInfo(id);
     if (!info) return 'That world is not available any more.';
+    // Save the player's own world before anything about the visit changes (explore-only would skip the save).
+    await flushSync();
     const meta = toMeta(info, identity);
-    useWorldsStore.setState({ visiting: meta, readOnly: info.publicBuild === false });
-    await switchTo(id, true);
+    const rights = await canBuildWorld(id);
+    useWorldsStore.setState({ visiting: meta, readOnly: rights === null ? info.publicBuild === false : !rights });
+    await switchTo(id, false);
     return null;
   } finally {
     setBusy(false);
@@ -902,6 +933,19 @@ export async function leaveVisit(): Promise<void> {
   }
 }
 
+/** Resolves once the account is known and its worlds are loaded (so a join does not race the start-up and get overwritten). */
+export function whenAccountReady(): Promise<void> {
+  const ready = () => !!identity && useSyncStore.getState().status !== 'loading';
+  if (ready()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const stop = useSyncStore.subscribe(() => {
+      if (!ready()) return;
+      stop();
+      resolve();
+    });
+  });
+}
+
 let started = false;
 
 /** Starts autosave. Call once at app start; returns a cleanup function. */
@@ -919,6 +963,13 @@ export function startSync(): () => void {
     onChange();
   });
   const unsubAuth = useAuthStore.subscribe(() => void handleIdentity());
+  // A friend whose request was approved sees the world appear, and a world's owner changing who may build
+  // takes effect, without anyone having to reload.
+  const freshen = window.setInterval(() => {
+    if (document.visibilityState !== 'visible' || !identity || useWorldsStore.getState().busy || pushing) return;
+    void refreshWorlds();
+    if (activeWorldId) void checkBuildRights(activeWorldId, worldToken);
+  }, 20_000);
   setStatus({
     retry: () => {
       retryDelay = 2000;
@@ -952,6 +1003,7 @@ export function startSync(): () => void {
     unsubCity();
     unsubTerrain();
     unsubAuth();
+    window.clearInterval(freshen);
     document.removeEventListener('visibilitychange', onHide);
     window.removeEventListener('pagehide', onPageHide);
     window.removeEventListener('online', onOnline);

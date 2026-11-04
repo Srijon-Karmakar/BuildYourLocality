@@ -4,6 +4,7 @@ import type { CityStats } from '../sim/cityStats';
 import { useCityStatsStore, type StatsTab } from '../state/useCityStatsStore';
 import { TERM_LENGTH, usePoliticsStore, type Level } from '../state/usePoliticsStore';
 import { Icon } from './icons';
+import { DisastersTab, MissionsTab } from './CityExtras';
 
 const TABS: { id: StatsTab; label: string; icon: string }[] = [
   { id: 'overview', label: 'Overview', icon: 'stats' },
@@ -11,6 +12,8 @@ const TABS: { id: StatsTab; label: string; icon: string }[] = [
   { id: 'traffic', label: 'Traffic & air', icon: 'car' },
   { id: 'economy', label: 'Economy', icon: 'coins' },
   { id: 'government', label: 'Government', icon: 'government' },
+  { id: 'missions', label: 'Contracts', icon: 'package' },
+  { id: 'disasters', label: 'Disasters', icon: 'siren' },
 ];
 
 /** Red at 0 through amber to green at 100. */
@@ -460,7 +463,11 @@ export function CityStatsModal() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-          {!stats || !stats.hasCity ? (
+          {tab === 'missions' ? (
+            <MissionsTab />
+          ) : tab === 'disasters' ? (
+            <DisastersTab />
+          ) : !stats || !stats.hasCity ? (
             <p className="py-14 text-center text-sm text-white/60">Build some homes (houses, villas, apartments) and workplaces to start a city. The numbers appear here.</p>
           ) : tab === 'overview' ? (
             <Overview s={stats} />

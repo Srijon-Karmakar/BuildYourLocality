@@ -38,10 +38,10 @@ interface Spec {
 }
 
 const SPECS: Record<Car['kind'], Spec> = {
-  car: { accel: 15, max: 31, reverse: 8, halfWidth: 0.95, halfLength: 2.05, wheelbase: 2.7, grip: 9, brake: 27 },
-  taxi: { accel: 15, max: 29, reverse: 8, halfWidth: 0.95, halfLength: 2.05, wheelbase: 2.7, grip: 9, brake: 26 },
+  car: { accel: 15, max: 31, reverse: 8, halfWidth: 0.84, halfLength: 1.78, wheelbase: 2.4, grip: 9, brake: 27 },
+  taxi: { accel: 15, max: 29, reverse: 8, halfWidth: 0.84, halfLength: 1.78, wheelbase: 2.4, grip: 9, brake: 26 },
   bus: { accel: 7.5, max: 19, reverse: 5, halfWidth: 1.3, halfLength: 4.4, wheelbase: 5.6, grip: 6.5, brake: 17 },
-  police: { accel: 17, max: 35, reverse: 8, halfWidth: 0.95, halfLength: 2.2, wheelbase: 2.8, grip: 9.5, brake: 28 },
+  police: { accel: 17, max: 35, reverse: 8, halfWidth: 0.86, halfLength: 1.95, wheelbase: 2.5, grip: 9.5, brake: 28 },
   ambulance: { accel: 12, max: 29, reverse: 7, halfWidth: 1.05, halfLength: 2.6, wheelbase: 3.3, grip: 8, brake: 22 },
   fire: { accel: 8, max: 21, reverse: 5, halfWidth: 1.25, halfLength: 3.5, wheelbase: 4.6, grip: 6.5, brake: 17 },
 };
@@ -227,10 +227,18 @@ class Vehicle {
     return false;
   }
 
+  /** When the car last took damage, so a long scrape counts once. */
+  private damagedAt = -9;
+
   private crash(impact: number) {
     if (impact < 3.5) return;
     this.shake = Math.min(1, Math.max(this.shake, impact / 20));
     playSfx('car_crash', Math.min(1, 0.3 + impact / 16));
+    // Windows, tyres, wheels and the engine suffer in a hard enough hit (once per scrape, not every frame of one).
+    if (this.car && impact > 6 && sim.time - this.damagedAt > 0.8) {
+      this.damagedAt = sim.time;
+      sim.damageCar(this.car, impact * 0.45);
+    }
     if (impact > 11 && combat.active) combat.crashDamage((impact - 10) * 1.8);
   }
 
@@ -244,7 +252,11 @@ class Vehicle {
     let lateral = this.vx * r.x + this.vz * r.z;
     this.onRoad = sim.world.roads.has(`${cellOf(car.x)},${cellOf(car.z)}`);
     const surface = this.onRoad ? 1 : 0.5;
-    const maxSpeed = spec.max * surface;
+    // Burst tyres and lost wheels: slower, and the car pulls towards the damaged side.
+    const fxd = car.fx;
+    const flatLeft = ((fxd?.flat ?? 0) & 12 ? 1 : 0) + ((fxd?.off ?? 0) & 12 ? 2 : 0);
+    const flatRight = ((fxd?.flat ?? 0) & 3 ? 1 : 0) + ((fxd?.off ?? 0) & 3 ? 2 : 0);
+    const maxSpeed = spec.max * surface * Math.max(0.35, 1 - 0.2 * (flatLeft + flatRight));
 
     // --- Engine, brakes and drag along the car ---
     let fwd = this.forward;
@@ -273,6 +285,8 @@ class Vehicle {
     yaw = Math.max(-yawMax, Math.min(yawMax, yaw));
     // Right is a turn towards negative heading.
     car.heading -= yaw * dt;
+    // Pulling to the side with the flat (a left flat swings the nose left, which is a rising heading).
+    if (flatLeft || flatRight) car.heading += (flatLeft - flatRight) * 0.1 * Math.min(1, Math.abs(fwd) / 10) * dt;
 
     // --- Grip: sideways motion bleeds away, slowly with the handbrake (a drift) ---
     const grip = (input.handbrake ? 1.3 : spec.grip) * (this.onRoad ? 1 : 0.55);
@@ -329,6 +343,7 @@ class Vehicle {
         this.vz += nzn * closing * 1.3;
         if (closing > 3 && this.hitCooldown <= 0) {
           this.hitCooldown = 0.4;
+          sim.collide(car, other, closing);
           playSfx('car_hit', Math.min(1, closing / 12));
           this.shake = Math.max(this.shake, Math.min(0.6, closing / 25));
         }

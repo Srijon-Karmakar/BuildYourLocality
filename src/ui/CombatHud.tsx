@@ -257,6 +257,23 @@ export function CombatHud() {
   const fmt = useMoneyFormat();
   const s = useSnapshot();
 
+  // Begin the run and grab the mouse in the same click, so the view can be turned straight away.
+  const begin = () => {
+    combat.beginRun();
+    if (!touch) document.querySelector('canvas')?.requestPointerLock?.();
+  };
+  // Enter starts the run too (the button is focused), so it never has to be hunted for.
+  const introShown = s.intro && sub === 'survival' && mode === 'roam';
+  useEffect(() => {
+    if (!introShown) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'Enter' || e.code === 'NumpadEnter') begin();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [introShown]);
+
   if (mode !== 'roam') return null;
   // Peaceful walks have no danger to show, only the weapons and the finds.
   if (sub === 'peaceful') {
@@ -375,8 +392,8 @@ export function CombatHud() {
               <Tip icon="rocket">The rocket launcher (-) fires a rocket that explodes on impact and brings buildings down. Bought in the shop.</Tip>
               <Tip icon="pistol">Gunfire is loud. A taser stuns without a sound. Dragons can be shot down.</Tip>
             </ul>
-            <button className={primary} onClick={() => combat.beginRun()}>
-              Begin day 1
+            <button className={`${primary} sticky bottom-0 shrink-0 shadow-lg`} onClick={begin} autoFocus>
+              Begin day 1 {!touch && <span className="text-xs font-normal opacity-60">(Enter)</span>}
             </button>
           </div>
         </Overlay>

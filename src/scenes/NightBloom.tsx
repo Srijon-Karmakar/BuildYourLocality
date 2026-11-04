@@ -27,7 +27,7 @@ export function NightBloom() {
     if (bloom.current) bloom.current.intensity = BLOOM_INTENSITY * Math.min(1, atmo.lamps * 1.3);
   });
 
-  if (!enabled || !night) return null;
+  if (touch || !enabled || !night) return null;
   const light = preset === 'low' || touch;
   return (
     <EffectComposer multisampling={light ? 0 : 4}>

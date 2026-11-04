@@ -471,6 +471,8 @@ export type LedLayout = 'auto' | 'full' | 'square' | 'wide';
 export type LedPanels = 'same' | 'next' | 'chase';
 /** How screens keep time with each other. */
 export type LedSync = 'together' | 'chase' | 'solo';
+/** Where a screen takes its picture from: itself, the building's main screen, or the one screen that broadcasts to the whole town. */
+export type LedLink = 'none' | 'building' | 'town';
 export type LedTransition = 'fade' | 'slide' | 'cut';
 export type LedFit = 'contain' | 'cover';
 
@@ -613,6 +615,14 @@ export interface LedSpec {
   board?: Partial<BoardSpec>;
   /** How much the screen bows out of the wall (or, on an LED tower, how far it wraps round): 0 flat to 1 deeply curved. */
   curve?: number;
+  /** No gaps: no frame, no margin, filling the wall right to its corners so neighbouring screens meet edge to edge. */
+  seamless?: boolean;
+  /** One unbroken band all the way round the block, following its outline (rounded corners, polygons, taper). Side, width and offset are ignored. */
+  wrap?: boolean;
+  /** Take the look (and so the picture) from another screen; this one keeps its own place and size. */
+  link?: LedLink;
+  /** This screen is the town's broadcast: every screen linked to the town shows what it shows. Only one at a time. */
+  master?: boolean;
   /** Block index and wall it is mounted on. */
   block: number;
   side: DoorSide;

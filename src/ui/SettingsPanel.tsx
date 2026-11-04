@@ -1,3 +1,4 @@
+import { ControlsHelp } from './ControlsHelp';
 import { CurrencyPicker } from './CurrencyPicker';
 import { useState } from 'react';
 import { SoundSettings } from './SoundSettings';
@@ -110,6 +111,10 @@ export function SettingsPanel() {
         <CurrencyPicker />
       </div>
       <Toggle label="Show FPS" checked={graphics.showFps} onChange={(showFps) => setGraphics({ showFps })} />
+
+      <div className="border-t border-white/10 pt-3">
+        <ControlsHelp />
+      </div>
 
       <button onClick={() => setAdvanced((v) => !v)} className="flex min-h-9 items-center justify-between text-white/70 sm:min-h-0">
         Fine tune

@@ -302,7 +302,7 @@ class Incidents {
     });
     cityState.totals.accidents++;
     this.panicNear(x, z, 18);
-    combat.toast('Crash at a junction!', 'bad');
+    combat.toast('Car crash!', 'bad');
   }
 
   // --- Crews ---------------------------------------------------------------------------------

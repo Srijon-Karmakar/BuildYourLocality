@@ -11,7 +11,8 @@ export type Sfx =
   | 'click' | 'place' | 'place_soft' | 'delete' | 'select' | 'undo' | 'error' | 'token' | 'menu' | 'money'
   | 'car_door' | 'car_start' | 'car_horn' | 'car_crash' | 'car_skid' | 'car_hit'
   | 'hammer' | 'saw' | 'drill' | 'thunder' | 'roar' | 'rex_roar' | 'raptor' | 'fire' | 'chat'
-  | 'bomb_launch' | 'explosion' | 'collapse' | 'tree_fall' | 'siren';
+  | 'bomb_launch' | 'explosion' | 'collapse' | 'tree_fall' | 'siren'
+  | 'glass_break' | 'tyre_burst' | 'scrape';
 
 interface NoiseLayer {
   kind: 'n';
@@ -223,6 +224,36 @@ const RECIPES: Record<Sfx, Recipe> = {
     reverb: 0.35,
     cooldown: 0.08,
     layers: [n({ color: 'pink', dur: 0.5, gain: 0.5, atk: 0.1, filter: { type: 'bandpass', f: 1400, to: 500, q: 0.7 }, am: { rate: 30, depth: 0.7 } }), n({ color: 'brown', at: 0.45, dur: 0.3, gain: 0.7, filter: { type: 'lowpass', f: 300 } }), t({ from: 90, to: 44, at: 0.45, dur: 0.25, gain: 0.5 })],
+  },
+
+  // --- Road trouble ---
+  glass_break: {
+    vary: 0.1,
+    reverb: 0.35,
+    cooldown: 0.12,
+    layers: [
+      n({ dur: 0.1, gain: 0.8, atk: 0.001, filter: { type: 'highpass', f: 3000 } }),
+      n({ dur: 0.5, at: 0.03, gain: 0.32, filter: { type: 'bandpass', f: 5200, to: 3600, q: 0.8 }, am: { rate: 38, depth: 0.9 } }),
+      t({ from: 2700, to: 1900, dur: 0.22, gain: 0.05, wave: 'triangle', fm: { ratio: 2.7, depth: 400 } }),
+    ],
+  },
+  tyre_burst: {
+    vary: 0.08,
+    reverb: 0.4,
+    cooldown: 0.12,
+    layers: [
+      n({ dur: 0.07, gain: 0.95, atk: 0.001, filter: { type: 'highpass', f: 900 } }),
+      t({ from: 140, to: 52, dur: 0.22, gain: 0.7 }),
+      n({ color: 'pink', at: 0.05, dur: 0.6, gain: 0.3, filter: { type: 'bandpass', f: 1900, to: 600, q: 0.9 } }),
+    ],
+  },
+  scrape: {
+    vary: 0.12,
+    cooldown: 0.2,
+    layers: [
+      n({ dur: 0.55, gain: 0.3, atk: 0.04, filter: { type: 'bandpass', f: 2600, to: 1400, q: 1.1 }, am: { rate: 58, depth: 0.8 } }),
+      t({ from: 900, to: 480, dur: 0.5, gain: 0.04, wave: 'sawtooth' }),
+    ],
   },
 
   // --- Vehicles (one-shots; engines are continuous, see vehicleAudio) ---

@@ -1,5 +1,6 @@
 import { ShopButton } from './ShopButton';
 import { StatsButton } from './StatsButton';
+import { PhotoButton } from './PhotoMode';
 import { SiteLinks } from './SiteLinks';
 import { SyncBadge } from './SyncBadge';
 import { useIsCompact } from './useMediaQuery';
@@ -46,6 +47,7 @@ export function MenuPanel() {
         {compact && (
           <div className="flex items-center gap-1.5 px-1.5 pt-1.5">
             <StatsButton />
+            <PhotoButton className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-black/40 pointer-coarse:bg-black/64 text-lg text-white active:bg-white/20" />
             <ShopButton />
             <SyncBadge compact={false} />
           </div>

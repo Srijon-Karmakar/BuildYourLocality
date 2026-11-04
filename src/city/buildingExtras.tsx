@@ -4,6 +4,7 @@ import {
   FLOOR_H,
   gableHeightForSpan,
   type BalconyMode,
+  type Block,
   type BlockBox,
   type DoorSide,
   type LedSpec,
@@ -16,6 +17,8 @@ import { LOT_HEIGHT } from './geometries';
 import { curvedPanelGeometry, sagOf } from './ledShapes';
 import { getLedColour, getLedGlow, getLedMaterial, getSignMaterial } from './ledTextures';
 import { registerLed } from './ledRegistry';
+import { useLinkedLed } from './ledNet';
+import { LedWrap } from './LedWrap';
 import { darkMetalMaterial, glassMaterial, metalMaterial, solidMaterial } from './materials';
 import { wallPlacement } from './wall';
 
@@ -67,19 +70,36 @@ export function Balconies({ box, floors, mode, trim }: { box: BlockBox; floors: 
   );
 }
 
+/**
+ * A screen of a building: it takes its picture from the screen it is linked to (the building's main
+ * one, or the town's broadcast), then is either one unbroken band round the block or a panel on a wall.
+ * `master` is the building's main screen, the one linked screens copy.
+ */
+export function LedScreen({ spec, box, floors, block, master }: { spec: LedSpec; box: BlockBox; floors: number; block?: Block; master?: LedSpec }) {
+  const shown = useLinkedLed(spec, master);
+  if (shown.wrap && block) return <LedWrap spec={shown} block={block} box={box} floors={floors} />;
+  return <LedPanel spec={shown} box={box} floors={floors} />;
+}
+
+/** How far a seamless panel reaches past its wall at each end, so two panels meeting at a corner close up with no notch. */
+const MITRE = 0.16;
+
 /** An animated LED panel mounted on a wall: it glows, throws light on its surroundings, and keeps time with its neighbours. */
-export function LedScreen({ spec, box, floors }: { spec: LedSpec; box: BlockBox; floors: number }) {
+function LedPanel({ spec, box, floors }: { spec: LedSpec; box: BlockBox; floors: number }) {
   const wall = wallPlacement(box, spec.side);
   const bottom = Math.max(0, Math.min(spec.bottom, floors - 1));
   const storeys = Math.max(1, Math.min(spec.height, floors - bottom));
-  const maxWidth = Math.max(1.5, wall.length - 1.2);
-  const width = spec.width > 0 ? Math.min(spec.width, maxWidth) : maxWidth;
-  const height = storeys * FLOOR_H - 0.5;
-  const offset = Math.max(-(maxWidth - width) / 2, Math.min((maxWidth - width) / 2, spec.offset));
+  // Seamless: right to the wall's ends and exactly the storeys' height, with no frame, so neighbours touch.
+  const seamless = !!spec.seamless;
+  const maxWidth = seamless ? wall.length : Math.max(1.5, wall.length - 1.2);
+  const width = spec.width > 0 ? Math.min(spec.width, maxWidth) : maxWidth + (seamless ? MITRE * 2 : 0);
+  const height = seamless ? storeys * FLOOR_H : storeys * FLOOR_H - 0.5;
+  const slack = Math.max(0, (maxWidth - width) / 2);
+  const offset = Math.max(-slack, Math.min(slack, spec.offset));
   const look = resolveLed(spec);
   const material = getLedMaterial(spec, width, height);
-  const y = LOT_HEIGHT + bottom * FLOOR_H + 0.25 + height / 2;
-  const border = look.bezel === 'thick' ? 0.45 : look.bezel === 'thin' ? 0.12 : 0;
+  const y = LOT_HEIGHT + bottom * FLOOR_H + (seamless ? 0 : 0.25) + height / 2;
+  const border = seamless ? 0 : look.bezel === 'thick' ? 0.45 : look.bezel === 'thin' ? 0.12 : 0;
   const frame = useMemo(() => solidMaterial(look.frame, 0.5, 0.5), [look.frame]);
   // Screens high up the wall light the street less than ones at the bottom.
   const ground = 1 / (1 + (bottom * FLOOR_H) / 22);

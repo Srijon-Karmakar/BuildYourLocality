@@ -58,13 +58,21 @@ export const PRESETS: Record<QualityPreset, PresetValues> = {
 };
 
 const startPreset: QualityPreset = isCoarsePointer ? 'low' : 'medium';
+const LOOK_RESET_KEY = 'apnagali.look.classic.v1';
 const GRAPHICS_KEY = 'apnagali.graphics.v1';
 
 /** Graphics choices survive a reload (this device only). */
 function savedGraphics(): Partial<GraphicsSettings> {
   try {
     const raw = JSON.parse(localStorage.getItem(GRAPHICS_KEY) ?? 'null') as Partial<GraphicsSettings> | null;
-    return raw && typeof raw === 'object' ? raw : {};
+    const saved = raw && typeof raw === 'object' ? raw : {};
+    // The classic (realistic) look is the default: a sunset look saved by an earlier version is reset once.
+    if (localStorage.getItem(LOOK_RESET_KEY) !== '1') {
+      localStorage.setItem(LOOK_RESET_KEY, '1');
+      delete saved.visualPreset;
+      delete saved.stylised;
+    }
+    return saved;
   } catch {
     return {};
   }
@@ -72,8 +80,8 @@ function savedGraphics(): Partial<GraphicsSettings> {
 
 export const useGameStore = create<GameState>((set) => {
   const saved = savedGraphics();
-  const initialVisual: VisualPreset = saved.visualPreset ?? (saved.stylised ? 'sunset' : 'sunset');
-  const initialStylised = saved.stylised ?? (initialVisual === 'sunset');
+  const initialVisual: VisualPreset = saved.visualPreset ?? (saved.stylised ? 'sunset' : 'classic');
+  const initialStylised = saved.stylised ?? initialVisual === 'sunset';
   return {
     mode: 'build',
     roamSubMode: 'peaceful',

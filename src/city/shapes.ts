@@ -237,6 +237,41 @@ export function shapedBodyGeometry(box: BlockBox, floors: number, block: Block):
   return geometry;
 }
 
+/**
+ * The block's outline as one closed ring of points (metres from the block's centre, no repeated end
+ * point), before taper and twist. Rounded corners, cut corners, polygons, stars, crosses and Ys all
+ * come out as the same kind of ring, so a screen can follow any of them.
+ */
+export function blockOutline(box: BlockBox, block: Block): P2[] {
+  const plan = block.plan ?? 'rect';
+  const a = box.w / 2;
+  const b = box.d / 2;
+  const r = Math.min(1, Math.max(0, block.round ?? 0)) * Math.min(a, b);
+  const sides = block.sides ?? (plan === 'star' ? 5 : 6);
+  const inner = block.inner ?? (plan === 'star' ? 0.45 : 0.4);
+  const strips = plan === 'rect' ? outlineStrips(a, b, r, !!block.bevel) : planStrips(plan, a, b, sides, inner);
+  const ring: P2[] = [];
+  for (const strip of strips) {
+    for (const p of strip) {
+      const last = ring[ring.length - 1];
+      if (!last || Math.hypot(last[0] - p[0], last[1] - p[1]) > 1e-4) ring.push(p);
+    }
+  }
+  const first = ring[0];
+  const end = ring[ring.length - 1];
+  if (ring.length > 1 && Math.hypot(first[0] - end[0], first[1] - end[1]) < 1e-4) ring.pop();
+  return ring;
+}
+
+/** How big and how far turned the outline is at height fraction t (0 = bottom, 1 = top): taper, bulge, flare and twist. */
+export function ringOf(block: Block, t: number): { s: number; ang: number } {
+  const taper = Math.min(3, Math.max(0, block.taper ?? 1));
+  const curve = Math.min(1, Math.max(-1, block.curve ?? 0));
+  const flare = Math.min(1, Math.max(-1, block.flare ?? 0));
+  const twist = ((block.twist ?? 0) * Math.PI) / 180;
+  return { s: (1 + (taper - 1) * t) * (1 + 0.35 * curve * Math.sin(Math.PI * t)) * (1 + 0.8 * flare * Math.pow(1 - t, 3)), ang: twist * t };
+}
+
 /** Total height of a shaped block above its lot slab: walls plus crown. */
 export function shapedHeight(block: Block, box: BlockBox): number {
   return box.y + box.h + capHeightOf(block, box.w, box.d);

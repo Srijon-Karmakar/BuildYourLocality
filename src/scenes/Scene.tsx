@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
 import * as THREE from 'three';
 import { BuilderCamera } from '../engine/builder/BuilderCamera';
 import { CityBuilder } from '../engine/builder/CityBuilder';
+import { PhotoCapture } from './PhotoCapture';
 import { PiecesLayer } from '../engine/builder/StaticPieces';
 import { Ground } from '../engine/builder/Ground';
 import { CombatController } from '../engine/player/CombatController';
@@ -27,6 +28,7 @@ import { VehicleController } from '../engine/player/VehicleController';
 import { BlastLayer } from './BlastLayer';
 import { vehicle } from '../sim/vehicle';
 import { blast } from '../sim/blast';
+import * as carFx from '../sim/carFx';
 import { AudioDirector } from '../audio/AudioDirector';
 import { NightBloom } from './NightBloom';
 import { ProgramWarmup } from './ProgramWarmup';
@@ -56,7 +58,7 @@ function DevHooks() {
   const three = useThree();
   useEffect(() => {
     if (!import.meta.env.DEV) return;
-    Object.assign(window, { __apna: { vehicle, three, sim, combat, construction, city: useCityStore, game: useGameStore, builder: useBuilderStore, weather: useWeatherStore, terrain: useTerrainStore, viewState, blast } });
+    Object.assign(window, { __apna: { vehicle, three, sim, combat, construction, city: useCityStore, game: useGameStore, builder: useBuilderStore, weather: useWeatherStore, terrain: useTerrainStore, viewState, blast, carFx } });
   }, [three]);
   return null;
 }
@@ -195,7 +197,8 @@ export function Scene() {
   // (Not on phones: painting a texture stalls a slow CPU for a moment, so there it happens only when a texture is first needed.)
   useEffect(() => (touch ? undefined : warmTextures(quality, FACADES.map((f) => f.id), ROOFS.map((r) => r.id))), [quality, touch]);
   const preset = useGameStore((s) => s.graphics.preset);
-  const dprRange: [number, number] = touch ? (preset === 'low' ? [0.6, 1] : [0.7, 1.25]) : [0.85, 1.5];
+  // Clamped DPR on mobile (0.65-0.85) ensures crisp native UI while eliminating mobile TBDR GPU fillrate bottlenecks
+  const dprRange: [number, number] = touch ? [0.65, 0.85] : preset === 'low' ? [0.75, 1.1] : [0.85, 1.5];
 
   return (
     <Canvas
@@ -205,6 +208,7 @@ export function Scene() {
       gl={{ antialias: !touch, powerPreference: 'high-performance' }}
     >
       <DevHooks />
+      <PhotoCapture />
       <FirstFrame />
       <AdaptiveResolution min={dprRange[0]} max={dprRange[1]} />
       <FpsMeter />

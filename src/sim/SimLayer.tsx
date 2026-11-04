@@ -7,7 +7,11 @@ import { MAX_CARS, sim } from './simulation';
 import { combat } from './combat';
 import { cityModel } from './cityStats';
 import { incidents } from './incidents';
+import { looseWheels, updateCarFx } from './carFx';
 import { IncidentLayer } from './IncidentLayer';
+import { DisasterLayer } from './DisasterLayer';
+import { disasters } from './disasters';
+import { missions } from './missions';
 import { construction } from './construction';
 import { MonsterLayer } from './MonsterLayer';
 import { PeopleLayer } from './PeopleLayer';
@@ -19,6 +23,7 @@ import { MAX_SHIPS, SHIP_LENGTH } from './ships';
 import { MAX_TRANSIT_UNITS } from './trains';
 import { getGlowTexture, headlightBeamMaterial, registerNightEmissive } from '../city/nightLights';
 import { atmo } from '../scenes/atmosphere';
+import { useIsTouch } from '../ui/useMediaQuery';
 
 const _base = new THREE.Matrix4();
 const _local = new THREE.Matrix4();
@@ -29,6 +34,9 @@ const _turn = new THREE.Quaternion();
 const _quatPlane = new THREE.Quaternion();
 const _tilt = new THREE.Quaternion();
 const _colour = new THREE.Color();
+const _frustum = new THREE.Frustum();
+const _projScreenMatrix = new THREE.Matrix4();
+const _carSphere = new THREE.Sphere();
 const UP = new THREE.Vector3(0, 1, 0);
 const RIGHT = new THREE.Vector3(1, 0, 0);
 
@@ -40,7 +48,11 @@ function setPart(mesh: THREE.InstancedMesh, index: number, base: THREE.Matrix4, 
   mesh.setMatrixAt(index, _part);
 }
 
-const glass = new THREE.MeshStandardMaterial({ color: '#16222c', roughness: 0.1, metalness: 0.5 });
+/** White: each car's glass colour comes from its instance colour (dark, or frosted white once the windows are smashed). */
+const carGlass = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.1, metalness: 0.5 });
+const BRAKE_RED = new THREE.Color('#ff2418');
+const AMBER = new THREE.Color('#ffa81a');
+const clampN = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 const rubber = new THREE.MeshStandardMaterial({ color: '#15171a', roughness: 0.9 });
 /** Tram windows glow after dark. */
 const trainGlass = new THREE.MeshStandardMaterial({ color: '#16222c', roughness: 0.1, metalness: 0.5, emissive: '#ffe2a8', emissiveIntensity: 0 });
@@ -126,15 +138,18 @@ const OFF_WHITE = 0xe9eaec;
 export function SimLayer() {
   const density = useGameStore((s) => s.graphics.population);
   const stylised = useGameStore((s) => s.graphics.stylised);
+  const touch = useIsTouch();
   // The stylised look: cars with rounded, chunky bodies and a softer, less shiny paint.
-  const bodyGeometry = useMemo(() => (stylised ? new RoundedBoxGeometry(1.9, 0.7, 4, 2, 0.24) : new THREE.BoxGeometry(1.9, 0.7, 4)), [stylised]);
-  const cabinGeometry = useMemo(() => (stylised ? new RoundedBoxGeometry(1.6, 0.55, 2.1, 2, 0.2) : new THREE.BoxGeometry(1.6, 0.55, 2.1)), [stylised]);
+  const bodyGeometry = useMemo(() => (stylised ? new RoundedBoxGeometry(1.66, 0.6, 3.46, 2, 0.21) : new THREE.BoxGeometry(1.66, 0.6, 3.46)), [stylised]);
+  const cabinGeometry = useMemo(() => (stylised ? new RoundedBoxGeometry(1.4, 0.48, 1.82, 2, 0.17) : new THREE.BoxGeometry(1.4, 0.48, 1.82)), [stylised]);
   useEffect(() => sim.setDensity(density), [density]);
 
   const carBody = useRef<THREE.InstancedMesh>(null);
   const carCabin = useRef<THREE.InstancedMesh>(null);
   const carWheels = useRef<THREE.InstancedMesh>(null);
   const carLamps = useRef<THREE.InstancedMesh>(null);
+  /** Brake lights, indicators and hazard lights: lit by day as well as night, close to the viewer only. */
+  const carSignals = useRef<THREE.InstancedMesh>(null);
   const carBeams = useRef<THREE.InstancedMesh>(null);
   const carSirens = useRef<THREE.InstancedMesh>(null);
   const sirenGeometry = useMemo(() => new THREE.BoxGeometry(0.5, 0.16, 0.3), []);
@@ -165,18 +180,21 @@ export function SimLayer() {
   }, []);
 
   const wheelGeometry = useMemo(() => {
-    const g = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 14);
+    const g = new THREE.CylinderGeometry(0.33, 0.33, 0.26, 14);
     g.rotateZ(Math.PI / 2);
     return g;
   }, []);
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     sim.setPlayer(viewState.x, viewState.z, useGameStore.getState().mode === 'roam');
     sim.setAmbient(atmo.crowd);
     sim.update(Math.min(delta, 0.05));
+    updateCarFx(Math.min(delta, 0.05), touch ? 0.5 : 1, touch ? 80 : 110);
     combat.update(delta);
     incidents.update(Math.min(delta, 0.1));
     cityModel.tick(Math.min(delta, 0.1));
+    disasters.update(Math.min(delta, 0.1));
+    missions.tick(Math.min(delta, 0.1));
     construction.update(Math.min(delta, 0.1));
 
     // --- Vehicles ---------------------------------------------------------------
@@ -188,67 +206,204 @@ export function SimLayer() {
     const moving = sim.cars;
     const total = moving.length + parked.current.length;
     const night = atmo.lamps > 0.02;
+
     if (carBody.current && carCabin.current && carWheels.current) {
-      let sirens = 0;
+      // Frustum culling and distance LOD for vehicles:
+      const camera = state.camera;
+      _projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      _frustum.setFromProjectionMatrix(_projScreenMatrix);
+
+      const maxDist = touch ? 75 : 105;
+      const maxDistSq = maxDist * maxDist;
+      const carLodDist = touch ? 26 : 35;
+      const carLodDistSq = carLodDist * carLodDist;
+      const signalDist = touch ? 34 : 50;
+      const signalDistSq = signalDist * signalDist;
+      const camX = camera.position.x;
+      const camZ = camera.position.z;
+
+      let drawnCars = 0;
+      let drawnWheels = 0;
+      let drawnSirens = 0;
+      let drawnLamps = 0;
+      let drawnBeams = 0;
+      let drawnSignals = 0;
+      const signals = carSignals.current;
+      const lamp = (x: number, y: number, z: number, colour: THREE.Color, size = 1) => {
+        setPart(signals!, drawnSignals, _base, x, y, z, 0, size, size, 1);
+        signals!.setColorAt(drawnSignals++, colour);
+      };
+
       for (let i = 0; i < total; i++) {
+        if (drawnCars >= MAX_DRAWN_CARS) break;
         const isMoving = i < moving.length;
         const car: { x: number; z: number; heading: number; color: number; y?: number; pitch?: number; roll?: number } = isMoving ? moving[i] : parked.current[i - moving.length];
-        const kind = isMoving ? moving[i].kind : 'car';
-        const wrecked = isMoving && moving[i].wreck > 0;
+
+        const dx = car.x - camX;
+        const dz = car.z - camZ;
+        const distSq = dx * dx + dz * dz;
+        if (distSq > maxDistSq) continue;
+
+        _carSphere.center.set(car.x, (car.y ?? 0) + 1.2, car.z);
+        _carSphere.radius = 4.2;
+        if (!_frustum.intersectsSphere(_carSphere)) continue;
+
+        const mv = isMoving ? moving[i] : null;
+        const kind = mv ? mv.kind : 'car';
+        const fxc = mv?.fx;
+        const wrecked = !!mv && mv.wreck > 0;
+        const burnt = !!fxc?.burnt;
         // Buses, ambulances and fire engines are tall boxes; everything else is a car.
         const tall = kind === 'bus' || kind === 'ambulance' || kind === 'fire';
         const bus = kind === 'bus';
-        const roll = wrecked ? 0.12 : car.roll;
-        if (car.pitch || roll) _turn.setFromEuler(_euler.set(car.pitch ?? 0, car.heading, roll ?? 0, 'YXZ'));
-        else _turn.setFromAxisAngle(UP, car.heading);
-        _base.compose(_pos.set(car.x, car.y ?? 0, car.z), _turn, _scale.set(1, 1, 1));
-        const sx = bus ? 1.2 : kind === 'fire' ? 1.15 : kind === 'ambulance' ? 1.05 : 1;
-        const sy = bus ? 1.9 : kind === 'fire' ? 1.5 : kind === 'ambulance' ? 1.35 : 1;
-        const sz = bus ? 2.25 : kind === 'fire' ? 1.75 : kind === 'ambulance' ? 1.3 : 1;
-        setPart(carBody.current, i, _base, 0, 0.3 + 0.35 * sy, 0, 0, sx, sy, sz);
-        setPart(carCabin.current, i, _base, 0, tall ? 0.3 + 0.7 * sy + 0.3 : 1.2, tall ? 0 : -0.15, 0, tall ? sx * 1.02 : 1, tall ? 0.8 : 1, tall ? sz * 0.98 : 1);
-        carBody.current.setColorAt(i, _colour.setHex(wrecked ? 0x2a2a2d : car.color));
+        // Cars come in three shapes (saloon, hatchback, estate) and a few sizes, so a street does not look cloned.
+        const key = mv ? mv.id : car.color;
+        const variant = key % 3;
+        const vary = 0.95 + (0.1 * (((key * 2654435761) >>> 0) % 100)) / 100;
+
+        // How the body sits: it dips under braking, squats under power, leans into bends, bounces on a bumpy road,
+        // and sags on a corner that has lost its tyre or wheel.
+        let pitch = car.pitch ?? 0;
+        let roll = wrecked ? 0.12 : (car.roll ?? 0);
+        let lift = 0;
+        let yaw = car.heading;
+        if (mv) {
+          const speed = Math.abs(mv.speed);
+          pitch += clampN(-(mv.acc ?? 0) * 0.0045, -0.05, 0.05);
+          roll += clampN((mv.turn ?? 0) * speed * 0.01, -0.07, 0.07);
+          if (speed > 2) lift = Math.sin(sim.time * 13 + mv.id * 2.1) * 0.012 * Math.min(1, speed / 7);
+          if (fxc) {
+            const flatBits = fxc.flat ?? 0;
+            const offBits = fxc.off ?? 0;
+            for (let w = 0; w < 4; w++) {
+              const weight = offBits & (1 << w) ? 1 : flatBits & (1 << w) ? 0.45 : 0;
+              if (weight === 0) continue;
+              roll -= (w >> 1 ? 1 : -1) * weight * 0.06;
+              pitch += (w & 1 ? 1 : -1) * weight * 0.045;
+            }
+            if (burnt) roll += (mv.id % 2 ? 1 : -1) * 0.25;
+            if (fxc.limp !== undefined) yaw += Math.sin(sim.time * 9 + mv.id) * 0.035;
+          }
+        }
+        if (pitch || roll || yaw !== car.heading) _turn.setFromEuler(_euler.set(pitch, yaw, roll, 'YXZ'));
+        else _turn.setFromAxisAngle(UP, yaw);
+        _base.compose(_pos.set(car.x, (car.y ?? 0) + lift, car.z), _turn, _scale.set(1, 1, 1));
+
+        // The body is 3.46 m long; tall vehicles are scaled up from it to keep their old size.
+        const K = 1.156;
+        const sx = bus ? 1.2 * K : kind === 'fire' ? 1.15 * K : kind === 'ambulance' ? 1.05 * K : kind === 'police' ? 1.04 : vary;
+        const sy = bus ? 1.9 * K : kind === 'fire' ? 1.5 * K : kind === 'ambulance' ? 1.35 * K : variant === 2 ? 1.08 : 1;
+        const sz = bus ? 2.25 * K : kind === 'fire' ? 1.75 * K : kind === 'ambulance' ? 1.3 * K : kind === 'police' ? 1.1 : vary;
+
+        const cIdx = drawnCars++;
+        setPart(carBody.current, cIdx, _base, 0, 0.3 + 0.3 * sy, 0, 0, sx, sy, sz);
+        const cabinY = tall ? 0.3 + 0.6 * sy + 0.26 : variant === 2 ? 1.14 : 1.1;
+        const cabinZ = tall ? 0 : variant === 1 ? -0.3 : variant === 2 ? -0.2 : -0.12;
+        const cabinLong = tall ? sz * 0.98 : variant === 1 ? 0.88 * sz : variant === 2 ? 1.12 * sz : sz;
+        setPart(carCabin.current, cIdx, _base, 0, cabinY, cabinZ * sz, 0, tall ? sx * 1.02 : sx, tall ? 0.9 : variant === 2 ? 1.1 : 1, cabinLong);
+        _colour.setHex(burnt ? 0x1b1917 : wrecked ? 0x2a2a2d : car.color);
+        if (fxc?.dent && !burnt) _colour.multiplyScalar(1 - 0.3 * fxc.dent);
+        carBody.current.setColorAt(cIdx, _colour);
+        carCabin.current.setColorAt(cIdx, _colour.setHex(burnt ? 0x0b0b0c : fxc?.glass ? 0x8d99a3 : 0x16222c));
+
         // Light bar on the roof of emergency vehicles, flashing red and blue.
-        if (isMoving && moving[i].mission && carSirens.current && sirens < MAX_SIRENS) {
-          const top = tall ? 0.3 + 0.7 * sy + 0.3 + 0.28 : 1.6;
-          const flip = Math.floor(sim.time * 6 + moving[i].id) % 2 === 0;
-          setPart(carSirens.current, sirens, _base, -0.38 * sx, top, 0.2 * sz);
-          carSirens.current.setColorAt(sirens, _colour.set(flip ? '#ff2a2a' : '#2a62ff'));
-          sirens++;
-          setPart(carSirens.current, sirens, _base, 0.38 * sx, top, 0.2 * sz);
-          carSirens.current.setColorAt(sirens, _colour.set(flip ? '#2a62ff' : '#ff2a2a'));
-          sirens++;
+        if (mv && mv.mission && carSirens.current && drawnSirens < MAX_SIRENS - 1) {
+          const top = tall ? 0.3 + 0.6 * sy + 0.26 + 0.24 : 1.58;
+          const flip = Math.floor(sim.time * 6 + mv.id) % 2 === 0;
+          setPart(carSirens.current, drawnSirens, _base, -0.38 * sx, top, 0.2 * sz);
+          carSirens.current.setColorAt(drawnSirens, _colour.set(flip ? '#ff2a2a' : '#2a62ff'));
+          drawnSirens++;
+          setPart(carSirens.current, drawnSirens, _base, 0.38 * sx, top, 0.2 * sz);
+          carSirens.current.setColorAt(drawnSirens, _colour.set(flip ? '#2a62ff' : '#ff2a2a'));
+          drawnSirens++;
         }
-        let w = 0;
-        for (const sideX of [-0.95 * sx, 0.95 * sx]) {
-          for (const sideZ of [-1.3 * sz, 1.3 * sz]) setPart(carWheels.current, i * 4 + w++, _base, sideX, 0.38, sideZ);
+
+        // Distant LOD: only calculate and render 4 individual wheels when within carLodDist. A burst tyre sits flat; a lost wheel is missing.
+        if (distSq <= carLodDistSq && drawnWheels + 4 <= MAX_DRAWN_CARS * 4) {
+          const flatBits = fxc?.flat ?? 0;
+          const offBits = fxc?.off ?? 0;
+          let bit = 1;
+          for (let ix = 0; ix < 2; ix++) {
+            for (let iz = 0; iz < 2; iz++, bit <<= 1) {
+              if (offBits & bit) continue;
+              const isFlat = (flatBits & bit) !== 0;
+              setPart(carWheels.current, drawnWheels++, _base, (ix ? 0.82 : -0.82) * sx, isFlat ? 0.26 : 0.33, (iz ? 1.1 : -1.1) * sz, 0, 1, isFlat ? 0.72 : 1, isFlat ? 1.1 : 1);
+            }
+          }
         }
+
+        // Brake lights, indicators and hazards (close up only, by day too).
+        if (mv && signals && !burnt && distSq <= signalDistSq && drawnSignals + 4 <= MAX_DRAWN_CARS * 4) {
+          const front = 1.73 * sz;
+          const ly = 0.3 + 0.3 * sy + 0.1;
+          const blink = Math.floor(sim.time * 3.2) % 2 === 0;
+          if ((mv.acc ?? 0) < -1.2 || mv.speed < 0.25) {
+            lamp(-0.5 * sx, ly, -front, BRAKE_RED, 0.8);
+            lamp(0.5 * sx, ly, -front, BRAKE_RED, 0.8);
+          }
+          if ((fxc?.hazard ?? 0) > 0) {
+            if (blink) {
+              lamp(-0.72 * sx, ly, front, AMBER, 0.7);
+              lamp(0.72 * sx, ly, front, AMBER, 0.7);
+              lamp(-0.72 * sx, ly, -front, AMBER, 0.7);
+              lamp(0.72 * sx, ly, -front, AMBER, 0.7);
+            }
+          } else if (mv.signal && blink) {
+            // A right turn lights the car's right side, which is its local -x.
+            const side = (mv.signal > 0 ? -1 : 1) * 0.72 * sx;
+            lamp(side, ly, front, AMBER, 0.7);
+            lamp(side, ly, -front, AMBER, 0.7);
+          }
+        }
+
         // Headlamps, tail lamps and the beam on the road ahead, only after dark and only for moving traffic.
-        if (night && isMoving && carLamps.current && carBeams.current) {
-          const front = 2 * sz;
-          const y = 0.3 + 0.35 * sy + 0.1;
-          setPart(carLamps.current, i * LAMPS_PER_CAR, _base, -0.7 * sx, y, front);
-          setPart(carLamps.current, i * LAMPS_PER_CAR + 1, _base, 0.7 * sx, y, front);
-          setPart(carLamps.current, i * LAMPS_PER_CAR + 2, _base, -0.7 * sx, y, -front);
-          setPart(carLamps.current, i * LAMPS_PER_CAR + 3, _base, 0.7 * sx, y, -front);
-          setPart(carBeams.current, i, _base, 0, 0.1, front + 5, 0, 4 * sx, 1, 10);
+        if (night && isMoving && carLamps.current && carBeams.current && distSq <= 55 * 55 && drawnLamps + 4 <= MAX_DRAWN_CARS * LAMPS_PER_CAR) {
+          const front = 1.73 * sz;
+          const y = 0.3 + 0.3 * sy + 0.1;
+          setPart(carLamps.current, drawnLamps++, _base, -0.6 * sx, y, front);
+          setPart(carLamps.current, drawnLamps++, _base, 0.6 * sx, y, front);
+          setPart(carLamps.current, drawnLamps++, _base, -0.6 * sx, y, -front);
+          setPart(carLamps.current, drawnLamps++, _base, 0.6 * sx, y, -front);
+          if (drawnBeams < MAX_DRAWN_CARS && !burnt && !fxc?.disabled) {
+            setPart(carBeams.current, drawnBeams++, _base, 0, 0.1, front + 5, 0, 4 * sx, 1, 10);
+          }
         }
       }
-      carBody.current.count = total;
-      carCabin.current.count = total;
-      carWheels.current.count = total * 4;
+
+      // Wheels that have come off, rolling down the road.
+      for (const w of looseWheels) {
+        if (drawnWheels >= MAX_DRAWN_CARS * 4) break;
+        const dxw = w.x - camX;
+        const dzw = w.z - camZ;
+        if (dxw * dxw + dzw * dzw > maxDistSq) continue;
+        const size = w.life < 1 ? Math.max(0.001, w.life) : 1;
+        _turn.setFromEuler(_euler.set(w.spin, w.heading, w.tilt, 'YXZ'));
+        _base.compose(_pos.set(w.x, w.y, w.z), _turn, _scale.set(size, size, size));
+        carWheels.current.setMatrixAt(drawnWheels++, _base);
+      }
+
+      if (signals) {
+        signals.count = drawnSignals;
+        signals.instanceMatrix.needsUpdate = true;
+        if (signals.instanceColor) signals.instanceColor.needsUpdate = true;
+      }
+      if (carCabin.current.instanceColor) carCabin.current.instanceColor.needsUpdate = true;
+
+      carBody.current.count = drawnCars;
+      carCabin.current.count = drawnCars;
+      carWheels.current.count = drawnWheels;
       for (const mesh of [carBody.current, carCabin.current, carWheels.current]) mesh.instanceMatrix.needsUpdate = true;
       if (carBody.current.instanceColor) carBody.current.instanceColor.needsUpdate = true;
       if (carSirens.current) {
-        carSirens.current.count = sirens;
+        carSirens.current.count = drawnSirens;
         carSirens.current.instanceMatrix.needsUpdate = true;
         if (carSirens.current.instanceColor) carSirens.current.instanceColor.needsUpdate = true;
       }
       if (carLamps.current && carBeams.current) {
         carLamps.current.visible = carBeams.current.visible = night;
         if (night) {
-          carLamps.current.count = moving.length * LAMPS_PER_CAR;
-          carBeams.current.count = moving.length;
+          carLamps.current.count = drawnLamps;
+          carBeams.current.count = drawnBeams;
           carLamps.current.instanceMatrix.needsUpdate = true;
           carBeams.current.instanceMatrix.needsUpdate = true;
         }
@@ -328,9 +483,12 @@ export function SimLayer() {
       <instancedMesh key={`body-${stylised}`} ref={carBody} args={[bodyGeometry, undefined, MAX_DRAWN_CARS]} frustumCulled={false} castShadow receiveShadow>
         <meshStandardMaterial roughness={stylised ? 0.55 : 0.3} metalness={stylised ? 0.12 : 0.5} />
       </instancedMesh>
-      <instancedMesh key={`cabin-${stylised}`} ref={carCabin} args={[cabinGeometry, undefined, MAX_DRAWN_CARS]} frustumCulled={false} castShadow material={glass} />
+      <instancedMesh key={`cabin-${stylised}`} ref={carCabin} args={[cabinGeometry, undefined, MAX_DRAWN_CARS]} frustumCulled={false} castShadow material={carGlass} />
       <instancedMesh ref={carWheels} args={[wheelGeometry, undefined, MAX_DRAWN_CARS * 4]} frustumCulled={false} castShadow material={rubber} />
       <instancedMesh ref={carLamps} args={[lampGeometry, undefined, MAX_DRAWN_CARS * LAMPS_PER_CAR]} frustumCulled={false} visible={false}>
+        <meshBasicMaterial toneMapped={false} />
+      </instancedMesh>
+      <instancedMesh ref={carSignals} args={[lampGeometry, undefined, MAX_DRAWN_CARS * 4]} frustumCulled={false}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
       <instancedMesh ref={carSirens} args={[sirenGeometry, undefined, MAX_SIRENS]} frustumCulled={false}>
@@ -368,6 +526,7 @@ export function SimLayer() {
       <instancedMesh ref={planeGear} args={[planeGeometry.gear, undefined, MAX_PLANES]} frustumCulled={false} material={rubber} />
 
       <IncidentLayer />
+      <DisasterLayer />
       <PeopleLayer />
       <MonsterLayer />
     </>

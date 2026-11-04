@@ -472,6 +472,11 @@ class CityModel {
     combat.toast(`${state.mayor} was voted out. ${mayor} is the new mayor.`, 'warn');
   }
 
+  /** Adds (or takes) money from the city treasury: contract rewards go in here. */
+  addFunds(amount: number) {
+    this.treasury += amount;
+  }
+
   /** The most recent numbers, for code that is not a React component. */
   get snapshot(): CityStats | null {
     return this.last;

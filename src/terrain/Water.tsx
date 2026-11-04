@@ -3,11 +3,11 @@ import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { getWaterNormals } from '../city/cityTextures';
 import { viewState } from '../engine/viewState';
+import { useIsTouch } from '../ui/useMediaQuery';
 import { WATER_LEVEL, useTerrainStore } from './terrain';
 
 const SIZE = 3000;
 const REPEAT = 160;
-const TILE = SIZE / REPEAT;
 
 /**
  * One big sheet of water at sea level that follows the view. It only shows where the terrain
@@ -19,17 +19,22 @@ export function Water() {
     for (const key in s.cells) if ((s.cells[key].h ?? 0) < WATER_LEVEL) return true;
     return false;
   });
+  const touch = useIsTouch();
+  const activeSize = touch ? 700 : SIZE;
+  const activeRepeat = touch ? 40 : REPEAT;
+  const tile = activeSize / activeRepeat;
+
   const mesh = useRef<THREE.Mesh>(null);
   const normals = useMemo(() => {
     const t = getWaterNormals().clone();
-    t.repeat.set(REPEAT, REPEAT);
+    t.repeat.set(activeRepeat, activeRepeat);
     t.needsUpdate = true;
     return t;
-  }, []);
+  }, [activeRepeat]);
 
   useFrame((_, dt) => {
     // Snap to whole ripple tiles so the pattern never appears to slide with the camera.
-    mesh.current?.position.set(Math.round(viewState.x / TILE) * TILE, WATER_LEVEL, Math.round(viewState.z / TILE) * TILE);
+    mesh.current?.position.set(Math.round(viewState.x / tile) * tile, WATER_LEVEL, Math.round(viewState.z / tile) * tile);
     normals.offset.x += dt * 0.011;
     normals.offset.y += dt * 0.007;
   });
@@ -37,7 +42,7 @@ export function Water() {
   if (!hasWater) return null;
   return (
     <mesh ref={mesh} rotation={[-Math.PI / 2, 0, 0]} renderOrder={2}>
-      <planeGeometry args={[SIZE, SIZE]} />
+      <planeGeometry args={[activeSize, activeSize]} />
       <meshStandardMaterial
         color="#2b7ca8"
         transparent

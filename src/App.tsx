@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { joinWithCode, requestJoin, startSync } from './lib/sync';
+import { joinWithCode, requestJoin, startSync, whenAccountReady } from './lib/sync';
 import { useWorldsStore } from './state/useWorldsStore';
 import { useMenuStore } from './state/useMenuStore';
 import { startWallet } from './lib/wallet';
@@ -17,6 +17,8 @@ import { Crosshair } from './ui/Crosshair';
 import { SyncConflictDialog } from './ui/SyncConflictDialog';
 import { SampleAdOverlay } from './ui/SampleAdOverlay';
 import { ShopModal } from './ui/ShopModal';
+import { PhotoMode } from './ui/PhotoMode';
+import { usePhotoStore } from './state/usePhotoStore';
 import { CityStatsModal } from './ui/CityStatsModal';
 import { IncidentBanner } from './ui/IncidentBanner';
 import { CallButton } from './ui/CallButton';
@@ -27,6 +29,7 @@ import { useIsTouch } from './ui/useMediaQuery';
 function App() {
   const mode = useGameStore((s) => s.mode);
   const touch = useIsTouch();
+  const photo = usePhotoStore((s) => s.active);
 
   // Restore the login session, then keep the city saved and loaded automatically.
   useEffect(() => {
@@ -51,8 +54,11 @@ function App() {
     if (!code && !world) return;
     window.history.replaceState(null, '', window.location.pathname);
     useMenuStore.getState().select('worlds');
-    if (code) void joinWithCode(code).then((err) => useWorldsStore.setState({ error: err }));
-    else if (world) void requestJoin(world).then((r) => useWorldsStore.setState({ error: r.message }));
+    // Wait until the account's worlds have loaded: joining earlier races the start-up, which then reopens the player's own world.
+    void whenAccountReady().then(() => {
+      if (code) return joinWithCode(code).then((err) => useWorldsStore.setState({ error: err }));
+      if (world) return requestJoin(world).then((r) => useWorldsStore.setState({ error: r.message }));
+    });
   }, [signedIn]);
 
   return (
@@ -60,25 +66,30 @@ function App() {
       <Suspense fallback={null}>
         <Scene />
       </Suspense>
-      {mode === 'roam' && <Crosshair arrows={touch} />}
-      <TopBar />
-      <CombatHud />
-      <VehicleHud />
-      <BuildPalette />
-      <BuildingInspector />
-      {touch && mode === 'build' && (
+      {!photo && (
         <>
-          <CameraPad />
-          <ConfirmBar />
+        {mode === 'roam' && <Crosshair arrows={touch} />}
+        <TopBar />
+        <CombatHud />
+        <VehicleHud />
+        <BuildPalette />
+        <BuildingInspector />
+        {touch && mode === 'build' && (
+          <>
+            <CameraPad />
+            <ConfirmBar />
+          </>
+        )}
+        {touch && mode === 'roam' && <WalkControls />}
+        <SyncConflictDialog />
+        <SampleAdOverlay />
+        <IncidentBanner />
+        <CallButton />
+        <ShopModal />
+        <CityStatsModal />
         </>
       )}
-      {touch && mode === 'roam' && <WalkControls />}
-      <SyncConflictDialog />
-      <SampleAdOverlay />
-      <IncidentBanner />
-      <CallButton />
-      <ShopModal />
-      <CityStatsModal />
+      <PhotoMode />
       <CurtainLoader />
     </div>
   );

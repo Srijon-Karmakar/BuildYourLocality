@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { heightAt } from '../terrain/terrain';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { useGameStore } from '../state/useGameStore';
+import { useIsTouch } from '../ui/useMediaQuery';
 import { MAX_PEOPLE, sim, type Ped } from './simulation';
 
 const _base = new THREE.Matrix4();
@@ -15,6 +16,9 @@ const _yaw = new THREE.Quaternion();
 const _lie = new THREE.Quaternion();
 const _tilt = new THREE.Quaternion();
 const _colour = new THREE.Color();
+const _frustum = new THREE.Frustum();
+const _projScreenMatrix = new THREE.Matrix4();
+const _pedSphere = new THREE.Sphere();
 const UP = new THREE.Vector3(0, 1, 0);
 const RIGHT = new THREE.Vector3(1, 0, 0);
 const ANGRY = new THREE.Color(0xe0453a);
@@ -46,7 +50,6 @@ function tint(hex: number, anger: number, flash: number): THREE.Color {
 }
 
 const MAX_DOGS = 14;
-const COARSE = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
 /** Head size multiplier and whether some people wear caps: set each frame from the look. */
 let HEAD_K = 1;
 let CAPS = false;
@@ -206,7 +209,8 @@ const ARM = 0.6;
  */
 export function PeopleLayer() {
   const stylised = useGameStore((s) => s.graphics.stylised);
-  const rich = stylised && !COARSE;
+  const touch = useIsTouch();
+  const rich = stylised && !touch;
   const dogs = useRef<THREE.InstancedMesh>(null);
   const pets = useRef(new Map<number, { x: number; z: number; h: number }>());
   const torso = useRef<THREE.InstancedMesh>(null);
@@ -275,15 +279,31 @@ export function PeopleLayer() {
     }
   }, [stylised]);
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     HEAD_K = stylised ? 1.14 : 1;
     CAPS = rich;
     const parts = [torso, head, hair, eyes, arms, hands, legs, shoes, bags, bagLeds, hoods, hats, ponytails, gear, muzzles].map((r) => r.current);
     if (parts.some((p) => !p)) return;
     const [tor, hed, hai, eye, arm, han, leg, sho, bag, led, hod, hat, pon, gea, muz] = parts as THREE.InstancedMesh[];
+
+    // Strict first-person / roam viewport frustum culling
+    const camera = state.camera;
+    _projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    _frustum.setFromProjectionMatrix(_projScreenMatrix);
+
+    const maxDist = touch ? 65 : 88;
+    const maxDistSq = maxDist * maxDist;
+    const lodDist = touch ? 22 : 28;
+    const lodDistSq = lodDist * lodDist;
+    const camX = camera.position.x;
+    const camZ = camera.position.z;
+
     const peds = sim.peds;
     let n = 0;
+    let eyeCount = 0;
+    let handCount = 0;
     let bagCount = 0;
+    let ledCount = 0;
     let hoodCount = 0;
     let hatCount = 0;
     let ponCount = 0;
@@ -293,27 +313,47 @@ export function PeopleLayer() {
     for (const p of peds) {
       if (n >= MAX_PEOPLE) break;
       if (p.vis <= 0.01 && p.state === 'inside') continue;
+
+      const dx = p.x - camX;
+      const dz = p.z - camZ;
+      const distSq = dx * dx + dz * dz;
+      if (distSq > maxDistSq) continue;
+
+      const gy = Math.max(0, heightAt(p.x, p.z));
+      _pedSphere.center.set(p.x, gy + 0.9, p.z);
+      _pedSphere.radius = 1.35;
+      if (!_frustum.intersectsSphere(_pedSphere)) continue;
+
+      const isDistant = distSq > lodDistSq;
+
       const used = drawPerson(
         p,
         n,
         { tor, hed, hai, eye, arm, han, leg, sho, bag, led, hod, hat, pon, gea, muz },
         bagCount,
+        ledCount,
         hoodCount,
         hatCount,
         ponCount,
         gearCount,
         muzzleCount,
+        eyeCount,
+        handCount,
+        isDistant,
       );
       if (p.bag) bagCount++;
+      if (used.led) ledCount++;
       if (used.hood) hoodCount++;
       if (used.hat) hatCount++;
       if (used.ponytail) ponCount++;
       if (used.gear) gearCount++;
       if (used.muzzle) muzzleCount++;
+      eyeCount += used.eyes;
+      handCount += used.hands;
       n++;
     }
 
-    // Desktop, stylised look: every sixth person walks a Shiba Inu that trots along beside them.
+    // Shiba Inu companions: only trot and render for visible pedestrians in camera frustum
     const dog = dogs.current;
     if (dog) {
       let nd = 0;
@@ -336,6 +376,15 @@ export function PeopleLayer() {
           const vz = (tz - d.z) * k;
           d.x += vx;
           d.z += vz;
+
+          // Frustum check for pet
+          const ddx = d.x - camX;
+          const ddz = d.z - camZ;
+          if (ddx * ddx + ddz * ddz > maxDistSq) continue;
+          _pedSphere.center.set(d.x, heightAt(d.x, d.z) + 0.4, d.z);
+          _pedSphere.radius = 0.8;
+          if (!_frustum.intersectsSphere(_pedSphere)) continue;
+
           const speed = Math.hypot(vx, vz) / Math.max(delta, 0.001);
           if (speed > 0.25) d.h += Math.atan2(Math.sin(Math.atan2(vx, vz) - d.h), Math.cos(Math.atan2(vx, vz) - d.h)) * Math.min(1, delta * 8);
           else d.h += Math.atan2(Math.sin(p.heading - d.h), Math.cos(p.heading - d.h)) * Math.min(1, delta * 3);
@@ -354,9 +403,11 @@ export function PeopleLayer() {
     }
 
     tor.count = hed.count = hai.count = n;
-    eye.count = n * 2;
-    arm.count = han.count = leg.count = sho.count = n * 2;
-    bag.count = led.count = bagCount;
+    eye.count = eyeCount;
+    arm.count = leg.count = sho.count = n * 2;
+    han.count = handCount;
+    bag.count = bagCount;
+    led.count = ledCount;
     hod.count = hoodCount;
     hat.count = hatCount;
     pon.count = ponCount;
@@ -373,52 +424,52 @@ export function PeopleLayer() {
   return (
     <Fragment key={stylised ? 'stylised' : 'classic'}>
       <instancedMesh ref={dogs} args={[dogGeometry, undefined, MAX_DOGS]} frustumCulled={false} castShadow visible={rich}>
-        <meshStandardMaterial vertexColors={stylised} roughness={0.8} flatShading />
+        <meshStandardMaterial vertexColors={stylised} roughness={0.78} metalness={0.06} flatShading />
       </instancedMesh>
       <instancedMesh ref={torso} args={[geometry.torso, undefined, MAX_PEOPLE]} frustumCulled={false} castShadow>
-        <meshStandardMaterial roughness={0.85} flatShading={flat} />
+        <meshStandardMaterial roughness={0.78} metalness={0.04} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={hoods} args={[geometry.hood, undefined, MAX_PEOPLE]} frustumCulled={false} castShadow>
-        <meshStandardMaterial roughness={0.85} flatShading={flat} />
+        <meshStandardMaterial roughness={0.82} metalness={0.02} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={head} args={[geometry.head, undefined, MAX_PEOPLE]} frustumCulled={false}>
-        <meshStandardMaterial roughness={0.75} flatShading={flat} />
+        <meshStandardMaterial roughness={0.65} metalness={0.02} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={hair} args={[geometry.hair, undefined, MAX_PEOPLE]} frustumCulled={false}>
-        <meshStandardMaterial roughness={0.9} flatShading={flat} />
+        <meshStandardMaterial roughness={0.45} metalness={0.12} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={ponytails} args={[geometry.ponytail, undefined, MAX_PEOPLE]} frustumCulled={false}>
-        <meshStandardMaterial roughness={0.9} flatShading={flat} />
+        <meshStandardMaterial roughness={0.45} metalness={0.12} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={eyes} args={[geometry.eye, undefined, MAX_PEOPLE * 2]} frustumCulled={false}>
         <meshBasicMaterial color="#14161a" />
       </instancedMesh>
       <instancedMesh ref={arms} args={[geometry.arm, undefined, MAX_PEOPLE * 2]} frustumCulled={false}>
-        <meshStandardMaterial roughness={0.85} flatShading={flat} />
+        <meshStandardMaterial roughness={0.8} metalness={0.04} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={hands} args={[geometry.hand, undefined, MAX_PEOPLE * 2]} frustumCulled={false}>
-        <meshStandardMaterial roughness={0.75} flatShading={flat} />
+        <meshStandardMaterial roughness={0.65} metalness={0.02} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={legs} args={[geometry.leg, undefined, MAX_PEOPLE * 2]} frustumCulled={false} castShadow>
-        <meshStandardMaterial roughness={0.85} flatShading={flat} />
+        <meshStandardMaterial roughness={0.82} metalness={0.05} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={shoes} args={[geometry.shoe, undefined, MAX_PEOPLE * 2]} frustumCulled={false}>
-        <meshStandardMaterial vertexColors={stylised} roughness={0.6} flatShading={flat} />
+        <meshStandardMaterial vertexColors={stylised} roughness={0.55} metalness={0.08} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={bags} args={[geometry.bag, undefined, MAX_PEOPLE]} frustumCulled={false}>
-        <meshStandardMaterial roughness={0.8} flatShading={flat} />
+        <meshStandardMaterial roughness={0.75} metalness={0.08} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={bagLeds} args={[geometry.bagLed, undefined, MAX_PEOPLE]} frustumCulled={false}>
-        <meshStandardMaterial color="#ff8000" emissive="#ff6600" emissiveIntensity={3} roughness={0.3} toneMapped={false} />
+        <meshStandardMaterial color="#ff8800" emissive="#ff6600" emissiveIntensity={3.5} roughness={0.2} toneMapped={false} />
       </instancedMesh>
       <instancedMesh ref={hats} args={[geometry.hat, undefined, MAX_PEOPLE]} frustumCulled={false}>
-        <meshStandardMaterial roughness={0.4} flatShading={flat} />
+        <meshStandardMaterial roughness={0.45} metalness={0.1} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={gear} args={[geometry.gear, undefined, MAX_PEOPLE]} frustumCulled={false} castShadow>
-        <meshStandardMaterial vertexColors={stylised} roughness={0.7} flatShading={flat} />
+        <meshStandardMaterial vertexColors={stylised} roughness={0.38} metalness={0.68} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={muzzles} args={[geometry.muzzle, undefined, MAX_PEOPLE]} frustumCulled={false}>
-        <meshBasicMaterial color="#ffea70" transparent opacity={0.95} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} side={THREE.DoubleSide} />
+        <meshBasicMaterial color="#ffe875" transparent opacity={0.95} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} side={THREE.DoubleSide} />
       </instancedMesh>
     </Fragment>
   );
@@ -447,12 +498,16 @@ function drawPerson(
   n: number,
   m: Meshes,
   bagIndex: number,
+  ledIndex: number,
   hoodIndex: number,
   hatIndex: number,
   ponIndex: number,
   gearIndex: number,
   muzzleIndex: number,
-): { hood: boolean; hat: boolean; ponytail: boolean; gear: boolean; muzzle: boolean } {
+  eyeIndex: number,
+  handIndex: number,
+  isDistant: boolean,
+): { hood: boolean; hat: boolean; ponytail: boolean; gear: boolean; muzzle: boolean; led: boolean; eyes: number; hands: number } {
   const sitting = p.state === 'sitting';
   const cowering = p.state === 'cowering';
   const down = p.state === 'down';
@@ -484,11 +539,12 @@ function drawPerson(
   setPart(m.tor, n, 0, hipY + 0.3 * coat - (coat - 1) * 0.25, lean * 0.2, lean, 1, coat, 0.64);
   m.tor.setColorAt(n, tint(p.shirt, anger * 0.3, flash));
 
-  // Folded hoodie collar resting on upper shoulders for anyone with a coat or hoodie.
-  const hasHood = p.coat || p.id % 2 === 0;
-  if (hasHood) {
+  // Folded hoodie collar resting on upper shoulders for anyone with a coat or hoodie (omitted for distant LOD).
+  let hasHood = false;
+  if (!isDistant && (p.coat || p.id % 2 === 0)) {
     setPart(m.hod, hoodIndex, 0, hipY + 0.55 * coat, lean * 0.2, lean, 1, 1, 1);
     m.hod.setColorAt(hoodIndex, tint(p.shirt, anger * 0.3, flash));
+    hasHood = true;
   }
 
   // Head, hair, eyes.
@@ -514,8 +570,13 @@ function drawPerson(
     setPart(m.hai, n, 0, hy + 0.045, headZ - 0.01, 0, 1.0 * hk, 0.88 * hk, 1.02 * hk);
     m.hai.setColorAt(n, tint(p.hair, 0, flash * 0.5));
   }
-  setPart(m.eye, n * 2, -0.045 * hk, hy + 0.015, headZ + 0.1 * hk);
-  setPart(m.eye, n * 2 + 1, 0.045 * hk, hy + 0.015, headZ + 0.1 * hk);
+
+  let eyesDrawn = 0;
+  if (!isDistant) {
+    setPart(m.eye, eyeIndex, -0.045 * hk, hy + 0.015, headZ + 0.1 * hk);
+    setPart(m.eye, eyeIndex + 1, 0.045 * hk, hy + 0.015, headZ + 0.1 * hk);
+    eyesDrawn = 2;
+  }
 
   // Legs and shoes.
   const legA = sitting ? -Math.PI / 2 : cowering ? 0 : swing;
@@ -565,26 +626,34 @@ function drawPerson(
     rightA = -0.9 + Math.sin(sim.time * 12 + p.id) * 0.25; // fists up
   }
 
-  const placeArm = (side: number, a: number, i: number) => {
-    setPart(m.arm, i, side * 0.26, shoulderY, 0.0, a);
-    m.arm.setColorAt(i, tint(p.shirt, anger * 0.3, flash));
-    setPart(m.han, i, side * 0.26, shoulderY - ARM * Math.cos(a), -ARM * Math.sin(a), 0);
-    m.han.setColorAt(i, tint(p.skin, anger, flash));
-  };
-  placeArm(-1, leftA, n * 2);
-  placeArm(1, rightA, n * 2 + 1);
+  setPart(m.arm, n * 2, -0.26, shoulderY, 0.0, leftA);
+  m.arm.setColorAt(n * 2, tint(p.shirt, anger * 0.3, flash));
+  setPart(m.arm, n * 2 + 1, 0.26, shoulderY, 0.0, rightA);
+  m.arm.setColorAt(n * 2 + 1, tint(p.shirt, anger * 0.3, flash));
+
+  let handsDrawn = 0;
+  if (!isDistant) {
+    setPart(m.han, handIndex, -0.26, shoulderY - ARM * Math.cos(leftA), -ARM * Math.sin(leftA), 0);
+    m.han.setColorAt(handIndex, tint(p.skin, anger, flash));
+    setPart(m.han, handIndex + 1, 0.26, shoulderY - ARM * Math.cos(rightA), -ARM * Math.sin(rightA), 0);
+    m.han.setColorAt(handIndex + 1, tint(p.skin, anger, flash));
+    handsDrawn = 2;
+  }
 
   // Backpack + glowing amber strips.
+  let hasLed = false;
   if (p.bag) {
     setPart(m.bag, bagIndex, 0, hipY + 0.34, -0.17, 0);
     m.bag.setColorAt(bagIndex, tint(p.bagColour, 0, flash * 0.5));
-    setPart(m.led, bagIndex, 0, hipY + 0.34, -0.26, 0);
+    if (!isDistant) {
+      setPart(m.led, ledIndex, 0, hipY + 0.34, -0.26, 0);
+      hasLed = true;
+    }
   }
 
   // Hard hat or stylish cap.
   let gear = false;
   let muzzle = false;
-  // In the stylised look a quarter of everyone wears a cap (in the colour of their bag).
   const cap = p.hardHat || (CAPS && p.id % 4 === 0 && p.hairStyle !== 0);
   if (cap) {
     setPart(m.hat, hatIndex, 0, hy + 0.06, headZ, 0, hk, hk, hk);
@@ -602,8 +671,8 @@ function drawPerson(
     }
     gear = true;
 
-    // Firing or in active combat chasing: 3D polygonal starburst muzzle flash!
-    if (p.swing > 0.05 || (p.state === 'chasing' && p.id % 2 === 0)) {
+    // Firing or in active combat chasing: 3D polygonal starburst muzzle flash (close only)
+    if (!isDistant && (p.swing > 0.05 || (p.state === 'chasing' && p.id % 2 === 0))) {
       const flashScale = 0.85 + Math.random() * 0.4;
       setPart(m.muz, muzzleIndex, rifleX, rifleY, rifleZ - 0.44, 0, flashScale, flashScale, flashScale);
       muzzle = true;
@@ -614,5 +683,5 @@ function drawPerson(
     gear = true;
   }
 
-  return { hood: hasHood, hat: cap, ponytail: hasPon, gear, muzzle };
+  return { hood: hasHood, hat: cap, ponytail: hasPon, gear, muzzle, led: hasLed, eyes: eyesDrawn, hands: handsDrawn };
 }

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { CityStats } from '../sim/cityStats';
 
-export type StatsTab = 'overview' | 'services' | 'traffic' | 'economy' | 'government';
+export type StatsTab = 'overview' | 'services' | 'traffic' | 'economy' | 'government' | 'missions' | 'disasters';
 
 interface CityStatsState {
   open: boolean;

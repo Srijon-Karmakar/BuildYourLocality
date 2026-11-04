@@ -33,6 +33,7 @@ import {
   LuBus,
   LuCar,
   LuCarTaxiFront,
+  LuCamera,
   LuChartColumn,
   LuGraduationCap,
   LuHospital,
@@ -275,6 +276,7 @@ const ICONS: Record<string, IconType> = {
   jail: LuLock,
   government: LuLandmark,
   stats: LuChartColumn,
+  camera: LuCamera,
   // tools
   select: LuPencil,
   paint: LuPalette,

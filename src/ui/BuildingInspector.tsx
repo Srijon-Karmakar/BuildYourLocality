@@ -43,6 +43,7 @@ import { resolveWall, wallStyleOf } from '../city/walls';
 import { FLOWER_SWATCHES, GRASS_SWATCHES, LEAF_SWATCHES, TREE_SHAPES, TRUNK_SWATCHES, resolveTree, seedFromId, type TreeSpec } from '../city/trees';
 import { BillboardStudio } from './BillboardStudio';
 import { LedEditor } from './LedEditor';
+import { setTownMaster } from '../city/ledNet';
 import { ShapePanel } from './ShapeEditor';
 import { LANDMARKS, type Landmark } from '../city/landmarks';
 import { useBuilderStore } from '../state/useBuilderStore';
@@ -240,7 +241,7 @@ function SingleInspector() {
   const saveLeds = (next: LedSpec[]) => patch({ leds: next, led: null });
   const setLed = (change: Partial<LedSpec>) => saveLeds(leds.map((l, i) => (i === ledIndex ? { ...l, ...change } : l)));
   /** A new screen on a side, with the look and size of the selected one (or the default). */
-  const screenFor = (side: DoorSide): LedSpec => ({ ...(led ?? defaultLed), side, offset: 0 });
+  const screenFor = (side: DoorSide): LedSpec => ({ ...(led ?? defaultLed), side, offset: 0, master: false, wrap: false });
   const toggleSide = (side: DoorSide) => {
     if (leds.some((l) => l.side === side)) {
       const next = leds.filter((l) => l.side !== side);
@@ -253,7 +254,7 @@ function SingleInspector() {
   };
   /** One tap: a screen on every side, floor to roof, in the look of the one being edited (door storey left clear). */
   const coverBuilding = () => {
-    const look = { ...(led ?? defaultLed) };
+    const look = { ...(led ?? defaultLed), master: false, wrap: false };
     // Eight screens at most: all four sides of the two tallest blocks.
     const tallest = style.blocks
       .map((b, index) => ({ b, index }))
@@ -264,7 +265,7 @@ function SingleInspector() {
       for (const sd of DOOR_SIDES) {
         const doorHere = style.door.style !== 'none' && style.door.block === index && style.door.side === sd.id;
         const bottom = doorHere && b.floors > 1 ? 1 : 0;
-        screens.push({ ...look, block: index, side: sd.id, bottom, height: Math.max(1, b.floors - bottom), width: 0, offset: 0 });
+        screens.push({ ...look, block: index, side: sd.id, bottom, height: Math.max(1, b.floors - bottom), width: 0, offset: 0, seamless: true });
       }
     }
     saveLeds(screens);
@@ -274,12 +275,27 @@ function SingleInspector() {
     const missing = DOOR_SIDES.filter((sd) => !leds.some((l) => l.side === sd.id)).map((sd) => screenFor(sd.id));
     if (missing.length > 0) saveLeds([...leds, ...missing].slice(0, MAX_LEDS));
   };
-  const LOOK_KEYS = ['block', 'side', 'bottom', 'height', 'width', 'offset'] as const;
+  /** What stays each screen's own when looks are copied between screens: where it is, how big and shaped, and its links. */
+  const LOOK_KEYS = ['block', 'side', 'bottom', 'height', 'width', 'offset', 'curve', 'seamless', 'wrap', 'master', 'link'] as const;
   const matchLook = () => {
     if (!led) return;
     const look = { ...led };
     for (const k of LOOK_KEYS) delete (look as Partial<LedSpec>)[k];
-    saveLeds(leds.map((l) => ({ ...look, block: l.block, side: l.side, bottom: l.bottom, height: l.height, width: l.width, offset: l.offset }) as LedSpec));
+    saveLeds(leds.map((l) => ({ ...look, ...Object.fromEntries(LOOK_KEYS.filter((k) => l[k] !== undefined).map((k) => [k, l[k]])) }) as LedSpec));
+  };
+  /** Every other screen on this building shows what the one being edited shows. */
+  const linkAll = () => {
+    if (!led) return;
+    saveLeds(leds.map((l, i) => (i === ledIndex ? { ...l, link: undefined, master: false } : { ...l, link: 'building' as const, master: false })));
+  };
+  /** One unbroken screen right round the tallest block, following its corners. */
+  const wrapBuilding = () => {
+    const look = { ...(led ?? defaultLed), master: false };
+    const index = style.blocks.reduce((best, b, i, all) => (b.floors > all[best].floors ? i : best), 0);
+    const b = style.blocks[index];
+    const bottom = style.door.style !== 'none' && style.door.block === index && b.floors > 1 ? 1 : 0;
+    saveLeds([{ ...look, block: index, side: 'front', bottom, height: Math.max(1, b.floors - bottom), width: 0, offset: 0, wrap: true, seamless: true }]);
+    setLedSel(0);
   };
   const toggleExtra = (extra: RoofExtra) =>
     patch({
@@ -542,6 +558,9 @@ function SingleInspector() {
             <button className="min-h-10 rounded-lg bg-white px-3 py-2 text-sm font-medium text-black transition active:bg-white/80 sm:min-h-0 sm:py-1.5" onClick={coverBuilding}>
               Cover the whole building
             </button>
+            <button className="min-h-10 rounded-lg bg-white/15 px-3 py-2 text-sm font-medium text-white transition active:bg-white/25 sm:min-h-0 sm:py-1.5" onClick={wrapBuilding}>
+              Wrap one seamless screen round it
+            </button>
             <div className="flex flex-wrap gap-1.5">
               <button className={chip(false)} disabled={DOOR_SIDES.every((sd) => leds.some((l) => l.side === sd.id))} onClick={allSides}>
                 All four sides
@@ -550,7 +569,7 @@ function SingleInspector() {
                 className={chip(false)}
                 disabled={leds.length >= MAX_LEDS}
                 onClick={() => {
-                  saveLeds([...leds, { ...(led ?? defaultLed), bottom: Math.min(ledBlock.floors - 1, (led?.bottom ?? 0) + (led?.height ?? 1) + 1), offset: 0 }]);
+                  saveLeds([...leds, { ...(led ?? defaultLed), bottom: Math.min(ledBlock.floors - 1, (led?.bottom ?? 0) + (led?.height ?? 1) + 1), offset: 0, master: false }]);
                   setLedSel(leds.length);
                 }}
               >
@@ -559,6 +578,11 @@ function SingleInspector() {
               {leds.length > 1 && (
                 <button className={chip(false)} onClick={matchLook}>
                   Same look everywhere
+                </button>
+              )}
+              {leds.length > 1 && (
+                <button className={chip(false)} onClick={linkAll} title="The other screens follow this one, so changing it changes them all">
+                  Link all to this one
                 </button>
               )}
               {leds.length > 0 && (
@@ -581,7 +605,7 @@ function SingleInspector() {
                 <div className="border-t border-white/10 pt-2 text-white/55">
                   Editing screen {ledIndex + 1} ({DOOR_SIDES.find((sd) => sd.id === led.side)?.label.toLowerCase()})
                 </div>
-                <LedEditor spec={led} onChange={setLed} />
+                <LedEditor spec={led} onChange={setLed} onMaster={(on) => setTownMaster(piece.id, ledIndex, on)} />
                 <div className="mt-1 border-t border-white/10 pt-2 text-white/55">Where it goes</div>
                 {style.blocks.length > 1 && (
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -593,14 +617,28 @@ function SingleInspector() {
                     ))}
                   </div>
                 )}
-                <div className="flex flex-wrap gap-1.5">
+                <div className={'flex flex-wrap gap-1.5' + (led.wrap ? ' hidden' : '')}>
                   {DOOR_SIDES.map((sd) => (
                     <button key={sd.id} className={chip(led.side === sd.id)} onClick={() => setLed({ side: sd.id, offset: 0 })}>
                       {sd.label}
                     </button>
                   ))}
                 </div>
-                <Stepper label="Curve" value={led.curve ?? 0} min={0} max={1} step={0.1} onChange={(curve) => setLed({ curve })} format={(v) => (v === 0 ? 'Flat' : `${Math.round(v * 100)}%`)} />
+                <label className="flex min-h-9 items-center justify-between sm:min-h-0">
+                  <span className="text-white/80">Wrap round the whole block (follows its corners)</span>
+                  <input type="checkbox" className="h-5 w-5" checked={!!led.wrap} onChange={(e) => setLed({ wrap: e.target.checked, ...(e.target.checked ? { seamless: true } : {}) })} />
+                </label>
+                {!led.wrap && (
+                  <label className="flex min-h-9 items-center justify-between sm:min-h-0">
+                    <span className="text-white/80">No gaps (no frame, edge to edge)</span>
+                    <input type="checkbox" className="h-5 w-5" checked={!!led.seamless} onChange={(e) => setLed({ seamless: e.target.checked })} />
+                  </label>
+                )}
+                {led.wrap ? (
+                  <p className="text-white/45">One picture all the way round, with no seams. Side and width are ignored; floor and height still apply.</p>
+                ) : (
+                  <Stepper label="Curve" value={led.curve ?? 0} min={0} max={1} step={0.1} onChange={(curve) => setLed({ curve })} format={(v) => (v === 0 ? 'Flat' : `${Math.round(v * 100)}%`)} />
+                )}
                 <Stepper label="Bottom floor" value={led.bottom} min={0} max={Math.max(0, ledBlock.floors - 1)} onChange={(bottom) => setLed({ bottom })} />
                 <Stepper label="Height (floors)" value={led.height} min={1} max={Math.max(1, ledBlock.floors - led.bottom)} onChange={(height) => setLed({ height })} />
                 <Stepper
@@ -852,7 +890,7 @@ function PropInspector({ piece }: { piece: Piece }) {
 
       {hasLed && (
         <Section title="LED screen">
-          <LedEditor spec={led} onChange={(change) => updatePiece(piece.id, { led: { ...led, ...change } })} />
+          <LedEditor spec={led} onChange={(change) => updatePiece(piece.id, { led: { ...led, ...change } })} onMaster={(on) => setTownMaster(piece.id, null, on)} />
         </Section>
       )}
 

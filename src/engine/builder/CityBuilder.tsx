@@ -2,6 +2,8 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { BlockGhost } from './BlockGhost';
+import { PiecesGhost } from './PiecesGhost';
+import { useBlueprintStore } from '../../state/useBlueprintStore';
 import { generateBlock } from '../../lib/blockGen';
 import { useBlockGenStore } from '../../state/useBlockGenStore';
 import {
@@ -55,7 +57,7 @@ interface Hover {
 }
 
 const isPlaceTool = (tool: BuilderTool): tool is PieceType =>
-  tool !== 'bulldoze' && tool !== 'paint' && tool !== 'select' && tool !== 'move' && tool !== 'terrain' && tool !== 'forest' && tool !== 'wall' && tool !== 'span' && tool !== 'blockgen';
+  tool !== 'bulldoze' && tool !== 'paint' && tool !== 'select' && tool !== 'move' && tool !== 'terrain' && tool !== 'forest' && tool !== 'wall' && tool !== 'span' && tool !== 'blockgen' && tool !== 'blueprint';
 
 /** Turns a model translucent and tints it green (can place) or red (blocked). */
 function ghostify(root: THREE.Object3D, valid: boolean) {
@@ -276,7 +278,18 @@ export function CityBuilder() {
     // A bridge is picked by its deck, which can pass over a road or a building.
     const spanHit = !wallHit && (b.tool === 'select' || b.tool === 'bulldoze') ? spanNear(h.px, h.pz, 1) : undefined;
     const topId = wallHit?.id ?? spanHit?.id ?? topIdAt(city.pieces, city.occupancy, h.hx, h.hz);
-    if (b.tool === 'blockgen') {
+    if (b.tool === 'blueprint') {
+      const { items, activeId } = useBlueprintStore.getState();
+      const bp = items.find((x) => x.id === activeId);
+      if (!bp) {
+        useBlueprintStore.setState({ message: 'Pick a blueprint first.' });
+      } else {
+        const ox = h.hx - Math.floor(bp.w / 2);
+        const oz = h.hz - Math.floor(bp.d / 2);
+        const res = city.placeBlock(bp.pieces.map((p) => ({ ...p, gx: p.gx + ox, gz: p.gz + oz })));
+        useBlueprintStore.setState({ message: res.placed === 0 ? 'Nothing fits here: the ground is uneven or taken.' : `Placed ${res.placed} pieces${res.skipped ? `, ${res.skipped} skipped (in the way)` : ''}.` });
+      }
+    } else if (b.tool === 'blockgen') {
       const cfg = useBlockGenStore.getState().config;
       const res = city.placeBlock(generateBlock(cfg, h.hx - Math.floor(cfg.w / 2), h.hz - Math.floor(cfg.d / 2)));
       useBlockGenStore.setState((st) => ({
@@ -571,9 +584,10 @@ export function CityBuilder() {
   }, [tool, movingId, mode]);
 
   const blockConfig = useBlockGenStore((st) => st.config);
+  const activeBlueprint = useBlueprintStore((st) => st.items.find((x) => x.id === st.activeId) ?? null);
   const placeType = isPlaceTool(tool) ? tool : null;
   const moving = tool === 'move' && movingId ? pieces[movingId] : undefined;
-  const touchGhost = touchMode.current && (placeType || moving || tool === 'blockgen');
+  const touchGhost = touchMode.current && (placeType || moving || tool === 'blockgen' || (tool === 'blueprint' && !!activeBlueprint));
   // On touch the ghost sits where the player tapped; with a mouse it follows the cursor.
   const shown: Hover | null = touchGhost ? (pendingPoint ? hoverFromPoint(pendingPoint.x, pendingPoint.z) : null) : hover;
 
@@ -585,7 +599,7 @@ export function CityBuilder() {
       existing?.type === 'road' && (placeType === 'road' || placeType === 'crossing')
         ? true // restyle the road that is already here (or turn it into a level crossing)
         : city.canPlace(placeType, shown.gx, shown.gz, placeType === 'road' ? 0 : rotation, undefined, undefined, roadSpec);
-  } else if (shown && tool === 'blockgen') {
+  } else if (shown && (tool === 'blockgen' || tool === 'blueprint')) {
     valid = true;
   } else if (shown && moving) {
     valid = useCityStore.getState().canPlace(moving.type, shown.gx, shown.gz, rotation, moving.lot, moving.id);
@@ -720,6 +734,7 @@ export function CityBuilder() {
       {hover && tool === 'forest' && <BrushRing x={hover.px} z={hover.pz} radius={forestRadius * CELL} />}
       {ghost}
       {tool === 'blockgen' && shown && <BlockGhost config={blockConfig} hx={shown.hx} hz={shown.hz} />}
+      {tool === 'blueprint' && shown && activeBlueprint && <PiecesGhost pieces={activeBlueprint.pieces} w={activeBlueprint.w} d={activeBlueprint.d} hx={shown.hx} hz={shown.hz} />}
       {wallGhost}
       {spanGhost}
       {spanMarkers}

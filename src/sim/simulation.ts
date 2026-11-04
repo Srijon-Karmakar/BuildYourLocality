@@ -38,6 +38,54 @@ const WRECK_LIFE = 90;
 
 // --- Vehicles ------------------------------------------------------------------
 
+/**
+ * Trouble a car is in. Most cars never have any, so this only exists on the few that do (see sim/carFx.ts for
+ * how it looks and sounds). Wheels are numbered by bit: 1 rear right, 2 front right, 4 rear left, 8 front left.
+ */
+export interface CarFx {
+  /** The windows are smashed. */
+  glass?: boolean;
+  /** Burst tyres, and wheels that have come off (one bit per wheel). */
+  flat?: number;
+  off?: number;
+  /** Seconds of hazard lights left. */
+  hazard?: number;
+  /** Seconds the car sits at the kerb (changing a tyre, getting over the shock). */
+  disabled?: number;
+  /** Seconds spent limping along on a burst tyre before pulling over. */
+  limp?: number;
+  /** Engine smoke, 0..1. */
+  smoke?: number;
+  /** Seconds the engine has been on fire, and (if it is going to blow) when. */
+  fire?: number;
+  blow?: number;
+  /** Burnt out. */
+  burnt?: boolean;
+  /** How crumpled the body is, 0..1. */
+  dent?: number;
+}
+
+/** Something happened to a car that is worth a sound, sparks or a shower of glass. */
+export interface CarEvent {
+  kind: 'bump' | 'crash' | 'glass' | 'burst' | 'wheelOff' | 'fire';
+  car: Car;
+  other?: Car;
+  x: number;
+  z: number;
+  /** Closing speed of an impact, m/s. */
+  power?: number;
+  wheel?: number;
+}
+
+/** What a collision can do to a car, by how hard it was: fender-bender, crash, severe crash. */
+const TROUBLE = [
+  { glass: 0.25, flat: 0.15, off: 0, smoke: 0, fire: 0, blow: 0 },
+  { glass: 0.8, flat: 0.55, off: 0.15, smoke: 0.35, fire: 0.2, blow: 0.4 },
+  { glass: 1, flat: 0.85, off: 0.55, smoke: 0.8, fire: 0.55, blow: 0.6 },
+];
+
+const carWidth = (c: Car) => (c.kind === 'bus' ? 2.5 : c.kind === 'fire' ? 2.3 : c.kind === 'ambulance' ? 1.9 : 1.7);
+
 export interface Car {
   id: number;
   kind: 'car' | 'bus' | 'taxi' | 'police' | 'ambulance' | 'fire';
@@ -88,6 +136,20 @@ export interface Car {
   y?: number;
   pitch?: number;
   roll?: number;
+  /** Temperament, 0 (cautious) to 1 (aggressive): how close they follow, how hard they pull away, how readily they honk. */
+  temper?: number;
+  /** Smoothed acceleration (m/s²) and yaw rate (rad/s): brake lights, and the body dipping and leaning. */
+  acc?: number;
+  turn?: number;
+  /** Indicator: -1 left, 1 right, 0 off; stays on through the turn itself. */
+  signal?: number;
+  /** Seconds a slower car has held this one up (negative: just pulled out, cooling off). */
+  held?: number;
+  /** Looking away from the road: seconds in which they do not brake for the car ahead. */
+  distract?: number;
+  /** When it last crashed, so one scrape is not reported over and over. */
+  crashAt?: number;
+  fx?: CarFx;
 }
 
 /** An emergency vehicle's errand: drive to the scene, work there, drive home and park. */
@@ -267,6 +329,11 @@ export class Simulation {
   worldVersion = 0;
   /** Emergency vehicles with their sirens on: other drivers pull over for them. */
   sirens: Car[] = [];
+  /** Things that just happened to cars (glass, bursts, impacts): drained every frame by carFx. */
+  events: CarEvent[] = [];
+  /** Cars that are wrecked or stopped at the kerb right now: too many and no new trouble starts. */
+  private trouble = 0;
+  private crashClock = 0;
   /** Set by the incident system. */
   crashHook: ((a: Car, b: Car) => void) | null = null;
   missionHook: ((car: Car, event: 'arrived' | 'done' | 'lost') => void) | null = null;
@@ -335,7 +402,7 @@ export class Simulation {
       }
       this.updateCar(car, dt);
     }
-    this.detectCrashes();
+    this.detectCrashes(dt);
     this.cars = this.cars.filter((c) => !this.releaseIfGone(c));
     this.trains.update(dt, factor);
     this.trams.update(dt, factor);
@@ -461,7 +528,8 @@ export class Simulation {
       lane: 0,
       laneNext: 0,
       vMax: bus ? range(0.7, 0.85) : reckless ? range(1.05, 1.22) : range(0.85, 1.1),
-      length: bus ? 9 : 4,
+      length: bus ? 9 : 3.5,
+      temper: bus ? range(0.1, 0.4) : reckless ? range(0.8, 1) : range(0.1, 0.9),
       color: bus ? pick([0xf2b134, 0x1b6ca8, 0xd7263d]) : wantTaxi ? 0xf6c31c : (from?.color ?? pick(CAR_COLOURS)),
       holding: null,
       dwell: 0,
@@ -502,6 +570,11 @@ export class Simulation {
     car.holding = null;
     car.driven = true;
     car.abandoned = undefined;
+    if (car.fx) {
+      car.fx.disabled = undefined;
+      car.fx.limp = undefined;
+    }
+    car.distract = 0;
     car.stuck = 0;
     car.dwell = 0;
     car.stoppedAt = null;
@@ -916,11 +989,33 @@ export class Simulation {
     const dir = DIRS[segDir];
     const toKey = cellKey(car.to[0], car.to[1]);
     const mission = car.mission;
+    const fx = car.fx;
+    const temper = car.temper ?? 0.5;
+    const h0 = car.heading;
+    if (car.honk > 0) car.honk -= dt;
+    if (fx) this.tickFx(car, fx, dt);
     let target = car.vMax * Math.min(this.info(car.from)?.layout.speedLimit ?? 7, this.info(car.to)?.layout.speedLimit ?? 7);
 
-    // Slow for turns and dead ends.
+    // Everyone's pace drifts a little; careful drivers ease off in rain, fog, snow and the dark.
+    if (!mission) {
+      const bad = 0.16 * atmo.rain + 0.1 * atmo.fog + 0.12 * atmo.snow + 0.05 * atmo.lamps;
+      target *= (1 - bad * (0.5 + 0.7 * (1 - temper))) * (1 + 0.05 * Math.sin(this.time * 0.23 + car.id * 1.7));
+    }
+    // A car in trouble: stopped at the kerb, or limping on a burst tyre.
+    if (fx) {
+      if ((fx.disabled ?? 0) > 0) target = 0;
+      else if (fx.limp !== undefined) target = Math.min(target, 3.2);
+    }
+
+    // Slow for turns and dead ends, and put the indicator on a little before turning.
     const nextDir = car.next ? this.dirIndex(car.to, car.next) : segDir;
     if (nextDir !== segDir && car.t > 0.4) target = Math.min(target, 3.6);
+    if (nextDir !== segDir && car.t > 0.2) {
+      const d2 = DIRS[nextDir];
+      car.signal = Math.sign(dir.dx * d2.dz - dir.dz * d2.dx);
+    } else if (car.signal && car.t > 0.5) {
+      car.signal = 0;
+    }
 
     // An emergency vehicle at the end of its route glides to a halt at the scene.
     if (mission && mission.phase === 'going' && !car.next) {
@@ -988,25 +1083,58 @@ export class Simulation {
         yielding = true;
         break;
       }
-      car.pull += ((yielding ? 1 : 0) - car.pull) * Math.min(1, dt * 2.2);
+      const kerb = fx && ((fx.disabled ?? 0) > 0 || fx.limp !== undefined) ? 0.85 : 0;
+      car.pull += ((yielding ? 1 : kerb) - car.pull) * Math.min(1, dt * 2.2);
       if (car.pull > 0.25) target = Math.min(target, 0.6 + 2 * (1 - car.pull));
     }
 
     // Keep a safe gap behind the vehicle ahead, and stop for people in the way.
     const rx = -dir.dz;
     const rz = dir.dx;
+    // How the driver follows: the speed from which they could still stop behind the car ahead, given their reaction
+    // time (careful drivers leave more room; hurried ones tailgate), not just a fixed gap.
+    const distracted = (car.distract ?? 0) > 0;
+    const brakeRate = 6;
+    const reaction = brakeRate * (0.45 + 0.9 * (1 - temper));
+    const open = target;
+    let slowAhead = false;
+    let gapAhead = 99;
     for (const other of this.cars) {
       if (other === car) continue;
+      const ox = other.x - car.x;
+      const oz = other.z - car.z;
+      const along = ox * dir.dx + oz * dir.dz;
+      const lateral = Math.abs(ox * rx + oz * rz);
+      // Trouble in the next lane (a wreck, a car on fire): people slow right down passing it, to look and to give it room.
+      if (!mission && (other.wreck > 0 || other.fx?.disabled || other.fx?.fire !== undefined) && along > -2 && along < 14 && lateral >= 1.8 && lateral < 5.5) {
+        target = Math.min(target, Math.max(2.4, open * 0.45));
+      }
       // Only queue behind traffic going the same way: oncoming cars pass in the other lane.
       if (Math.cos(other.heading - car.heading) < 0.35) continue;
       // A siren drives past cars that have pulled over for it.
       if (mission && other.pull > 0.55) continue;
-      const ox = other.x - car.x;
-      const oz = other.z - car.z;
-      const along = ox * dir.dx + oz * dir.dz;
-      if (along < 0.2 || along > 16 || Math.abs(ox * rx + oz * rz) > 1.8) continue;
+      if (along < 0.2 || along > 16 || lateral > 1.8) continue;
       const gap = along - (car.length + other.length) / 2 - 0.8;
-      target = Math.min(target, gap <= 0 ? 0 : Math.sqrt(2 * 6 * gap));
+      const safe = gap <= 0 ? 0 : -reaction + Math.sqrt(reaction * reaction + other.speed * other.speed + 2 * brakeRate * gap);
+      // Someone not watching the road only reacts when it is almost too late.
+      if (!distracted || gap < 0.3) target = Math.min(target, safe);
+      if (safe < open * 0.7 && other.speed < open * 0.75 && along < 12) slowAhead = true;
+      gapAhead = Math.min(gapAhead, gap);
+    }
+    if (slowAhead) {
+      car.held = (car.held ?? 0) + dt;
+      // A hurried driver stuck behind someone slow sometimes glances at their phone, and an accident follows.
+      if (car.reckless && !mission && !distracted && gapAhead < 6 && car.held > 1 && this.trouble < 3 && Math.random() < dt * 0.12) car.distract = range(0.9, 1.7);
+      // Held up for a while on a road with another lane: pull out and get round.
+      if (car.held > 1.8 && !car.holding && !mission) {
+        const lanes = this.perDir(car.to);
+        if (lanes > 1) {
+          car.laneNext = (car.laneNext + 1) % lanes;
+          car.held = -3;
+        }
+      }
+    } else if (car.held) {
+      car.held = car.held < 0 ? Math.min(0, car.held + dt) : 0;
     }
     const brakeForPerson = (px: number, pz: number) => {
       const ox = px - car.x;
@@ -1019,17 +1147,29 @@ export class Simulation {
       if (lateral > 2.3) return;
       const gap = along - car.length / 2 - 0.8;
       target = Math.min(target, gap <= 0 ? 0 : Math.sqrt(2 * 6 * gap));
+      // Close and still rolling: lean on the horn.
+      if (gap < 3 && car.speed > 2 && temper > 0.35 && car.honk <= 0 && !mission) this.honkAt(car);
     };
     // A siren does not wait for people queueing at a crossing signal, and after a few seconds stuck it noses through anyone.
     for (const p of this.peds) if (p.vis > 0.5 && !(mission && (p.signalWait || car.stuck > 4))) brakeForPerson(p.x, p.z);
     if (this.player.active) brakeForPerson(this.player.x, this.player.z);
 
-    const accel = target > car.speed ? 3.6 : BRAKE_MAX;
+    const accel = target > car.speed ? 2.8 + 1.8 * temper : BRAKE_MAX;
+    const before = car.speed;
     car.speed += Math.max(-accel * dt, Math.min(accel * dt, target - car.speed));
-    car.stuck = car.speed < 0.05 && car.dwell <= 0 ? car.stuck + dt : 0;
+    if (dt > 0) car.acc = (car.acc ?? 0) + ((car.speed - before) / dt - (car.acc ?? 0)) * Math.min(1, dt * 8);
+    // Stamping on the brakes: the driver behind (or this one) leans on the horn.
+    if (!mission && (car.acc ?? 0) < -7 && temper > 0.3 && car.honk <= 0) this.honkAt(car);
+    car.stuck = car.speed < 0.05 && car.dwell <= 0 && !((fx?.disabled ?? 0) > 0) ? car.stuck + dt : 0;
+    // Now and then a tyre goes or an engine gives up. Worn, hurried cars more often; never when the roads are already a mess.
+    if (!mission && !fx && car.speed > 3 && !car.holding && this.trouble < 3) {
+      const wear = car.reckless ? 3 : 1;
+      const roll = Math.random();
+      if (roll < dt * 0.00014 * wear) this.burstTyre(car);
+      else if (roll < dt * (0.00014 * wear + 0.00004)) this.engineTrouble(car);
+    }
     // Stuck in a jam: impatient drivers lean on the horn and swing into another lane if there is one.
     if (!mission && car.stuck > 4) {
-      car.honk -= dt;
       if (car.honk <= 0 && ((car.reckless && car.stuck > 4) || car.stuck > 18)) {
         car.honk = range(3, 7);
         if (this.player.active && this.playerWithin(car.x, car.z, 70)) playSfx('car_horn', 0.5, { x: car.x, z: car.z });
@@ -1079,6 +1219,143 @@ export class Simulation {
     }
 
     this.placeCar(car);
+    if (dt > 0) car.turn = (car.turn ?? 0) + (wrapAngle(car.heading - h0) / dt - (car.turn ?? 0)) * Math.min(1, dt * 6);
+  }
+
+  /** Counts down a car's trouble: hazard lights, the limp to the kerb, the wait while a tyre is changed. */
+  private tickFx(car: Car, fx: CarFx, dt: number) {
+    if (fx.hazard !== undefined && fx.hazard > 0) fx.hazard -= dt;
+    if (fx.limp !== undefined) {
+      fx.limp += dt;
+      // After a few seconds on a burst tyre the driver pulls over and waits.
+      if (fx.limp > 6 || (fx.limp > 2 && car.speed < 0.3)) {
+        fx.limp = undefined;
+        fx.disabled = range(26, 45);
+      }
+    }
+    if (fx.disabled !== undefined && fx.disabled > 0) {
+      fx.disabled -= dt;
+      // A car parked up in a junction lets it go, so the lights keep working.
+      if (car.holding) {
+        if (this.junctionOwner.get(car.holding) === car.id) this.junctionOwner.delete(car.holding);
+        car.holding = null;
+      }
+      if (fx.disabled <= 0) {
+        fx.disabled = undefined;
+        // Tyre changed (or the shock has passed): off again.
+        fx.flat = 0;
+        fx.hazard = 0;
+      }
+    }
+    if (car.distract !== undefined && car.distract > 0) car.distract -= dt;
+  }
+
+  private honkAt(car: Car) {
+    car.honk = range(2.5, 5);
+    if (this.player.active && this.playerWithin(car.x, car.z, 60)) playSfx('car_horn', 0.55, { x: car.x, z: car.z });
+  }
+
+  private emit(e: CarEvent) {
+    if (this.events.length < 40) this.events.push(e);
+  }
+
+  /** A tyre bursts (a random one, unless told which). The car limps to the kerb and waits for it to be changed. */
+  burstTyre(car: Car, wheel = Math.floor(Math.random() * 4)) {
+    const fx = (car.fx ??= {});
+    if (((fx.flat ?? 0) | (fx.off ?? 0)) & (1 << wheel)) return;
+    fx.flat = (fx.flat ?? 0) | (1 << wheel);
+    fx.hazard = 90;
+    if (!car.driven && car.wreck <= 0 && fx.limp === undefined && !((fx.disabled ?? 0) > 0)) fx.limp = 0;
+    this.emit({ kind: 'burst', car, x: car.x, z: car.z, wheel });
+  }
+
+  /** A wheel comes right off. The car drops onto its wheel arch, grinds to a halt, and is towed away. */
+  loseWheel(car: Car, wheel = Math.floor(Math.random() * 4)) {
+    const fx = (car.fx ??= {});
+    if ((fx.off ?? 0) & (1 << wheel)) return;
+    fx.off = (fx.off ?? 0) | (1 << wheel);
+    fx.flat = (fx.flat ?? 0) & ~(1 << wheel);
+    fx.hazard = 90;
+    fx.limp = undefined;
+    if (!car.driven) {
+      car.wreck = Math.max(car.wreck, 55);
+      car.speed *= 0.6;
+    }
+    this.emit({ kind: 'wheelOff', car, x: car.x, z: car.z, wheel });
+  }
+
+  /** Smoke from under the bonnet: the car stops at the kerb, and may catch fire. */
+  engineTrouble(car: Car) {
+    const fx = (car.fx ??= {});
+    fx.smoke = 1;
+    fx.hazard = 60;
+    if (!car.driven) fx.disabled = range(22, 38);
+    if (Math.random() < 0.4) this.ignite(car, Math.random() < 0.5);
+  }
+
+  /** The engine catches fire. If it is going to blow, it does so a few seconds later. */
+  ignite(car: Car, willBlow: boolean) {
+    const fx = (car.fx ??= {});
+    if (fx.fire !== undefined || fx.burnt) return;
+    fx.fire = 0.01;
+    fx.smoke = 1;
+    fx.hazard = 60;
+    if (willBlow) fx.blow = range(4, 9);
+    if (!car.driven) fx.disabled = Math.max(fx.disabled ?? 0, 60);
+    this.emit({ kind: 'fire', car, x: car.x, z: car.z });
+  }
+
+  /** What an impact of this strength (closing speed, m/s) does to one car: dents, glass, tyres, wheels, smoke, fire. */
+  damageCar(car: Car, strength: number) {
+    const tier = strength < 4 ? 0 : strength < 8.5 ? 1 : 2;
+    const p = TROUBLE[tier];
+    const fx = (car.fx ??= {});
+    fx.dent = Math.min(1, (fx.dent ?? 0) + strength / 14);
+    if (!fx.glass && Math.random() < p.glass) {
+      fx.glass = true;
+      this.emit({ kind: 'glass', car, x: car.x, z: car.z, power: strength });
+    }
+    if (Math.random() < p.flat) this.burstTyre(car);
+    if (Math.random() < p.off) this.loseWheel(car);
+    if (Math.random() < p.smoke) {
+      fx.smoke = 1;
+      if (Math.random() < p.fire) this.ignite(car, Math.random() < p.blow);
+    }
+    if (!car.driven) {
+      car.speed *= 0.4;
+      // A fender-bender: both drivers stop, put the hazards on and get out to look.
+      if (tier === 0 && car.wreck <= 0) {
+        fx.disabled = Math.max(fx.disabled ?? 0, range(5, 10));
+        fx.hazard = Math.max(fx.hazard ?? 0, 12);
+      }
+    }
+  }
+
+  /**
+   * Two vehicles hit each other at `closing` m/s (either may be the one the player is driving, which the traffic
+   * system does not own). Soft knocks are bumps; harder ones break glass and tyres; the worst set cars on fire.
+   */
+  collide(a: Car, b: Car, closing: number) {
+    const x = (a.x + b.x) / 2;
+    const z = (a.z + b.z) / 2;
+    if (closing < 2.2) {
+      for (const c of [a, b]) {
+        if (c.driven) continue;
+        const fx = (c.fx ??= {});
+        fx.dent = Math.min(1, (fx.dent ?? 0) + 0.12);
+        fx.hazard = Math.max(fx.hazard ?? 0, 6);
+        fx.disabled = Math.max(fx.disabled ?? 0, range(3, 6));
+        c.speed *= 0.4;
+      }
+      this.emit({ kind: 'bump', car: a, other: b, x, z, power: closing });
+      return;
+    }
+    for (const c of [a, b]) this.damageCar(c, closing);
+    // One crash is reported once, however many scrapes it takes.
+    const recent = this.time - (a.crashAt ?? -99) < 5 || this.time - (b.crashAt ?? -99) < 5;
+    a.crashAt = b.crashAt = this.time;
+    if (closing >= 4 && !recent) this.crash(a, b, closing);
+    this.emit({ kind: 'crash', car: a, other: b, x, z, power: closing });
   }
 
   /** Puts the car on its lane, following the curve of the cell it is in (arcs, roundabouts, U-turns). */
@@ -1101,6 +1378,12 @@ export class Simulation {
     if (car.pull > 0.01) {
       car.x -= Math.cos(pose.heading) * 1.8 * car.pull;
       car.z += Math.sin(pose.heading) * 1.8 * car.pull;
+    }
+    // Limping on a burst tyre: wobbling from side to side.
+    if (car.fx?.limp !== undefined) {
+      const w = Math.sin(this.time * 9 + car.id) * 0.14;
+      car.x += Math.cos(pose.heading) * w;
+      car.z -= Math.sin(pose.heading) * w;
     }
     // A wreck sits skewed.
     if (car.wreck > 0) car.heading += ((car.id % 7) - 3) * 0.09;
@@ -1173,7 +1456,7 @@ export class Simulation {
       phase = 'onscene';
     }
     const dir = DIRS[this.dirIndex(start, to)];
-    const look = { police: { color: 0x1b2f6b, length: 4.4 }, ambulance: { color: 0xf4f4f4, length: 5.2 }, fire: { color: 0xc8281f, length: 7 } }[role];
+    const look = { police: { color: 0x1b2f6b, length: 3.9 }, ambulance: { color: 0xf4f4f4, length: 5.2 }, fire: { color: 0xc8281f, length: 7 } }[role];
     const car: Car = {
       id: this.nextId++,
       kind: role,
@@ -1224,30 +1507,89 @@ export class Simulation {
     car.next = car.route[0] ?? null;
   }
 
-  /** Two cars in a junction going across each other and fast enough: they collide. */
-  private detectCrashes() {
-    const held = this.cars.filter((c) => c.holding && !c.wreck && !c.driven && !c.mission && c.speed > 0.5);
-    for (let i = 0; i < held.length; i++) {
-      for (let j = i + 1; j < held.length; j++) {
-        const a = held[i];
-        const b = held[j];
-        if (a.holding !== b.holding || a.wreck > 0 || b.wreck > 0) continue;
-        if ((a.x - b.x) ** 2 + (a.z - b.z) ** 2 > 9) continue;
-        if (a.speed + b.speed < 2 || Math.abs(Math.cos(a.heading - b.heading)) > 0.6) continue;
-        this.crash(a, b);
+  /**
+   * Tenth-of-a-second check for any two cars whose bodies meet: running a light, the car behind not braking in time,
+   * a lane change into someone. How hard they hit decides what happens (see `collide`). Cars are sorted into 8 m
+   * squares first, so only neighbours are compared.
+   */
+  private detectCrashes(dt: number) {
+    this.trouble = 0;
+    for (const c of this.cars) if (c.wreck > 0 || (c.fx?.disabled ?? 0) > 0) this.trouble++;
+    this.crashClock -= dt;
+    if (this.crashClock > 0) return;
+    this.crashClock = 0.1;
+    const grid = new Map<number, Car[]>();
+    const cellOfCar = (v: number) => Math.floor(v / 8);
+    for (const c of this.cars) {
+      if (c.driven || c.mission || c.abandoned !== undefined) continue;
+      const k = cellOfCar(c.x) * 8192 + cellOfCar(c.z);
+      const list = grid.get(k);
+      if (list) list.push(c);
+      else grid.set(k, [c]);
+    }
+    for (const list of grid.values()) {
+      for (const a of list) {
+        const gx = cellOfCar(a.x);
+        const gz = cellOfCar(a.z);
+        for (let ox = -1; ox <= 1; ox++) {
+          for (let oz = -1; oz <= 1; oz++) {
+            const near = grid.get((gx + ox) * 8192 + gz + oz);
+            if (!near) continue;
+            for (const b of near) if (b.id > a.id) this.checkPair(a, b);
+          }
+        }
       }
     }
   }
 
-  private crash(a: Car, b: Car) {
+  private checkPair(a: Car, b: Car) {
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 > 36 || (a.wreck > 0 && b.wreck > 0) || (a.speed < 0.5 && b.speed < 0.5)) return;
+    // Only driver errors count as accidents. Cars sharing a junction on compatible turns are allowed by the junction rules even
+    // when their bodies come close, so a car must either cross another's path through a junction it should not have entered
+    // (a red-light runner), or run into the back of one going the same way (the driver who looked away).
+    const cosd = Math.cos(a.heading - b.heading);
+    const sameWay = cosd > 0.85;
+    const crossing = Math.abs(cosd) < 0.5 && !!a.holding && a.holding === b.holding;
+    if (!sameWay && !crossing) return;
+    // b's body, seen from a's own length and width axes.
+    const sa = Math.sin(a.heading);
+    const ca = Math.cos(a.heading);
+    const along = dx * sa + dz * ca;
+    const lat = dx * ca - dz * sa;
+    const th = b.heading - a.heading;
+    const c = Math.abs(Math.cos(th));
+    const s = Math.abs(Math.sin(th));
+    const wa = carWidth(a);
+    const wb = carWidth(b);
+    if (Math.abs(along) > a.length / 2 + (c * b.length + s * wb) / 2 - 0.25) return;
+    if (Math.abs(lat) > wa / 2 + (s * b.length + c * wb) / 2 - 0.2) return;
+    const d = Math.sqrt(d2) || 1;
+    const closing = ((sa * a.speed - Math.sin(b.heading) * b.speed) * dx + (ca * a.speed - Math.cos(b.heading) * b.speed) * dz) / d;
+    if (closing < 0.8) return;
+    this.collide(a, b, closing);
+  }
+
+  /** The two cars are wrecks until the tow truck comes, and the incident system sends the emergency services. */
+  private crash(a: Car, b: Car, closing: number) {
     for (const c of [a, b]) {
+      if (c.driven) continue;
       c.wreck = WRECK_LIFE;
       c.pull = 1; // slewed over to the kerb
       c.speed *= 0.25;
       c.runLight = false;
+      if (c.fx) {
+        c.fx.limp = undefined;
+        c.fx.disabled = undefined;
+        c.fx.hazard = 90;
+      } else {
+        c.fx = { hazard: 90 };
+      }
       if (c.holding && this.junctionOwner.get(c.holding) !== c.id) c.holding = null;
     }
-    playSfx('car_crash', 1, { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 });
+    playSfx('car_crash', Math.min(1, 0.5 + closing / 14), { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 });
     this.crashHook?.(a, b);
   }
 

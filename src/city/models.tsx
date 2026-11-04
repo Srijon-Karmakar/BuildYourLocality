@@ -20,8 +20,10 @@ import {
   type PieceType,
   type RoadSpec,
   type RoofId,
+  type LedSpec,
 } from './catalog';
 import { Chimney, Balconies, LedScreen, RoofExtras, SignBoard } from './buildingExtras';
+import { buildingMaster, useTownMaster, linkedLed } from './ledNet';
 import { BlockDetails } from './buildingDetails';
 import { getFacadeMaterial, getRoofMaterial } from './cityTextures';
 import { WATER_LEVEL, useTerrainStore } from '../terrain/terrain';
@@ -267,6 +269,7 @@ export function BuildingModel({ type, facade, roof, style, seed }: BuildingProps
   const offset = Math.max(-maxDoorOffset(placement.length), Math.min(maxDoorOffset(placement.length), door.offset));
   const trim = solidMaterial(style.trim, 0.9);
   const mainIndex = style.blocks.reduce((best, b, i, all) => (b.floors > all[best].floors ? i : best), 0);
+  const master = buildingMaster(style.leds);
 
   return (
     <group>
@@ -291,7 +294,7 @@ export function BuildingModel({ type, facade, roof, style, seed }: BuildingProps
       {style.leds.map((led, i) =>
         style.blocks[led.block] ? (
           <group key={i} position={[0, blockBox(style.blocks[led.block], style.lot).y, 0]}>
-            <LedScreen spec={led} box={blockBox(style.blocks[led.block], style.lot)} floors={style.blocks[led.block].floors} />
+            <LedScreen spec={led} box={blockBox(style.blocks[led.block], style.lot)} floors={style.blocks[led.block].floors} block={style.blocks[led.block]} master={master} />
           </group>
         ) : null,
       )}
@@ -414,11 +417,19 @@ export function PieceModel({
   if (PIECES[type].paintable) {
     return <BuildingModel type={type} facade={facade} roof={roof} style={style} seed={seed} />;
   }
+  const prop = (led: LedSpec | null) => <PropModel type={type} seed={seed} accent={accent} led={led} rot={rot} tree={tree} zone={`${Math.floor((gx ?? 0) / 8)},${Math.floor((gz ?? 0) / 8)}`} />;
   return (
     <group scale={scale}>
-      <PropModel type={type} seed={seed} accent={accent} led={style.led} rot={rot} tree={tree} zone={`${Math.floor((gx ?? 0) / 3)},${Math.floor((gz ?? 0) / 3)}`} />
+      {style.led?.link === 'town' ? <LinkedProp led={style.led} render={prop} /> : prop(style.led)}
     </group>
   );
+}
+
+/** A billboard or LED wall that shows the town's broadcast: it follows whatever the broadcasting screen shows. */
+function LinkedProp({ led, render }: { led: LedSpec; render: (led: LedSpec | null) => ReactNode }) {
+  const town = useTownMaster(true);
+  const shown = useMemo(() => linkedLed(led, undefined, town), [led, town]);
+  return <>{render(shown)}</>;
 }
 
 /** A placed piece: its model plus (for solid pieces) fixed colliders for roam mode. */

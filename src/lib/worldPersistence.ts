@@ -294,6 +294,8 @@ function sanitizeLed(led: unknown): LedSpec | undefined {
   out.layout = oneOf(raw.layout, ['auto', 'full', 'square', 'wide'] as const);
   out.panels = oneOf(raw.panels, ['same', 'next', 'chase'] as const);
   out.sync = oneOf(raw.sync, ['together', 'chase', 'solo'] as const);
+  out.link = oneOf(raw.link, ['none', 'building', 'town'] as const);
+  for (const flag of ['seamless', 'wrap', 'master'] as const) if (typeof raw[flag] === 'boolean') out[flag] = raw[flag];
   out.transition = oneOf(raw.transition, ['fade', 'slide', 'cut'] as const);
   out.fit = oneOf(raw.fit, ['contain', 'cover'] as const);
   if (Array.isArray(raw.layers)) {
@@ -608,6 +610,16 @@ export async function setWorldPublicBuild(userId: string, id: string, publicBuil
 export async function joinWorldByCode(code: string, name: string): Promise<{ id: string | null; error: string | null }> {
   const { data, error } = await supabase.rpc('join_world_by_code', { p_code: code, p_name: name });
   return error ? { id: null, error: error.message } : { id: String(data), error: null };
+}
+
+/**
+ * Asks the database whether this player may build in a world right now (the owner, a friend who joined,
+ * or anyone in a public world with building on). Resolves to null when the question could not be asked,
+ * so a hiccup is never mistaken for "no".
+ */
+export async function canBuildWorld(worldId: string): Promise<boolean | null> {
+  const { data, error } = await supabase.rpc('can_build_world', { w: worldId });
+  return error ? null : data === true;
 }
 
 /** Asks a world's owner for access. Resolves to the world's name, or an error message. */
