@@ -31,6 +31,9 @@ const ROCKET_RADIUS = 15;
 /** How fast the shock wave travels, m/s. */
 const SHOCK_SPEED = 95;
 const MAX_BOMBS = 6;
+/** Seconds a crater stays before it eases back, and how long the easing takes. */
+const CRATER_HOLD = 45;
+const CRATER_EASE = 90;
 const MAX_PUFFS = 720;
 const MAX_CHUNKS = 260;
 const MAX_RUBBLE = 360;
@@ -53,6 +56,11 @@ export interface Bomb {
   age: number;
   /** A rocket flies flat and fast; a bomb is lobbed. */
   rocket?: boolean;
+  /** Bounces so far, and seconds until a bounced bomb goes off (null until its first bounce). */
+  bounces?: number;
+  fuse?: number | null;
+  /** Spin of the roll, for drawing. */
+  spin?: number;
 }
 
 /** A soft round particle: smoke, dust, flame or ember. */
@@ -192,6 +200,8 @@ class BlastSim {
   private nextId = 1;
   private events: { t: number; run: () => void }[] = [];
   /** Damage taken so far by the buildings and bridges that have been hit, and how many floors they had left after the last hit. */
+  /** Craters waiting to ease back to level ground: the heights they had, and how long ago they were dug. */
+  private craters: { before: Record<string, number>; age: number; eased: number }[] = [];
   private wear = new Map<string, { dmg: number; hp: number; total0: number; keep: number; blocks: Block[] }>();
 
   get busy(): boolean {
@@ -220,19 +230,39 @@ class BlastSim {
       const steps = Math.max(1, Math.ceil(dt / 0.016));
       const h = dt / steps;
       let boom = false;
+      let how: 'ground' | 'direct' | 'air' = 'ground';
       for (let s = 0; s < steps && !boom; s++) {
         b.age += h;
         b.vy -= (b.rocket ? ROCKET_GRAVITY : GRAVITY) * h;
         b.x += b.vx * h;
         b.y += b.vy * h;
         b.z += b.vz * h;
-        boom = this.bombHit(b) || b.age > 8;
+        // A lobbed bomb hits the ground, bounces and rolls with a short fuse running; anything solid sets it off at once.
+        if (!b.rocket && b.fuse != null) {
+          b.fuse -= h;
+          b.spin = (b.spin ?? 0) + Math.hypot(b.vx, b.vz) * h;
+          if (b.fuse <= 0) {
+            boom = true;
+            how = b.y - this.groundAt(b.x, b.z) > 3 ? 'air' : 'ground';
+            break;
+          }
+          if (this.bounceOnGround(b)) continue;
+        }
+        const hit = this.bombHit(b);
+        if (hit === 'ground' && !b.rocket && (b.bounces ?? 0) < 3 && Math.hypot(b.vx, b.vy, b.vz) > 5) {
+          this.bounce(b);
+          continue;
+        }
+        if (hit) {
+          boom = true;
+          how = hit === 'solid' ? 'direct' : 'ground';
+        } else if (b.age > 8) boom = true;
       }
       // A thin trail of smoke behind it.
       if (Math.random() < 0.7) this.puff(b.x, b.y, b.z, rnd(-0.3, 0.3), rnd(0, 0.4), rnd(-0.3, 0.3), 0.9, 0.35, 1.1, 0.5, 0.5, 0.5, 0.45, false, 0.2);
       if (boom) {
         this.bombs.splice(i, 1);
-        this.detonate(b.x, b.y, b.z, b.rocket ? ROCKET_RADIUS : BLAST_RADIUS);
+        this.detonate(b.x, b.y, b.z, (b.rocket ? ROCKET_RADIUS : BLAST_RADIUS) * (how === 'air' ? 1.15 : how === 'direct' ? 0.9 : 1), how);
       }
     }
 
@@ -247,34 +277,136 @@ class BlastSim {
     for (const w of this.waves) w.age += dt;
     this.waves = this.waves.filter((w) => w.age < (BLAST_RADIUS * 1.6) / SHOCK_SPEED + 0.3);
 
+    this.settleCraters(dt);
     this.updateFires(dt);
     this.updateParticles(dt);
     this.updateGround(dt);
   }
 
+  /** Craters stay for a while, then ease back to the ground they were dug from. */
+  private settleCraters(dt: number) {
+    if (this.craters.length === 0) return;
+    for (const c of this.craters) c.age += dt;
+    if (Math.floor(this.time * 2) === Math.floor((this.time - dt) * 2)) return; // twice a second is plenty
+    const terrain = useTerrainStore.getState();
+    this.craters = this.craters.filter((c) => {
+      if (c.age < CRATER_HOLD) return true;
+      const k = clamp((c.age - CRATER_HOLD) / CRATER_EASE, 0, 1);
+      const step = k >= 1 ? 1 : clamp((k - c.eased) / (1 - c.eased), 0, 1);
+      c.eased = k;
+      terrain.settle(c.before, step);
+      return k < 1;
+    });
+  }
+
+  /** Burning buildings, fuel and cars near a blast go up in smaller explosions a moment later, shoving things further. */
+  private chainReactions(x: number, z: number, R: number) {
+    let n = 0;
+    for (const car of sim.cars) {
+      if (n >= 3) break;
+      const d = Math.hypot(car.x - x, car.z - z);
+      if (d > R * 0.8 || car.driven || Math.random() > 0.55 * (1 - d / (R * 0.8))) continue;
+      n++;
+      car.stuck = 999; // wrecked: it disappears with the blast
+      const cx = car.x;
+      const cz = car.z;
+      this.at(0.25 + d / SHOCK_SPEED + Math.random() * 0.4, () => this.minorBlast(cx, cz, 7, 'car'));
+    }
+    // Burning buildings near the blast can have a gas explosion.
+    for (const f of this.fires) {
+      if (n >= 4) break;
+      if (f.kind !== 'building' || Math.hypot(f.x - x, f.z - z) > R * 1.2 || Math.random() > 0.18) continue;
+      n++;
+      const fx = f.x;
+      const fz = f.z;
+      this.at(1 + Math.random() * 2.5, () => this.minorBlast(fx, fz, 9, 'gas'));
+    }
+  }
+
+  /** A small secondary explosion: fireball, shock on people, shoves cars aside, and a floor or two off nearby buildings. */
+  private minorBlast(x: number, z: number, R: number, _kind: 'car' | 'gas') {
+    void _kind;
+    const ground = this.groundAt(x, z);
+    playSfx('explosion', 0.6, { x, y: ground, z });
+    this.waves.push({ x, y: ground + 0.5, z, age: 0 });
+    this.fireball(x, ground + 0.5, z);
+    this.shake = Math.max(this.shake, clamp(0.5 - Math.hypot(sim.player.x - x, sim.player.z - z) / 60, 0, 0.5));
+    this.at(0.1, () => combat.blastDamage(x, z, R, 0.5));
+    if (useWorldsStore.getState().readOnly) return;
+    const city = useCityStore.getState();
+    const bucket = { remove: [] as string[], patch: new Map<string, Partial<Piece>>(), fx: [] as (() => void)[] };
+    for (const piece of Object.values(city.pieces)) {
+      if (!PIECES[piece.type].paintable) continue;
+      const [w, d] = pieceFootprint(piece);
+      const x0 = piece.gx * CELL;
+      const z0 = piece.gz * CELL;
+      const dist = Math.hypot(Math.max(x0 - x, 0, x - (piece.gx + w) * CELL), Math.max(z0 - z, 0, z - (piece.gz + d) * CELL));
+      if (dist < R) this.building(piece, dist, x, z, bucket, R, 0.5);
+    }
+    this.at(0.2, () => {
+      const store = useCityStore.getState();
+      if (bucket.remove.length > 0) store.removeMany(bucket.remove);
+      if (bucket.patch.size > 0) store.updateMany([...bucket.patch.keys()], (p) => (bucket.patch.get(p.id) as never) ?? null);
+      for (const run of bucket.fx) run();
+    });
+  }
+
   // --- Flight ---------------------------------------------------------------------------------
 
-  private bombHit(b: Bomb): boolean {
-    const ground = hasTerrain() ? Math.max(heightAt(b.x, b.z), WATER_LEVEL) : 0;
+  private groundAt(x: number, z: number): number {
+    return hasTerrain() ? Math.max(heightAt(x, z), WATER_LEVEL) : 0;
+  }
+
+  /** First touch of the ground: lose most of the speed, hop, and light the fuse. */
+  private bounce(b: Bomb) {
+    b.bounces = (b.bounces ?? 0) + 1;
+    b.y = this.groundAt(b.x, b.z) + 0.15;
+    b.vy = Math.abs(b.vy) * 0.42;
+    b.vx *= 0.62;
+    b.vz *= 0.62;
+    if (b.fuse == null) b.fuse = 1.1;
+    playSfx('collapse', 0.25, { x: b.x, y: b.y, z: b.z });
+    for (let i = 0; i < 3; i++) this.puff(b.x, b.y, b.z, rnd(-1.5, 1.5), rnd(0.5, 2), rnd(-1.5, 1.5), rnd(0.6, 1.2), 0.5, 1.8, 0.45, 0.38, 0.3, 0.55, false, 0.1);
+  }
+
+  /** While the fuse burns the bomb keeps hopping and rolling; true when it did so this step. */
+  private bounceOnGround(b: Bomb): boolean {
+    const ground = this.groundAt(b.x, b.z);
+    if (b.y > ground + 0.15 || b.vy > 0) return false;
+    if (Math.abs(b.vy) > 2.5) {
+      this.bounce(b);
+      return true;
+    }
+    // Rolling: stay on the ground and slow down.
+    b.y = ground + 0.15;
+    b.vy = 0;
+    b.vx *= 0.985;
+    b.vz *= 0.985;
+    return true;
+  }
+
+  /** 'ground' when it reached the earth, 'solid' for a building, tree or body; false while it flies on. */
+  private bombHit(b: Bomb): false | 'ground' | 'solid' {
+    const ground = this.groundAt(b.x, b.z);
     if (b.y <= ground + 0.12) {
       b.y = ground;
-      return true;
+      return 'ground';
     }
     const deck = spanSurfaceAt(b.x, b.z, b.y + 0.6, 0.6);
     if (deck !== null && b.vy < 0 && b.y <= deck + 0.2) {
       b.y = deck;
-      return true;
+      return 'solid';
     }
     const city = useCityStore.getState();
     const id = city.occupancy[cellKey(Math.floor(b.x / CELL), Math.floor(b.z / CELL))];
     const piece = id ? city.pieces[id] : undefined;
-    if (piece && PIECES[piece.type].paintable && b.y < this.heightOf(piece)) return true;
+    if (piece && PIECES[piece.type].paintable && b.y < this.heightOf(piece)) return 'solid';
     if (b.age > 0.2) {
       for (const t of overlaysNear(city.pieces, b.x, b.z, 1.3)) {
-        if (isTreeType(t.type) && !GRASS_TYPES.includes(t.type) && b.y < 7 * (t.scale ?? 1)) return true;
+        if (isTreeType(t.type) && !GRASS_TYPES.includes(t.type) && b.y < 7 * (t.scale ?? 1)) return 'solid';
       }
-      for (const m of combat.monsters) if (m.state !== 'dying' && Math.hypot(m.x - b.x, m.z - b.z) < 1.6 && b.y < 3.5) return true;
-      for (const p of sim.peds) if (p.vis > 0.6 && p.state !== 'inside' && p.state !== 'entering' && Math.hypot(p.x - b.x, p.z - b.z) < 1 && b.y < 2.3) return true;
+      for (const m of combat.monsters) if (m.state !== 'dying' && Math.hypot(m.x - b.x, m.z - b.z) < 1.6 && b.y < 3.5) return 'solid';
+      for (const p of sim.peds) if (p.vis > 0.6 && p.state !== 'inside' && p.state !== 'entering' && Math.hypot(p.x - b.x, p.z - b.z) < 1 && b.y < 2.3) return 'solid';
     }
     return false;
   }
@@ -290,7 +422,7 @@ class BlastSim {
 
   // --- The explosion --------------------------------------------------------------------------
 
-  private detonate(x: number, y: number, z: number, R = BLAST_RADIUS) {
+  private detonate(x: number, y: number, z: number, R = BLAST_RADIUS, how: 'ground' | 'direct' | 'air' = 'ground') {
     playSfx('explosion', 1, { x, y, z });
     const away = Math.hypot(sim.player.x - x, sim.player.z - z);
     this.shake = Math.max(this.shake, clamp(1 - away / 80, 0, 1));
@@ -298,13 +430,15 @@ class BlastSim {
     this.fireball(x, y, z);
 
     const ground = hasTerrain() ? Math.max(heightAt(x, z), 0) : 0;
-    const surface = y - ground < 4;
+    const surface = y - ground < 4 && how !== 'air';
     const editable = !useWorldsStore.getState().readOnly;
     /** A bigger blast hits harder as well as further. */
-    const power = (R / BLAST_RADIUS) ** 1.5;
+    // A direct hit on a building concentrates the damage; an airburst spreads it wider and thinner (and shreds people more than walls).
+    const power = (R / BLAST_RADIUS) ** 1.5 * (how === 'direct' ? 1.35 : how === 'air' ? 0.75 : 1);
 
     // People and creatures feel it as the wave reaches them.
-    this.at(0.12, () => combat.blastDamage(x, z, R, 1));
+    this.at(0.12, () => combat.blastDamage(x, z, R, how === 'air' ? 1.2 : 1));
+    this.at(0.15, () => this.chainReactions(x, z, R));
 
     // A scorch mark, whatever it landed on.
     if (surface) this.scar(x, z, R * 0.8, 0.85);
@@ -328,7 +462,10 @@ class BlastSim {
     // (ground under buildings and roads is held level), and each bomb on the same spot digs deeper.
     if (surface) {
       this.at(0.5, () => {
-        const woods = useTerrainStore.getState().crater(x, z, (R / CELL) * 0.7, 2.9 * (R / BLAST_RADIUS));
+        const dug = useTerrainStore.getState().crater(x, z, (R / CELL) * 0.7, 0.9 * (R / BLAST_RADIUS));
+        const woods = dug.woods;
+        // The crater is only a dent: it eases back to level ground over the next couple of minutes.
+        if (Object.keys(dug.before).length > 0) this.craters.push({ before: dug.before, age: 0, eased: 0 });
         for (let i = 0; i < Math.min(26, woods * 4); i++) {
           const a = Math.random() * Math.PI * 2;
           const d = rnd(2, R * 0.9);

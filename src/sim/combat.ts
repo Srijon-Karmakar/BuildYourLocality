@@ -207,6 +207,8 @@ export interface PlayerState {
   hurt: number;
   /** Extra velocity from being knocked back. */
   pushX: number;
+  /** Upward kick from a blast, m/s, taken by the player controller. */
+  blastLift: number;
   pushZ: number;
   /** Shelter: hiding inside a building. */
   shelter: { pieceId: string; x: number; z: number } | null;
@@ -305,6 +307,7 @@ class Combat {
     burstTimer: 0,
     hurt: 0,
     pushX: 0,
+    blastLift: 0,
     pushZ: 0,
     shelter: null,
     alarm: 0,
@@ -1649,12 +1652,14 @@ class Combat {
     }
     // Only a real fight can hurt you: peaceful walks stay safe.
     const dp = Math.hypot(this.px - x, this.pz - z);
-    if (this.active && p.alive && !p.shelter && dp < radius * 0.9) {
-      const fall = 1 - dp / (radius * 0.9);
+    if ((this.active || this.arms) && p.alive && !p.shelter && dp < radius * 1.1) {
+      const fall = 1 - dp / (radius * 1.1);
       const l = dp || 1;
-      p.pushX += ((this.px - x) / l) * 9 * fall;
-      p.pushZ += ((this.pz - z) / l) * 9 * fall;
-      this.damagePlayer((6 + 70 * fall * fall) * power, x, z);
+      // The blast throws you clear, hard when close, in every walking mode.
+      p.pushX += ((this.px - x) / l) * 22 * fall * Math.min(1.5, power);
+      p.pushZ += ((this.pz - z) / l) * 22 * fall * Math.min(1.5, power);
+      p.blastLift = Math.max(p.blastLift, 7 * fall);
+      if (this.active && dp < radius * 0.9) this.damagePlayer((6 + 70 * fall * fall) * power, x, z);
     }
   }
 

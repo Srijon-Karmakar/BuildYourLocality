@@ -199,7 +199,7 @@ export function BuildPalette() {
     </div>
   );
 
-  const iconBtn = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-base transition disabled:opacity-30 sm:h-8 sm:w-8 sm:text-base';
+  const iconBtn = 'flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-xl text-base transition disabled:opacity-30 sm:h-8 sm:w-8 sm:text-base';
 
   return (
     <>
@@ -228,17 +228,17 @@ export function BuildPalette() {
         style={{ paddingBottom: 'calc(var(--safe-bottom) + 0.5rem)' }}
       >
         {/* Item row: scrolls sideways on a phone, wraps on a desktop. */}
-        <div className={`no-scrollbar pointer-events-auto flex w-fit max-w-full gap-1 overflow-x-auto rounded-2xl p-1 sm:p-1.5 sm:w-auto sm:max-w-[92vw] sm:flex-wrap sm:justify-center sm:overflow-visible ${glass}`}>
+        <div className={`no-scrollbar pointer-events-auto flex w-fit max-w-full gap-0.5 overflow-x-auto rounded-2xl p-0.5 sm:gap-1 sm:p-1.5 sm:w-auto sm:max-w-[92vw] sm:flex-wrap sm:justify-center sm:overflow-visible ${glass}`}>
           {ITEMS[tab].map((item, i) => (
             <button
               // Bridges and walls share one tool id, so the key must tell their variants apart or the row keeps stale buttons.
               key={`${item.id}:${item.brush ?? item.wallStyle ?? item.spanPreset ?? ''}`}
               onClick={() => activate(item)}
-              className={`flex min-h-10 min-w-[3.6rem] shrink-0 flex-col items-center justify-center gap-0 rounded-xl px-1.5 text-[11px] leading-tight transition sm:min-h-0 sm:min-w-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-sm ${
+              className={`flex min-h-9 min-w-[3rem] max-sm:text-[10px] shrink-0 flex-col items-center justify-center gap-0 rounded-xl px-1.5 text-[11px] leading-tight transition sm:min-h-0 sm:min-w-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-sm ${
                 isActive(item) ? 'bg-white text-black' : 'text-white/80 active:bg-white/20 sm:hover:bg-white/10'
               }`}
             >
-              <span className="text-lg sm:text-base"><Icon name={item.icon ?? ICON_BY_TOOL[item.id] ?? item.id} /></span>
+              <span className="text-base sm:text-base"><Icon name={item.icon ?? ICON_BY_TOOL[item.id] ?? item.id} /></span>
               <span className="whitespace-nowrap">
                 <span className="mr-1 hidden text-xs opacity-60 sm:inline">{i + 1}</span>
                 {item.label}
@@ -251,7 +251,7 @@ export function BuildPalette() {
               <button
                 key={p.id}
                 onClick={() => applyRoadPreset(p.id)}
-                className={`flex min-h-10 min-w-[3.6rem] shrink-0 flex-col items-center justify-center rounded-xl px-1.5 text-[11px] leading-tight transition ${
+                className={`flex min-h-9 min-w-[3rem] max-sm:text-[10px] shrink-0 flex-col items-center justify-center rounded-xl px-1.5 text-[11px] leading-tight transition ${
                   roadPreset === p.id ? 'bg-white text-black' : 'text-white/80 active:bg-white/20'
                 }`}
               >
@@ -264,7 +264,7 @@ export function BuildPalette() {
           {compact && showMaterials && (
             <button
               onClick={() => setMaterialsOpen((v) => !v)}
-              className={`flex min-h-10 min-w-[3.6rem] shrink-0 flex-col items-center justify-center rounded-xl px-1.5 text-[11px] leading-tight transition ${
+              className={`flex min-h-9 min-w-[3rem] max-sm:text-[10px] shrink-0 flex-col items-center justify-center rounded-xl px-1.5 text-[11px] leading-tight transition ${
                 materialsOpen ? 'bg-white text-black' : 'bg-white/15 text-white'
               }`}
               aria-label="Options"
@@ -282,7 +282,7 @@ export function BuildPalette() {
                 setTool('select');
               }}
               title="Pick several buildings and plants and edit them together (Shift+click, or drag a box)"
-              className={`flex min-h-10 min-w-[3.6rem] shrink-0 flex-col items-center justify-center rounded-xl px-1.5 text-[11px] leading-tight transition sm:min-h-0 sm:min-w-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-sm ${
+              className={`flex min-h-9 min-w-[3rem] max-sm:text-[10px] shrink-0 flex-col items-center justify-center rounded-xl px-1.5 text-[11px] leading-tight transition sm:min-h-0 sm:min-w-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-sm ${
                 multiSelect ? 'bg-white text-black' : 'text-white/80 active:bg-white/20 sm:hover:bg-white/10'
               }`}
             >
@@ -304,7 +304,7 @@ export function BuildPalette() {
                   setConfirmClear(true);
                 }
               }}
-              className={`flex min-h-10 min-w-[3.6rem] shrink-0 flex-col items-center justify-center rounded-xl px-1.5 text-[11px] transition disabled:opacity-30 sm:min-h-0 sm:flex-row sm:px-3 sm:py-1.5 sm:text-sm ${confirmClear ? 'bg-red-600 text-white' : 'text-red-300 active:bg-red-500/20 sm:hover:bg-red-500/20'}`}
+              className={`flex min-h-9 min-w-[3rem] max-sm:text-[10px] shrink-0 flex-col items-center justify-center rounded-xl px-1.5 text-[11px] transition disabled:opacity-30 sm:min-h-0 sm:flex-row sm:px-3 sm:py-1.5 sm:text-sm ${confirmClear ? 'bg-red-600 text-white' : 'text-red-300 active:bg-red-500/20 sm:hover:bg-red-500/20'}`}
               title="Delete everything (undoable)"
             >
               <span className="text-lg sm:mr-1.5 sm:text-base"><Icon name="clearall" /></span>
@@ -318,7 +318,7 @@ export function BuildPalette() {
             <button
               key={t.id}
               onClick={() => selectTab(t.id)}
-              className={`min-h-8 shrink-0 rounded-xl px-3 transition sm:min-h-0 sm:px-3 sm:py-1 ${
+              className={`min-h-7 shrink-0 rounded-xl px-2 text-[11px] transition sm:text-xs sm:min-h-0 sm:px-3 sm:py-1 ${
                 tab === t.id ? 'bg-white/90 text-black' : 'text-white/70 active:bg-white/15 sm:hover:bg-white/10'
               }`}
             >

@@ -57,7 +57,7 @@ function App() {
       <Suspense fallback={null}>
         <Scene />
       </Suspense>
-      {mode === 'roam' && !touch && <Crosshair />}
+      {mode === 'roam' && <Crosshair arrows={touch} />}
       <TopBar />
       <CombatHud />
       <VehicleHud />

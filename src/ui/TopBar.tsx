@@ -55,12 +55,13 @@ export function TopBar() {
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-1.5 sm:gap-2 sm:px-4" style={inset}>
         {compact ? <ModeToggle /> : <ModeBar />}
         <SiteLinks className="pointer-events-auto absolute left-1/2 top-[calc(var(--safe-top)+0.375rem)] hidden -translate-x-1/2 items-center rounded-full bg-black/40 px-1 backdrop-blur-[6px] xl:flex xl:h-10" />
-        <div className="flex items-start gap-1.5 sm:gap-2">
+        <div className="flex items-start gap-1 sm:gap-2">
           <OnlineChip />
           <MoneyChip />
-          <ShopButton />
-          <SyncBadge compact={compact} />
-          <SkyChip compact={compact} />
+          {/* On a phone the shop, save status and clock live inside the menu sheet. */}
+          {!compact && <ShopButton />}
+          {!compact && <SyncBadge compact={compact} />}
+          {!compact && <SkyChip compact={compact} />}
           <AvatarMenu />
           <button
             onClick={() => toggle()}

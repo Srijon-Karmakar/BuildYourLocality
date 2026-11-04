@@ -103,14 +103,14 @@ function OnFootControls({ nearCar }: { nearCar: boolean }) {
       )}
       {fighting ? (
         <div className="flex items-end gap-3">
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-1.5">
             {sub === 'survival' && (
-              <button className={`${pad} h-10 w-10 text-xl`} onClick={() => combat.interact()} aria-label="Hide inside a building">
+              <button className={`${pad} h-9 w-9 text-lg`} onClick={() => combat.interact()} aria-label="Hide inside a building">
                 <Icon name="door" />
               </button>
             )}
             <button
-              className={`${pad} h-10 w-10 text-xl ${torch ? 'bg-amber-300/80 text-black' : ''}`}
+              className={`${pad} h-9 w-9 text-lg ${torch ? 'bg-amber-300/80 text-black' : ''}`}
               onClick={() => {
                 combat.player.flashlight = !combat.player.flashlight;
                 setTorch(combat.player.flashlight);
@@ -120,7 +120,7 @@ function OnFootControls({ nearCar }: { nearCar: boolean }) {
               <Icon name="flashlight" />
             </button>
             <button
-              className={`${pad} h-10 w-10 text-xl ${crouched ? 'bg-emerald-400/80 text-black' : ''}`}
+              className={`${pad} h-9 w-9 text-lg ${crouched ? 'bg-emerald-400/80 text-black' : ''}`}
               onClick={() => {
                 virtualInput.crouch = !virtualInput.crouch;
                 setCrouched(virtualInput.crouch);
@@ -129,15 +129,15 @@ function OnFootControls({ nearCar }: { nearCar: boolean }) {
             >
               <Icon name="person" />
             </button>
-            <HoldButton label="Run" className="h-10 w-10 text-xl" onHold={(down) => (virtualInput.sprint = down)}>
+            <HoldButton label="Run" className="h-9 w-9 text-lg" onHold={(down) => (virtualInput.sprint = down)}>
               <Icon name="run" />
             </HoldButton>
           </div>
-          <div className="flex flex-col items-center gap-3">
-            <HoldButton label="Jump" className="h-10 w-10 text-xl" onHold={(down) => (virtualInput.jump = down)}>
+          <div className="flex flex-col items-center gap-2">
+            <HoldButton label="Jump" className="h-9 w-9 text-lg" onHold={(down) => (virtualInput.jump = down)}>
               <Icon name="up" />
             </HoldButton>
-            <HoldButton label="Attack" className="h-16 w-16 bg-red-600/60 text-3xl" onHold={(down) => (virtualInput.attack = down)}>
+            <HoldButton label="Attack" className="h-14 w-14 bg-red-600/60 text-2xl" onHold={(down) => (virtualInput.attack = down)}>
               <Icon name="swords" />
             </HoldButton>
           </div>
@@ -146,7 +146,7 @@ function OnFootControls({ nearCar }: { nearCar: boolean }) {
         <div className="flex items-end gap-3">
           <div className="flex flex-col items-center gap-2">
             <button
-              className={`${pad} h-10 w-10 text-xl ${torch ? 'bg-amber-300/80 text-black' : ''}`}
+              className={`${pad} h-9 w-9 text-lg ${torch ? 'bg-amber-300/80 text-black' : ''}`}
               onClick={() => {
                 combat.player.flashlight = !combat.player.flashlight;
                 setTorch(combat.player.flashlight);
@@ -159,21 +159,21 @@ function OnFootControls({ nearCar }: { nearCar: boolean }) {
               Fly
             </button>
             {flying ? (
-              <HoldButton label="Descend" className="h-10 w-10 text-xl" onHold={(down) => (virtualInput.down = down)}>
+              <HoldButton label="Descend" className="h-9 w-9 text-lg" onHold={(down) => (virtualInput.down = down)}>
                 <Icon name="down" />
               </HoldButton>
             ) : (
-              <HoldButton label="Run" className="h-10 w-10 text-xl" onHold={(down) => (virtualInput.sprint = down)}>
+              <HoldButton label="Run" className="h-9 w-9 text-lg" onHold={(down) => (virtualInput.sprint = down)}>
                 <Icon name="run" />
               </HoldButton>
             )}
           </div>
-          <div className="flex flex-col items-center gap-3">
+          <div className="flex flex-col items-center gap-2">
             {/* Weapons turn up in peaceful walks too, so there is a trigger here as well. */}
-            <HoldButton label="Attack" className="h-16 w-16 bg-red-600/60 text-3xl" onHold={(down) => (virtualInput.attack = down)}>
+            <HoldButton label="Attack" className="h-14 w-14 bg-red-600/60 text-2xl" onHold={(down) => (virtualInput.attack = down)}>
               <Icon name="swords" />
             </HoldButton>
-            <HoldButton label={flying ? 'Ascend' : 'Jump'} className="h-12 w-12 text-2xl" onHold={(down) => (virtualInput.jump = down)}>
+            <HoldButton label={flying ? 'Ascend' : 'Jump'} className="h-10 w-10 text-xl" onHold={(down) => (virtualInput.jump = down)}>
               <Icon name="up" />
             </HoldButton>
           </div>
@@ -192,32 +192,40 @@ const cameraKey = (code: string) => (down: boolean) => {
 export function CameraPad() {
   const hand = useBuilderStore((s) => s.hand);
   const tool = useBuilderStore((s) => s.tool);
+  const [open, setOpen] = useState(false);
   return (
     <div
-      className="pointer-events-none absolute flex flex-col gap-2"
-      style={{ right: 'calc(var(--safe-right) + 0.5rem)', top: '50%', transform: 'translateY(-50%)' }}
+      className="pointer-events-none absolute flex flex-col gap-1.5"
+      style={{ right: 'calc(var(--safe-right) + 0.4rem)', top: '50%', transform: 'translateY(-50%)' }}
     >
-      <HoldButton label="Zoom in" className="h-9 w-9 text-xl" onHold={cameraKey('ZoomIn')}>
-        <Icon name="plus" />
-      </HoldButton>
-      <HoldButton label="Zoom out" className="h-9 w-9 text-xl" onHold={cameraKey('ZoomOut')}>
-        <Icon name="minus" />
-      </HoldButton>
-      <HoldButton label="Turn left" className="h-9 w-9 text-lg" onHold={cameraKey('KeyQ')}>
-        <Icon name="rotateBack" />
-      </HoldButton>
-      <HoldButton label="Turn right" className="h-9 w-9 text-lg" onHold={cameraKey('KeyE')}>
-        <Icon name="rotate" />
-      </HoldButton>
-      <HoldButton label="Tilt up" className="h-9 w-9 text-base" onHold={cameraKey('TiltUp')}>
-        <Icon name="up" />
-      </HoldButton>
-      <HoldButton label="Tilt down" className="h-9 w-9 text-base" onHold={cameraKey('TiltDown')}>
-        <Icon name="down" />
-      </HoldButton>
+      {open && (
+        <>
+          <HoldButton label="Zoom in" className="h-8 w-8 text-lg" onHold={cameraKey('ZoomIn')}>
+            <Icon name="plus" />
+          </HoldButton>
+          <HoldButton label="Zoom out" className="h-8 w-8 text-lg" onHold={cameraKey('ZoomOut')}>
+            <Icon name="minus" />
+          </HoldButton>
+          <HoldButton label="Turn left" className="h-8 w-8 text-base" onHold={cameraKey('KeyQ')}>
+            <Icon name="rotateBack" />
+          </HoldButton>
+          <HoldButton label="Turn right" className="h-8 w-8 text-base" onHold={cameraKey('KeyE')}>
+            <Icon name="rotate" />
+          </HoldButton>
+          <HoldButton label="Tilt up" className="h-8 w-8 text-sm" onHold={cameraKey('TiltUp')}>
+            <Icon name="up" />
+          </HoldButton>
+          <HoldButton label="Tilt down" className="h-8 w-8 text-sm" onHold={cameraKey('TiltDown')}>
+            <Icon name="down" />
+          </HoldButton>
+        </>
+      )}
+      <button aria-label={open ? 'Hide camera buttons' : 'Show camera buttons'} className={`${pad} h-8 w-8 text-base ${open ? '!bg-white !text-black' : ''}`} onClick={() => setOpen((v) => !v)}>
+        <Icon name="sliders" />
+      </button>
       <button
         aria-label="Edit"
-        className={`${pad} h-9 w-9 text-base ${!hand && tool === 'select' ? '!bg-white !text-black' : ''}`}
+        className={`${pad} h-8 w-8 text-sm ${!hand && tool === 'select' ? '!bg-white !text-black' : ''}`}
         onClick={() => {
           useBuilderStore.getState().setHand(false);
           useBuilderStore.getState().setTool('select');
@@ -228,7 +236,7 @@ export function CameraPad() {
       <button
         aria-label="Hand mode"
         aria-pressed={hand}
-        className={`${pad} h-9 w-9 text-base ${hand ? '!bg-white !text-black' : ''}`}
+        className={`${pad} h-8 w-8 text-sm ${hand ? '!bg-white !text-black' : ''}`}
         onClick={() => useBuilderStore.getState().setHand(!hand)}
       >
         <Icon name="hand" />
@@ -284,10 +292,10 @@ function DriveControls() {
       <Joystick />
       <div className="flex items-end gap-3">
         <div className="flex flex-col items-center gap-2">
-          <button className={`${pad} h-10 w-10 text-xl`} onClick={() => vehicle.exit()} aria-label="Get out">
+          <button className={`${pad} h-9 w-9 text-lg`} onClick={() => vehicle.exit()} aria-label="Get out">
             <Icon name="exitcar" />
           </button>
-          <button className={`${pad} h-10 w-10 text-xl`} onClick={() => (vehicle.view = vehicle.view === 'chase' ? 'hood' : 'chase')} aria-label="Change view">
+          <button className={`${pad} h-9 w-9 text-lg`} onClick={() => (vehicle.view = vehicle.view === 'chase' ? 'hood' : 'chase')} aria-label="Change view">
             <Icon name="view" />
           </button>
           <HoldButton label="Horn" className="h-12 w-12 text-xl" onHold={(down) => (virtualInput.horn = down)}>

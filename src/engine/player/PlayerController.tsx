@@ -136,6 +136,13 @@ export function PlayerController({ start = [0, 2, 0], bodyRef }: PlayerControlle
 
     const linvel = body.linvel();
     const translation = body.translation();
+    // Safety net: if the ground ever gives way, put the player back on the nearest solid ground instead of falling forever.
+    const floorY = hasTerrain() ? Math.max(0, heightAt(translation.x, translation.z)) : 0;
+    if (!vehicle.active && translation.y < Math.min(-6, floorY - 8)) {
+      body.setTranslation({ x: translation.x, y: floorY + 2, z: translation.z }, true);
+      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      return;
+    }
     viewState.x = translation.x;
     viewState.z = translation.z;
 
@@ -164,7 +171,12 @@ export function PlayerController({ start = [0, 2, 0], bodyRef }: PlayerControlle
       return;
     }
 
-    const nextY = jump && grounded && !frozen ? JUMP_SPEED : linvel.y;
+    let nextY = jump && grounded && !frozen ? JUMP_SPEED : linvel.y;
+    // A blast throws you up as well as away.
+    if (fighter.blastLift > 0) {
+      nextY = Math.max(nextY, fighter.blastLift);
+      fighter.blastLift = 0;
+    }
     if (jump && grounded && combat.active) {
       fighter.noiseBurst = Math.max(fighter.noiseBurst, 11);
       fighter.burstTimer = 0.5;

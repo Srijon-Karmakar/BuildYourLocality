@@ -1,4 +1,7 @@
+import { ShopButton } from './ShopButton';
 import { SiteLinks } from './SiteLinks';
+import { SyncBadge } from './SyncBadge';
+import { useIsCompact } from './useMediaQuery';
 import { useGameStore } from '../state/useGameStore';
 import { useMenuStore, type MenuTab } from '../state/useMenuStore';
 import { Icon } from './icons';
@@ -26,6 +29,7 @@ export function MenuPanel() {
   const close = useMenuStore((s) => s.close);
   const mode = useGameStore((s) => s.mode);
 
+  const compact = useIsCompact();
   if (!open) return null;
   const tabs = mode === 'roam' ? [{ id: 'walk' as MenuTab, label: 'Walk', icon: 'walk' }, ...TABS] : TABS;
   const active = tabs.some((t) => t.id === tab) ? tab : tabs[0].id;
@@ -38,6 +42,12 @@ export function MenuPanel() {
         className="pointer-events-auto absolute inset-x-2 flex max-h-[72dvh] flex-col overflow-hidden rounded-2xl bg-black/62 pointer-coarse:bg-black/84 text-white shadow-xl backdrop-blur-[6px] sm:inset-x-auto sm:right-4 sm:w-80"
         style={{ top: 'calc(var(--safe-top) + 4rem)' }}
       >
+        {compact && (
+          <div className="flex items-center gap-1.5 px-1.5 pt-1.5">
+            <ShopButton />
+            <SyncBadge compact={false} />
+          </div>
+        )}
         <div className="flex gap-1 p-1.5">
           {tabs.map((t) => (
             <button
