@@ -17,6 +17,8 @@ import { Crosshair } from './ui/Crosshair';
 import { SyncConflictDialog } from './ui/SyncConflictDialog';
 import { SampleAdOverlay } from './ui/SampleAdOverlay';
 import { ShopModal } from './ui/ShopModal';
+import { CityStatsModal } from './ui/CityStatsModal';
+import { IncidentBanner } from './ui/IncidentBanner';
 import { TopBar } from './ui/TopBar';
 import { CameraPad, ConfirmBar, WalkControls } from './ui/TouchControls';
 import { useIsTouch } from './ui/useMediaQuery';
@@ -72,7 +74,9 @@ function App() {
       {touch && mode === 'roam' && <WalkControls />}
       <SyncConflictDialog />
       <SampleAdOverlay />
+      <IncidentBanner />
       <ShopModal />
+      <CityStatsModal />
       <CurtainLoader />
     </div>
   );

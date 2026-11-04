@@ -143,7 +143,12 @@ export type PieceType =
   | 'busdepot'
   | 'pier'
   | 'portcrane'
-  | 'containers';
+  | 'containers'
+  // city services
+  | 'police'
+  | 'firestation'
+  | 'hospital'
+  | 'school';
 
 /** Size of one layout unit (a block's width/depth/position step), in world units. */
 export const UNIT = 3;
@@ -157,7 +162,7 @@ export function gableHeightForSpan(span: number): number {
   return Math.min(4, Math.max(1.6, span * 0.3));
 }
 
-export type Category = 'roads' | 'bridges' | 'buildings' | 'nature' | 'walls' | 'street' | 'transit' | 'airport' | 'port';
+export type Category = 'roads' | 'bridges' | 'buildings' | 'nature' | 'walls' | 'street' | 'transit' | 'airport' | 'port' | 'services';
 
 // --- Roads -------------------------------------------------------------------------
 
@@ -884,6 +889,10 @@ export const PIECES: Record<PieceType, PieceDef> = {
     roof: 'membrane',
     style: { windows: 'ribbon', roofExtras: ['antenna'], tint: '#d7d9dc' },
   }),
+  police: { ...bld('Police station', [2, 1], 2, 'flat', { facade: 'stone', roof: 'membrane', style: { windows: 'punched', roofExtras: ['antenna'], sign: { text: 'POLICE', color: '#4da3ff' } } }), category: 'services' },
+  firestation: { ...bld('Fire station', [2, 1], 2, 'flat', { facade: 'ceramic', roof: 'membrane', style: { windows: 'punched', roofExtras: ['plant'], sign: { text: 'FIRE', color: '#ff5a3c' } } }, 'garage', false), category: 'services' },
+  hospital: { ...bld('Hospital', [2, 2], 5, 'flat', { facade: 'plaster', roof: 'membrane', style: { windows: 'ribbon', roofExtras: ['helipad', 'plant'], sign: { text: 'HOSPITAL', color: '#ff4d6d' } } }), category: 'services' },
+  school: { ...bld('School', [2, 2], 2, 'flat', { facade: 'plaster', roof: 'membrane', style: { windows: 'tall', roofExtras: ['solar'], sign: { text: 'SCHOOL', color: '#ffd23f' } } }), category: 'services' },
 };
 
 export const CATEGORIES: { id: Category; label: string }[] = [
@@ -893,6 +902,7 @@ export const CATEGORIES: { id: Category; label: string }[] = [
   { id: 'nature', label: 'Nature' },
   { id: 'walls', label: 'Walls' },
   { id: 'street', label: 'Street' },
+  { id: 'services', label: 'Services' },
   { id: 'transit', label: 'Transit' },
   { id: 'airport', label: 'Airport' },
   { id: 'port', label: 'Port' },

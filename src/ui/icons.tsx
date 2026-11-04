@@ -34,6 +34,9 @@ import {
   LuCar,
   LuCarTaxiFront,
   LuChartColumn,
+  LuGraduationCap,
+  LuHospital,
+  LuShield,
   LuCheck,
   LuChevronDown,
   LuChevronLeft,
@@ -251,6 +254,12 @@ const ICONS: Record<string, IconType> = {
   pier: LuAnchor,
   portcrane: LuConstruction,
   containers: LuContainer,
+  // city services
+  police: LuShield,
+  firestation: LuFlame,
+  hospital: LuHospital,
+  school: LuGraduationCap,
+  stats: LuChartColumn,
   // tools
   select: LuPencil,
   paint: LuPalette,

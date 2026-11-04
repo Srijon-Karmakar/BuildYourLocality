@@ -41,6 +41,9 @@ const SPECS: Record<Car['kind'], Spec> = {
   car: { accel: 15, max: 31, reverse: 8, halfWidth: 0.95, halfLength: 2.05, wheelbase: 2.7, grip: 9, brake: 27 },
   taxi: { accel: 15, max: 29, reverse: 8, halfWidth: 0.95, halfLength: 2.05, wheelbase: 2.7, grip: 9, brake: 26 },
   bus: { accel: 7.5, max: 19, reverse: 5, halfWidth: 1.3, halfLength: 4.4, wheelbase: 5.6, grip: 6.5, brake: 17 },
+  police: { accel: 17, max: 35, reverse: 8, halfWidth: 0.95, halfLength: 2.2, wheelbase: 2.8, grip: 9.5, brake: 28 },
+  ambulance: { accel: 12, max: 29, reverse: 7, halfWidth: 1.05, halfLength: 2.6, wheelbase: 3.3, grip: 8, brake: 22 },
+  fire: { accel: 8, max: 21, reverse: 5, halfWidth: 1.25, halfLength: 3.5, wheelbase: 4.6, grip: 6.5, brake: 17 },
 };
 
 /** The fastest a moving car can be and still be taken (m/s): you cannot leap into traffic at full speed. */

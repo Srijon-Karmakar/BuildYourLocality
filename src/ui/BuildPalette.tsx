@@ -54,6 +54,7 @@ const ITEMS: Record<Tab, Item[]> = {
   nature: [],
   walls: WALL_STYLES.map((s) => ({ id: 'wall' as const, label: s.label, icon: s.icon, wallStyle: s.id })),
   street: [],
+  services: [],
   transit: [],
   airport: [],
   port: [],

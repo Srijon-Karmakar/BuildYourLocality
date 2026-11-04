@@ -7,6 +7,7 @@ import { MenuPanel } from './MenuPanel';
 import { ModeBar, ModeToggle } from './ModeBar';
 import { MoneyChip } from './MoneyChip';
 import { ShopButton } from './ShopButton';
+import { StatsButton } from './StatsButton';
 import { OnlineChip } from './OnlineChip';
 import { SiteLinks } from './SiteLinks';
 import { SyncBadge } from './SyncBadge';
@@ -59,6 +60,7 @@ export function TopBar() {
           <OnlineChip />
           <MoneyChip />
           {/* On a phone the shop, save status and clock live inside the menu sheet. */}
+          {!compact && <StatsButton />}
           {!compact && <ShopButton />}
           {!compact && <SyncBadge compact={compact} />}
           {!compact && <SkyChip compact={compact} />}

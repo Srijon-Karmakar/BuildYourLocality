@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { combat } from '../sim/combat';
 import { vehicle } from '../sim/vehicle';
+import type { Car } from '../sim/simulation';
 import { useGameStore } from '../state/useGameStore';
 import { Icon } from './icons';
 import { useIsTouch } from './useMediaQuery';
@@ -8,10 +9,10 @@ import { useIsTouch } from './useMediaQuery';
 export interface VehicleSnap {
   active: boolean;
   /** Kind of the car that could be taken from here, if any. */
-  near: 'car' | 'taxi' | 'bus' | null;
+  near: Car['kind'] | null;
   kmh: number;
   view: 'chase' | 'hood';
-  kind: 'car' | 'taxi' | 'bus';
+  kind: Car['kind'];
 }
 
 const read = (): VehicleSnap => ({
@@ -36,7 +37,7 @@ export function useVehicleSnap(): VehicleSnap {
 }
 
 const card = 'rounded-full bg-black/45 pointer-coarse:bg-black/70 text-white backdrop-blur-[6px]';
-const NAME = { car: 'car', taxi: 'taxi', bus: 'bus' } as const;
+const NAME = { car: 'car', taxi: 'taxi', bus: 'bus', police: 'police car', ambulance: 'ambulance', fire: 'fire engine' } as const;
 
 /** The prompt to take a car when one is close, and the speedometer while driving. */
 export function VehicleHud() {

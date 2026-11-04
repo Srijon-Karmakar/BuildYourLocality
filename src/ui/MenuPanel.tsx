@@ -1,4 +1,5 @@
 import { ShopButton } from './ShopButton';
+import { StatsButton } from './StatsButton';
 import { SiteLinks } from './SiteLinks';
 import { SyncBadge } from './SyncBadge';
 import { useIsCompact } from './useMediaQuery';
@@ -44,6 +45,7 @@ export function MenuPanel() {
       >
         {compact && (
           <div className="flex items-center gap-1.5 px-1.5 pt-1.5">
+            <StatsButton />
             <ShopButton />
             <SyncBadge compact={false} />
           </div>

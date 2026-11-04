@@ -29,6 +29,19 @@ export interface Destination {
   facing: number;
   /** Seconds to spend there: [min, max]. */
   dwell: [number, number];
+  /** For doors: what kind of building it belongs to (homes, workplaces and shops are told apart by it). */
+  building?: PieceType;
+}
+
+export type ServiceKind = 'police' | 'fire' | 'hospital' | 'school';
+
+/** A city service building. Police, fire and hospital send vehicles out from the road beside them. */
+export interface ServiceBuilding {
+  kind: ServiceKind;
+  pieceId: string;
+  roadCell: string | null;
+  x: number;
+  z: number;
 }
 
 export interface BusStop {
@@ -142,12 +155,25 @@ export interface SimWorld {
   /** Street lamps (world position), which light up the night and make you easier to spot. */
   lamps: { x: number; z: number }[];
   destinations: Destination[];
+  /** Each building's door, by piece id. */
+  doorByPiece: Map<string, Destination>;
+  services: ServiceBuilding[];
+  /** Doors of buildings people live in / work in / eat at. */
+  homes: Destination[];
+  workplaces: Destination[];
+  lunchSpots: Destination[];
   busStops: BusStop[];
   busByRoad: Map<string, BusStop>;
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number } | null;
   /** Counts used to size the population. */
   stats: { buildings: number; greens: number; roads: number };
 }
+
+/** Buildings people sleep in; every other door is somewhere to work. */
+export const HOME_TYPES = new Set<PieceType>(['house', 'villa', 'apartment']);
+const LUNCH_TYPES = new Set<PieceType>(['cafe', 'shop', 'mall', 'hotel']);
+
+const SERVICE_OF: Partial<Record<PieceType, ServiceKind>> = { police: 'police', firestation: 'fire', hospital: 'hospital', school: 'school' };
 
 /** Props that physically fill their cell. Lamps, lights and benches' neighbours stay walkable. */
 const SOLID_PROPS = new Set<PieceType>([...TREE_TYPES, 'hedge', 'fountain', 'kiosk', 'busstop', 'billboard', 'bench', 'taxistand']);
@@ -185,6 +211,11 @@ export const emptyWorld = (): SimWorld => ({
   foliage: new Set(),
   lamps: [],
   destinations: [],
+  doorByPiece: new Map(),
+  services: [],
+  homes: [],
+  workplaces: [],
+  lunchSpots: [],
   busStops: [],
   busByRoad: new Map(),
   bounds: null,
@@ -222,6 +253,7 @@ export function buildWorld(pieces: Piece[]): SimWorld {
   const depotCells: string[] = [];
   const lotPieces: Piece[] = [];
   const railArms = new Map<string, number>();
+  const serviceCells: { kind: ServiceKind; piece: Piece; cells: string[] }[] = [];
   const doorCandidates: { piece: Piece; x: number; z: number; outX: number; outZ: number }[] = [];
 
   for (const piece of pieces) {
@@ -310,6 +342,8 @@ export function buildWorld(pieces: Piece[]): SimWorld {
       }
       world.stats.buildings++;
       addDoor(piece, w, d, doorCandidates);
+      const serviceKind = SERVICE_OF[piece.type];
+      if (serviceKind) serviceCells.push({ kind: serviceKind, piece, cells });
       continue;
     }
     if (SOLID_PROPS.has(piece.type)) for (const c of cells) world.blocked.add(c);
@@ -454,6 +488,21 @@ export function buildWorld(pieces: Piece[]): SimWorld {
       const k = cellKey(gx + dir.dx, gz + dir.dz);
       if (world.roads.has(k) && !depotCells.includes(k) && !world.depotRoads.includes(k)) world.depotRoads.push(k);
     }
+  }
+
+  // Service buildings open onto a road cell beside them (where their vehicles set out from).
+  for (const { kind, piece, cells } of serviceCells) {
+    const own = new Set(cells);
+    let roadCell: string | null = null;
+    for (const key of cells) {
+      const [gx, gz] = key.split(',').map(Number);
+      for (const dir of DIRS) {
+        const k = cellKey(gx + dir.dx, gz + dir.dz);
+        if (!roadCell && !own.has(k) && world.roads.has(k)) roadCell = k;
+      }
+    }
+    const [w, d] = pieceFootprint(piece);
+    world.services.push({ kind, pieceId: piece.id, roadCell, x: (piece.gx + w / 2) * CELL, z: (piece.gz + d / 2) * CELL });
   }
 
   // Berths: open water beside a pier, plus all the water a ship can reach from there.
@@ -653,7 +702,17 @@ export function buildWorld(pieces: Piece[]): SimWorld {
       point: { x: c.x, z: c.z },
       facing: Math.atan2(c.x - c.outX, c.z - c.outZ),
       dwell: [8, 25],
+      building: c.piece.type,
     });
+  }
+  for (const dest of world.destinations) {
+    if (dest.kind !== 'door') continue;
+    world.doorByPiece.set(dest.pieceId, dest);
+    const type = dest.building;
+    if (!type) continue;
+    if (HOME_TYPES.has(type)) world.homes.push(dest);
+    else world.workplaces.push(dest);
+    if (LUNCH_TYPES.has(type)) world.lunchSpots.push(dest);
   }
 
   return world;

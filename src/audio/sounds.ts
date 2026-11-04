@@ -11,7 +11,7 @@ export type Sfx =
   | 'click' | 'place' | 'place_soft' | 'delete' | 'select' | 'undo' | 'error' | 'token' | 'menu' | 'money'
   | 'car_door' | 'car_start' | 'car_horn' | 'car_crash' | 'car_skid' | 'car_hit'
   | 'hammer' | 'saw' | 'drill' | 'thunder' | 'roar' | 'rex_roar' | 'raptor' | 'fire' | 'chat'
-  | 'bomb_launch' | 'explosion' | 'collapse' | 'tree_fall';
+  | 'bomb_launch' | 'explosion' | 'collapse' | 'tree_fall' | 'siren';
 
 interface NoiseLayer {
   kind: 'n';
@@ -153,6 +153,7 @@ const RECIPES: Record<Sfx, Recipe> = {
     reverb: 0.5,
     layers: [t({ from: 220, to: 55, dur: 1.3, gain: 0.3, wave: 'sawtooth' }), n({ color: 'brown', dur: 1.4, gain: 0.35, filter: { type: 'lowpass', f: 400, to: 90 } }), t({ from: 164, to: 41, dur: 1.4, gain: 0.25 })],
   },
+  siren: { reverb: 0.35, cooldown: 1.7, layers: [t({ from: 640, to: 960, dur: 0.8, gain: 0.07, wave: 'sawtooth' }), t({ from: 960, to: 640, at: 0.8, dur: 0.8, gain: 0.07, wave: 'sawtooth' })] },
   alert: { reverb: 0.1, layers: [t({ from: 740, to: 1040, dur: 0.15, gain: 0.11, wave: 'square' }), t({ from: 1040, to: 740, at: 0.16, dur: 0.15, gain: 0.11, wave: 'square' })] },
 
   // --- Moving about ---

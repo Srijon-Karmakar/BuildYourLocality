@@ -7,6 +7,8 @@ import { TrainSystem } from './trains';
 import { findPath } from './pathfinding';
 import { SignalController, lightFor, type Axis } from './signals';
 import { atmo } from '../scenes/atmosphere';
+import { cityState } from './cityState';
+import { playSfx } from './sfx';
 import {
   DIRS,
   buildWorld,
@@ -31,12 +33,14 @@ const BRAKE_PLAN = 4;
 const BRAKE_MAX = 12;
 /** Seconds without moving before a car is assumed to be gridlocked and removed. */
 const STUCK_LIMIT = 60;
+/** Seconds a wrecked car stays on the road when nobody comes for it. */
+const WRECK_LIFE = 90;
 
 // --- Vehicles ------------------------------------------------------------------
 
 export interface Car {
   id: number;
-  kind: 'car' | 'bus' | 'taxi';
+  kind: 'car' | 'bus' | 'taxi' | 'police' | 'ambulance' | 'fire';
   x: number;
   z: number;
   heading: number;
@@ -68,11 +72,40 @@ export interface Car {
   driven?: boolean;
   /** Left behind by the player: seconds until it is cleared away (it no longer follows the roads). */
   abandoned?: number;
+  /** A hurried, impatient driver: runs red lights now and then and honks in a jam. */
+  reckless: boolean;
+  /** Decided at each junction: this driver means to go through even on red. */
+  runLight: boolean;
+  /** 0..1: how far over to the kerb the car has pulled to let an emergency vehicle by. */
+  pull: number;
+  /** Crashed: seconds left before the wreck is towed away. */
+  wreck: number;
+  honk: number;
+  /** Cells still to drive after `next` (emergency vehicles follow a planned route). */
+  route: [number, number][];
+  mission?: Mission;
   /** Height and tilt, when it is driven over uneven ground. */
   y?: number;
   pitch?: number;
   roll?: number;
 }
+
+/** An emergency vehicle's errand: drive to the scene, work there, drive home and park. */
+export interface Mission {
+  incident: number;
+  role: 'police' | 'fire' | 'ambulance';
+  phase: 'going' | 'onscene' | 'returning';
+  /** Road cell of the station it came from. */
+  home: [number, number];
+  /** Seconds it works at the scene. */
+  hold: number;
+}
+
+/** A smooth 0..1 bump centred on `at` hours, `width` hours wide. */
+const bump = (hour: number, at: number, width: number) => {
+  const d = Math.min(Math.abs(hour - at), 24 - Math.abs(hour - at));
+  return Math.exp(-(d * d) / (2 * width * width));
+};
 
 const CAR_COLOURS = [0xd7263d, 0x1b6ca8, 0xf2f2f2, 0x222831, 0xf4b942, 0x2e933c, 0x8d99ae, 0xe36414, 0x6a4c93];
 
@@ -98,6 +131,8 @@ export type PedState =
 
 /** What a person is up to beyond everyday life: most are civilians; thieves and thugs make trouble for the player. */
 export type PedRole = 'civilian' | 'thief' | 'thug';
+/** Everyone has a character: joggers run, elders amble, kids are small and go to school. */
+export type PedTrait = 'normal' | 'jogger' | 'elder' | 'kid';
 
 export interface Ped {
   id: number;
@@ -159,6 +194,15 @@ export interface Ped {
   hatColour: number;
   carrying: boolean;
   tool: boolean;
+  /** Where they live and where they spend the day. */
+  home: Destination | null;
+  work: Destination | null;
+  trait: PedTrait;
+  /** 0..100 how content they are; follows the city's happiness plus a personal lean. */
+  joy: number;
+  joyBias: number;
+  /** Incident they are standing around to watch. */
+  watching: number | null;
   /** Looks. */
   hair: number;
   hairStyle: number;
@@ -203,6 +247,14 @@ export class Simulation {
   pedHook: ((ped: Ped, dt: number) => boolean) | null = null;
   /** Set by the construction system: runs after the combat hook and drives builders. */
   workHook: ((ped: Ped, dt: number) => boolean) | null = null;
+
+  /** Bumped every time the city is rebuilt, so the stats know when to look again. */
+  worldVersion = 0;
+  /** Emergency vehicles with their sirens on: other drivers pull over for them. */
+  sirens: Car[] = [];
+  /** Set by the incident system. */
+  crashHook: ((a: Car, b: Car) => void) | null = null;
+  missionHook: ((car: Car, event: 'arrived' | 'done' | 'lost') => void) | null = null;
 
   private dirty = true;
   private nextId = 1;
@@ -257,6 +309,7 @@ export class Simulation {
     const factor = DENSITY[this.density] * this.ambient;
     this.manage(dt, factor);
     this.updateSignals(dt);
+    this.sirens = this.cars.filter((c) => c.mission && c.mission.phase !== 'onscene');
     for (const car of this.cars) {
       if (car.driven) continue;
       if (car.abandoned !== undefined) {
@@ -267,6 +320,7 @@ export class Simulation {
       }
       this.updateCar(car, dt);
     }
+    this.detectCrashes();
     this.cars = this.cars.filter((c) => !this.releaseIfGone(c));
     this.trains.update(dt, factor);
     this.trams.update(dt, factor);
@@ -282,6 +336,7 @@ export class Simulation {
 
   private rebuild() {
     this.dirty = false;
+    this.worldVersion++;
     this.world = buildWorld(Object.values(useCityStore.getState().pieces));
     this.trains.rebuild();
     this.trams.rebuild();
@@ -297,7 +352,7 @@ export class Simulation {
       if (car.driven || car.abandoned !== undefined) continue;
       const ok = this.world.roads.has(cellKey(...car.from)) && this.world.roads.has(cellKey(...car.to));
       if (!ok) car.stuck = 999;
-      else car.next = this.pickNext(car.from, car.to);
+      else car.next = this.pickNext(car.from, car.to, car);
     }
     for (const ped of this.peds) {
       const [gx, gz] = [cellOf(ped.x), cellOf(ped.z)];
@@ -319,7 +374,8 @@ export class Simulation {
 
   private releaseIfGone(car: Car): boolean {
     if (car.driven || car.stuck < STUCK_LIMIT) return false;
-    if (car.holding) this.junctionOwner.delete(car.holding);
+    if (car.holding && this.junctionOwner.get(car.holding) === car.id) this.junctionOwner.delete(car.holding);
+    if (car.mission && car.mission.phase !== 'returning') this.missionHook?.(car, 'lost');
     return true;
   }
 
@@ -327,18 +383,21 @@ export class Simulation {
 
   private manage(dt: number, factor: number) {
     const { stats, roads } = this.world;
-    const carTarget = Math.round(Math.min(MAX_CARS, roads.size * 0.3) * factor);
-    const pedTarget = Math.round(Math.min(MAX_PEOPLE, stats.buildings * 2.5 + stats.greens * 3 + this.world.destinations.length) * factor);
+    // The population follows the housing: a half-empty city has quiet streets; rush hour fills the roads.
+    const fill = cityState.hasHousing ? 0.4 + 0.9 * cityState.occupancy : 1;
+    const rush = 1 + 0.45 * (bump(atmo.hour, 8.2, 1.1) + bump(atmo.hour, 17.8, 1.3));
+    const carTarget = Math.round(Math.min(MAX_CARS, roads.size * 0.3 * factor * fill * rush));
+    const pedTarget = Math.round(Math.min(MAX_PEOPLE, (stats.buildings * 2.5 + stats.greens * 3 + this.world.destinations.length) * factor * fill));
 
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
       this.spawnTimer = 0.35;
-      if (this.cars.length < carTarget) this.spawnCar();
+      if (this.cars.filter((c) => !c.mission && !c.wreck).length < carTarget) this.spawnCar();
       if (this.peds.length < pedTarget) this.spawnPed();
     }
     // Shrink the crowd after the player lowers density or deletes things.
-    if (this.cars.length > carTarget + 1) {
-      const extra = this.cars.find((c) => !c.holding && !c.driven && c.abandoned === undefined);
+    if (this.cars.length > carTarget + 8) {
+      const extra = this.cars.find((c) => !c.holding && !c.driven && c.abandoned === undefined && !c.mission && !c.wreck);
       if (extra) extra.stuck = 999;
     }
     if (this.peds.length > pedTarget + 2) {
@@ -370,6 +429,7 @@ export class Simulation {
     if (this.cars.some((c) => (c.x - x) ** 2 + (c.z - z) ** 2 < 100)) return false;
 
     const bus = wantBus;
+    const reckless = !bus && !wantTaxi && Math.random() < 0.12;
     const car: Car = {
       id: this.nextId++,
       kind: bus ? 'bus' : wantTaxi ? 'taxi' : 'car',
@@ -385,13 +445,19 @@ export class Simulation {
       lanePrev: 0,
       lane: 0,
       laneNext: 0,
-      vMax: bus ? range(0.7, 0.85) : range(0.85, 1.1),
+      vMax: bus ? range(0.7, 0.85) : reckless ? range(1.05, 1.22) : range(0.85, 1.1),
       length: bus ? 9 : 4,
       color: bus ? pick([0xf2b134, 0x1b6ca8, 0xd7263d]) : wantTaxi ? 0xf6c31c : (from?.color ?? pick(CAR_COLOURS)),
       holding: null,
       dwell: 0,
       stoppedAt: null,
       stuck: 0,
+      reckless,
+      runLight: false,
+      pull: 0,
+      wreck: 0,
+      honk: 0,
+      route: [],
     };
     car.next = this.pickNext(car.from, car.to);
     car.lane = Math.floor(Math.random() * this.perDir(car.from));
@@ -458,6 +524,12 @@ export class Simulation {
       z = cellCentre(Math.floor(range(bounds.minZ, bounds.maxZ + 1)));
     }
     if (!at && !isWalkable(this.world, cellOf(x), cellOf(z))) return;
+    const roll = Math.random();
+    const trait: PedTrait = roll < 0.06 ? 'jogger' : roll < 0.14 ? 'elder' : roll < 0.21 ? 'kid' : 'normal';
+    const home = this.world.homes.length > 0 ? pick(this.world.homes) : null;
+    const school = this.world.services.find((sv) => sv.kind === 'school');
+    const work = trait === 'kid' ? (school ? this.world.doorByPiece.get(school.pieceId) ?? null : null) : this.world.workplaces.length > 0 ? pick(this.world.workplaces) : null;
+    const joyBias = range(-18, 18);
     this.peds.push({
       id: this.nextId++,
       x,
@@ -469,7 +541,7 @@ export class Simulation {
       goal: null,
       timer: 0,
       vis: 1,
-      walkSpeed: range(1.7, 2.6),
+      walkSpeed: range(1.7, 2.6) * (trait === 'jogger' ? 1.9 : trait === 'elder' ? 0.62 : trait === 'kid' ? 1.1 : 1),
       phase: range(0, 6),
       jitterX: range(-1.3, 1.3),
       jitterZ: range(-1.3, 1.3),
@@ -503,12 +575,18 @@ export class Simulation {
       hatColour: 0xffd21f,
       carrying: false,
       tool: false,
+      home,
+      work,
+      trait,
+      joy: Math.max(0, Math.min(100, cityState.happiness + joyBias)),
+      joyBias,
+      watching: null,
       hair: pick(HAIRS),
       hairStyle: Math.random() < 0.12 ? 0 : 1 + Math.floor(Math.random() * 3),
       bag: Math.random() < 0.28,
       bagColour: pick(BAGS),
       coat: Math.random() < 0.22,
-      height: range(0.92, 1.08),
+      height: trait === 'kid' ? range(0.7, 0.78) : range(0.92, 1.08),
       shirt: pick(SHIRTS),
       pants: pick(PANTS),
       skin: pick(SKINS),
@@ -523,10 +601,20 @@ export class Simulation {
   }
 
   /** Picks the cell after `cur`, favouring straight on and avoiding turning back unless at a dead end. */
-  private pickNext(prev: [number, number], cur: [number, number]): [number, number] | null {
+  private pickNext(prev: [number, number], cur: [number, number], car?: Car): [number, number] | null {
     const mask = this.world.roads.get(cellKey(cur[0], cur[1])) ?? 0;
     const incoming = this.dirIndex(prev, cur);
     if (incoming < 0) return null;
+    // An emergency vehicle follows its planned route and nothing else.
+    if (car?.mission) {
+      // At the end of its route there is nowhere further to go: it stops here (or is removed if it is on the way home).
+      if (car.route.length === 0) return null;
+      const want = car.route[0];
+      const d = this.dirIndex(cur, want);
+      if (d >= 0 && Math.abs(want[0] - cur[0]) + Math.abs(want[1] - cur[1]) === 1 && mask & DIRS[d].bit && this.allowed(cur, want)) return want;
+      car.route = []; // the roads changed under it
+      return null;
+    }
     const back = (incoming + 2) % 4;
     const options = DIRS.map((d, i) => ({ d, i })).filter(
       ({ d, i }) => mask & d.bit && i !== back && this.allowed(cur, [cur[0] + d.dx, cur[1] + d.dz]),
@@ -752,8 +840,10 @@ export class Simulation {
   /** Would this car be refused entry to the junction right now? (No reservation is made.) */
   private junctionBlocked(car: Car, key: string, axis: Axis): boolean {
     if (this.trains.closed.has(key)) return true;
+    if (car.runLight) return false; // means to barge through
     const owner = this.junctionOwner.get(key);
     if (owner !== undefined && owner !== car.id && this.cars.some((c) => c.id === owner)) return true;
+    if (car.mission && car.mission.phase !== 'onscene') return false; // sirens go through
     return !this.signalGreen(key, axis);
   }
 
@@ -762,8 +852,16 @@ export class Simulation {
     // With the barriers down only a car already past the stop line may carry on, and only while no train is on the crossing.
     if (this.trains.closed.has(key) && (car.t <= this.stopLine(key) + 0.02 || this.trains.occupied(key))) return false;
     const owner = this.junctionOwner.get(key);
-    if (owner !== undefined && owner !== car.id && this.cars.some((c) => c.id === owner)) return false;
-    if (!this.signalGreen(key, axis)) return false;
+    const siren = !!car.mission && car.mission.phase !== 'onscene';
+    // A driver running the red goes in whether or not the junction is clear: that is how crashes happen.
+    if (car.runLight && !siren && !this.signalGreen(key, axis)) {
+      if (owner === undefined || !this.cars.some((c) => c.id === owner)) this.junctionOwner.set(key, car.id);
+      return true;
+    }
+    // A siren may go past a junction held by a wreck.
+    const blocker = owner !== undefined && owner !== car.id ? this.cars.find((c) => c.id === owner) : undefined;
+    if (blocker && !(siren && blocker.wreck > 0)) return false;
+    if (!siren && !this.signalGreen(key, axis)) return false;
     this.junctionOwner.set(key, car.id);
     return true;
   }
@@ -774,13 +872,40 @@ export class Simulation {
       car.stuck = 999;
       return;
     }
+    // A wreck sits where it crashed until the tow truck (or the clock) clears it.
+    if (car.wreck > 0) {
+      car.wreck -= dt;
+      // Pushed to the kerb after a few seconds, so the junction works again (the lane behind stays blocked).
+      if (car.holding && car.wreck < WRECK_LIFE - 8) {
+        if (this.junctionOwner.get(car.holding) === car.id) this.junctionOwner.delete(car.holding);
+        car.holding = null;
+      }
+      car.speed = Math.max(0, car.speed - BRAKE_MAX * dt);
+      car.t = Math.min(0.98, car.t + (car.speed * dt) / CELL);
+      car.stuck = car.wreck <= 0 ? 999 : 0;
+      this.placeCar(car);
+      return;
+    }
     const dir = DIRS[segDir];
     const toKey = cellKey(car.to[0], car.to[1]);
+    const mission = car.mission;
     let target = car.vMax * Math.min(this.info(car.from)?.layout.speedLimit ?? 7, this.info(car.to)?.layout.speedLimit ?? 7);
 
     // Slow for turns and dead ends.
     const nextDir = car.next ? this.dirIndex(car.to, car.next) : segDir;
     if (nextDir !== segDir && car.t > 0.4) target = Math.min(target, 3.6);
+
+    // An emergency vehicle at the end of its route glides to a halt at the scene.
+    if (mission && mission.phase === 'going' && !car.next) {
+      const room = (0.9 - car.t) * CELL;
+      target = room <= 0.15 ? 0 : Math.min(target, Math.sqrt(2 * BRAKE_PLAN * room) + 0.4);
+      if (room < 2 && car.speed < 0.7) {
+        mission.phase = 'onscene';
+        car.dwell = mission.hold;
+        car.speed = 0;
+        this.missionHook?.(car, 'arrived');
+      }
+    }
 
     // Take turns at junctions; wait at the stop line (just before the cell) otherwise.
     const axis: Axis = dir.dx !== 0 ? 1 : 0;
@@ -822,6 +947,23 @@ export class Simulation {
       target = 0;
       car.dwell -= dt;
     }
+    if (mission && mission.phase === 'onscene' && car.dwell <= 0) this.startReturn(car);
+
+    // Everyone else eases over to the kerb and slows for a siren coming up behind them.
+    if (!mission) {
+      let yielding = false;
+      for (const s of this.sirens) {
+        const ox = car.x - s.x;
+        const oz = car.z - s.z;
+        const along = ox * Math.sin(s.heading) + oz * Math.cos(s.heading);
+        if (along < 1 || along > 32) continue;
+        if (Math.abs(ox * Math.cos(s.heading) - oz * Math.sin(s.heading)) > 4.5 || Math.cos(s.heading - car.heading) < 0.5) continue;
+        yielding = true;
+        break;
+      }
+      car.pull += ((yielding ? 1 : 0) - car.pull) * Math.min(1, dt * 2.2);
+      if (car.pull > 0.25) target = Math.min(target, 0.6 + 2 * (1 - car.pull));
+    }
 
     // Keep a safe gap behind the vehicle ahead, and stop for people in the way.
     const rx = -dir.dz;
@@ -830,6 +972,8 @@ export class Simulation {
       if (other === car) continue;
       // Only queue behind traffic going the same way: oncoming cars pass in the other lane.
       if (Math.cos(other.heading - car.heading) < 0.35) continue;
+      // A siren drives past cars that have pulled over for it.
+      if (mission && other.pull > 0.55) continue;
       const ox = other.x - car.x;
       const oz = other.z - car.z;
       const along = ox * dir.dx + oz * dir.dz;
@@ -855,6 +999,16 @@ export class Simulation {
     const accel = target > car.speed ? 3.6 : BRAKE_MAX;
     car.speed += Math.max(-accel * dt, Math.min(accel * dt, target - car.speed));
     car.stuck = car.speed < 0.05 && car.dwell <= 0 ? car.stuck + dt : 0;
+    // Stuck in a jam: impatient drivers lean on the horn and swing into another lane if there is one.
+    if (!mission && car.stuck > 4) {
+      car.honk -= dt;
+      if (car.honk <= 0 && ((car.reckless && car.stuck > 4) || car.stuck > 18)) {
+        car.honk = range(3, 7);
+        if (this.player.active && this.playerWithin(car.x, car.z, 70)) playSfx('car_horn', 0.5, { x: car.x, z: car.z });
+        const lanes = this.perDir(car.to);
+        if (car.stuck > 8 && !car.holding && lanes > 1) car.laneNext = (car.laneNext + 1) % lanes;
+      }
+    }
     car.t += (car.speed * dt) / CELL;
 
     // Arrived at the next cell centre: line up the following segment.
@@ -867,7 +1021,9 @@ export class Simulation {
         return;
       }
       car.to = car.next;
-      car.next = this.pickNext(car.from, car.to);
+      if (car.route.length > 0 && car.route[0][0] === car.to[0] && car.route[0][1] === car.to[1]) car.route.shift();
+      car.next = this.pickNext(car.from, car.to, car);
+      car.runLight = car.reckless && Math.random() < 0.45;
       car.lanePrev = car.lane;
       car.lane = car.laneNext;
       car.laneNext = this.pickLane(car.lane, car.to);
@@ -913,11 +1069,186 @@ export class Simulation {
     car.x = pose.x;
     car.z = pose.z;
     car.heading = pose.heading;
+    // Pulled over to the kerb for a siren (the right-hand side of the direction of travel).
+    if (car.pull > 0.01) {
+      car.x -= Math.cos(pose.heading) * 1.8 * car.pull;
+      car.z += Math.sin(pose.heading) * 1.8 * car.pull;
+    }
+    // A wreck sits skewed.
+    if (car.wreck > 0) car.heading += ((car.id % 7) - 3) * 0.09;
+  }
+
+  // --- Emergencies and crashes ---------------------------------------------------------
+
+  /** Shortest drivable route between two road cells (cells inclusive), respecting one-way streets. */
+  routeRoad(from: [number, number], to: [number, number]): [number, number][] | null {
+    const startKey = cellKey(from[0], from[1]);
+    const goalKey = cellKey(to[0], to[1]);
+    if (startKey === goalKey) return [from];
+    const parent = new Map<string, string>([[startKey, '']]);
+    const queue: [number, number][] = [from];
+    for (let i = 0; i < queue.length && i < 4000; i++) {
+      const [gx, gz] = queue[i];
+      const mask = this.world.roads.get(cellKey(gx, gz)) ?? 0;
+      for (const d of DIRS) {
+        if (!(mask & d.bit)) continue;
+        const next: [number, number] = [gx + d.dx, gz + d.dz];
+        const key = cellKey(next[0], next[1]);
+        if (parent.has(key) || !this.allowed([gx, gz], next)) continue;
+        parent.set(key, cellKey(gx, gz));
+        if (key === goalKey) {
+          const path: [number, number][] = [];
+          for (let k: string = goalKey; k; k = parent.get(k) ?? '') {
+            const [px, pz] = k.split(',').map(Number);
+            path.push([px, pz]);
+          }
+          return path.reverse();
+        }
+        queue.push(next);
+      }
+    }
+    return null;
+  }
+
+  /** The road cell nearest a point, preferring plain road over junctions (a vehicle can stop on it). */
+  nearestRoadCell(x: number, z: number): [number, number] | null {
+    let best: [number, number] | null = null;
+    let bestCost = Infinity;
+    for (const key of this.world.roads.keys()) {
+      const [gx, gz] = key.split(',').map(Number);
+      const cost = Math.hypot(cellCentre(gx) - x, cellCentre(gz) - z) + (this.world.junctions.has(key) ? 9 : 0);
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = [gx, gz];
+      }
+    }
+    return best;
+  }
+
+  /** Sends a police car, ambulance or fire engine along a route; null when its way out is blocked. */
+  spawnEmergency(role: Mission['role'], path: [number, number][], incident: number, hold: number): Car | null {
+    const start = path[0];
+    const x = cellCentre(start[0]);
+    const z = cellCentre(start[1]);
+    if (this.cars.some((c) => (c.x - x) ** 2 + (c.z - z) ** 2 < 49)) return null;
+    let to: [number, number];
+    let route: [number, number][] = [];
+    let phase: Mission['phase'] = 'going';
+    if (path.length >= 2) {
+      to = path[1];
+      route = path.slice(2);
+    } else {
+      const mask = this.world.roads.get(cellKey(start[0], start[1])) ?? 0;
+      const d = DIRS.find((dir) => mask & dir.bit && this.allowed(start, [start[0] + dir.dx, start[1] + dir.dz]));
+      if (!d) return null;
+      to = [start[0] + d.dx, start[1] + d.dz];
+      phase = 'onscene';
+    }
+    const dir = DIRS[this.dirIndex(start, to)];
+    const look = { police: { color: 0x1b2f6b, length: 4.4 }, ambulance: { color: 0xf4f4f4, length: 5.2 }, fire: { color: 0xc8281f, length: 7 } }[role];
+    const car: Car = {
+      id: this.nextId++,
+      kind: role,
+      x,
+      z,
+      heading: Math.atan2(dir.dx, dir.dz),
+      speed: 0,
+      from: start,
+      to,
+      next: route[0] ?? null,
+      prev: null,
+      t: 0,
+      lanePrev: 0,
+      lane: 0,
+      laneNext: 0,
+      vMax: 1.5,
+      length: look.length,
+      color: look.color,
+      holding: null,
+      dwell: phase === 'onscene' ? hold : 0,
+      stoppedAt: null,
+      stuck: 0,
+      reckless: false,
+      runLight: false,
+      pull: 0,
+      wreck: 0,
+      honk: 0,
+      route,
+      mission: { incident, role, phase, home: start, hold },
+    };
+    this.placeCar(car);
+    this.cars.push(car);
+    if (phase === 'onscene') this.missionHook?.(car, 'arrived');
+    return car;
+  }
+
+  /** The job is done: drive back to the station and park. */
+  private startReturn(car: Car) {
+    const mission = car.mission!;
+    mission.phase = 'returning';
+    this.missionHook?.(car, 'done');
+    const path = this.routeRoad(car.to, mission.home);
+    if (!path) {
+      car.stuck = 999;
+      return;
+    }
+    car.route = path.slice(1);
+    car.next = car.route[0] ?? null;
+  }
+
+  /** Two cars in a junction going across each other and fast enough: they collide. */
+  private detectCrashes() {
+    const held = this.cars.filter((c) => c.holding && !c.wreck && !c.driven && c.speed > 0.5);
+    for (let i = 0; i < held.length; i++) {
+      for (let j = i + 1; j < held.length; j++) {
+        const a = held[i];
+        const b = held[j];
+        if (a.holding !== b.holding || a.wreck > 0 || b.wreck > 0) continue;
+        if ((a.x - b.x) ** 2 + (a.z - b.z) ** 2 > 9) continue;
+        if (a.speed + b.speed < 2 || Math.abs(Math.cos(a.heading - b.heading)) > 0.6) continue;
+        this.crash(a, b);
+      }
+    }
+  }
+
+  private crash(a: Car, b: Car) {
+    for (const c of [a, b]) {
+      c.wreck = WRECK_LIFE;
+      c.pull = 1; // slewed over to the kerb
+      c.speed *= 0.25;
+      c.runLight = false;
+      if (c.holding && this.junctionOwner.get(c.holding) !== c.id) c.holding = null;
+    }
+    playSfx('car_crash', 1, { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 });
+    this.crashHook?.(a, b);
+  }
+
+  /** Tows a wreck away (the emergency crews have finished with it). */
+  clearWreck(car: Car) {
+    if (car.wreck > 0) car.wreck = 0.01;
   }
 
   // --- Pedestrians ---------------------------------------------------------------
 
-  private pickGoal(): Destination | 'wander' {
+  /** The day's rhythm: to work in the morning, lunch, home in the evening, indoors and asleep at night. */
+  private scheduleGoal(ped: Ped): Destination | null {
+    const h = atmo.hour;
+    const roll = Math.random();
+    const live = (d: Destination | null) => (d ? this.world.doorByPiece.get(d.pieceId) ?? null : null);
+    const home = live(ped.home);
+    const work = live(ped.work);
+    if (ped.trait === 'kid' && work && h >= 7.5 && h < 15 && roll < 0.85) return work;
+    if (h >= 6.5 && h < 9.5 && work && roll < 0.8) return work;
+    if (h >= 12 && h < 13.8 && roll < 0.55 && this.world.lunchSpots.length > 0) return pick(this.world.lunchSpots);
+    if (h >= 16.5 && h < 19.5 && home && roll < 0.8) return home;
+    if ((h >= 21.5 || h < 5.5) && home && roll < 0.9) return home;
+    if (h >= 19.5 && h < 21.5 && roll < 0.3 && this.world.lunchSpots.length > 0) return pick(this.world.lunchSpots);
+    return null;
+  }
+
+  private pickGoal(ped: Ped): Destination | 'wander' {
+    const scheduled = this.scheduleGoal(ped);
+    if (scheduled) return scheduled;
     const byKind = (kind: DestinationKind) => this.world.destinations.filter((d) => d.kind === kind);
     // People plan around the sky: at night and in bad weather they head indoors or for transport
     // instead of idling in parks.
@@ -935,6 +1266,9 @@ export class Simulation {
       ['green', 0.13 * (1 - 0.75 * night) * (1 - 0.7 * wet)],
       ['wander', 0.1 * (1 - 0.7 * night) * (1 - 0.8 * wet)],
     ];
+    // Joggers head for the parks and open streets, elders for a seat and the bus.
+    if (ped.trait === 'jogger') for (const o of options) o[1] *= o[0] === 'green' || o[0] === 'wander' ? 3.5 : o[0] === 'door' ? 0.4 : 0.15;
+    else if (ped.trait === 'elder') for (const o of options) o[1] *= o[0] === 'bench' ? 2.8 : o[0] === 'green' || o[0] === 'busstop' ? 1.6 : 1;
     const available = options.filter(([k]) => k === 'wander' || byKind(k).length > 0);
     let roll = Math.random() * available.reduce((s, [, w]) => s + w, 0);
     for (const [kind, w] of available) {
@@ -956,13 +1290,14 @@ export class Simulation {
   }
 
   private startGoal(ped: Ped) {
-    const goal = this.pickGoal();
+    const goal = this.pickGoal(ped);
     ped.goal = null;
     if (goal === 'wander') {
       const b = this.world.bounds;
       if (!b) return;
-      const gx = cellOf(ped.x) + Math.floor(range(-6, 7));
-      const gz = cellOf(ped.z) + Math.floor(range(-6, 7));
+      const reach = ped.trait === 'jogger' ? 13 : 6;
+      const gx = cellOf(ped.x) + Math.floor(range(-reach, reach + 1));
+      const gz = cellOf(ped.z) + Math.floor(range(-reach, reach + 1));
       if (this.routeTo(ped, [gx, gz], null) && ped.path.length > 0) ped.state = 'walking';
       else ped.timer = 1;
       return;
@@ -984,6 +1319,11 @@ export class Simulation {
     }
     ped.speed = 0;
     ped.timer = range(goal.dwell[0], goal.dwell[1]);
+    if (goal.kind === 'door') {
+      const h = atmo.hour;
+      if (ped.work && goal.pieceId === ped.work.pieceId && h >= 7 && h < 18) ped.timer *= 3.5; // a day's work
+      else if (ped.home && goal.pieceId === ped.home.pieceId && (h >= 20 || h < 6)) ped.timer = range(45, 110); // asleep
+    }
     if (goal.kind === 'door' || goal.kind === 'metro') {
       ped.state = 'entering';
       ped.heading = goal.facing;
@@ -1075,6 +1415,18 @@ export class Simulation {
       if (ped.emoteTimer <= 0) ped.emote = null;
     }
     if (ped.state !== 'walking') ped.signalWait = null;
+    // Mood follows the city's happiness (and a personal lean); weather drags it down. Content people beam, unhappy ones grumble.
+    const wetness = Math.max(atmo.rain, atmo.storm);
+    ped.joy += (Math.max(0, Math.min(100, cityState.happiness + ped.joyBias - 14 * wetness)) - ped.joy) * Math.min(1, dt * 0.3);
+    if (ped.emoteTimer <= 0 && (ped.state === 'walking' || ped.state === 'idle' || ped.state === 'busy' || ped.state === 'sitting') && Math.random() < dt * 0.012) {
+      if (ped.joy > 74) {
+        ped.emote = 'party';
+        ped.emoteTimer = 1.8;
+      } else if (ped.joy < 32 && cityState.hasHousing) {
+        ped.emote = 'angry';
+        ped.emoteTimer = 1.8;
+      }
+    }
     if (this.pedHook && this.pedHook(ped, dt)) return;
     if (this.workHook && this.workHook(ped, dt)) return;
     if (HOSTILE_STATES.has(ped.state)) {
@@ -1137,7 +1489,7 @@ export class Simulation {
         ped.heading += wrapAngle(Math.atan2(other.x - ped.x, other.z - ped.z) - ped.heading) * Math.min(1, dt * 5);
         // Take turns speaking: whoever has the lower id talks first, then they alternate.
         if (Math.floor(ped.timer / 1.6 + (ped.id % 2)) % 2 === 0 && ped.emoteTimer <= 0 && Math.random() < dt * 0.6) {
-          ped.emote = 'chat';
+          ped.emote = ped.joy < 32 && other.joy < 32 ? 'angry' : 'chat'; // sour neighbours argue
           ped.emoteTimer = 1.4;
         }
         break;

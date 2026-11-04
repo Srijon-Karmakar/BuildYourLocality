@@ -5,6 +5,9 @@ import { viewState } from '../engine/viewState';
 import { useGameStore } from '../state/useGameStore';
 import { MAX_CARS, sim } from './simulation';
 import { combat } from './combat';
+import { cityModel } from './cityStats';
+import { incidents } from './incidents';
+import { IncidentLayer } from './IncidentLayer';
 import { construction } from './construction';
 import { MonsterLayer } from './MonsterLayer';
 import { PeopleLayer } from './PeopleLayer';
@@ -43,6 +46,7 @@ const trainGlass = new THREE.MeshStandardMaterial({ color: '#16222c', roughness:
 registerNightEmissive(trainGlass, 1.6);
 headlightBeamMaterial.map = getGlowTexture();
 const LAMPS_PER_CAR = 4;
+const MAX_SIRENS = 16;
 const MAX_UNITS = MAX_TRANSIT_UNITS;
 /** Room for moving cars plus those sitting in car parks. */
 const MAX_DRAWN_CARS = MAX_CARS + 160;
@@ -127,6 +131,8 @@ export function SimLayer() {
   const carWheels = useRef<THREE.InstancedMesh>(null);
   const carLamps = useRef<THREE.InstancedMesh>(null);
   const carBeams = useRef<THREE.InstancedMesh>(null);
+  const carSirens = useRef<THREE.InstancedMesh>(null);
+  const sirenGeometry = useMemo(() => new THREE.BoxGeometry(0.5, 0.16, 0.3), []);
   const parked = useRef<{ x: number; z: number; heading: number; color: number }[]>([]);
   const parkedAt = useRef(-1);
 
@@ -164,6 +170,8 @@ export function SimLayer() {
     sim.setAmbient(atmo.crowd);
     sim.update(Math.min(delta, 0.05));
     combat.update(delta);
+    incidents.update(Math.min(delta, 0.1));
+    cityModel.tick(Math.min(delta, 0.1));
     construction.update(Math.min(delta, 0.1));
 
     // --- Vehicles ---------------------------------------------------------------
@@ -176,19 +184,36 @@ export function SimLayer() {
     const total = moving.length + parked.current.length;
     const night = atmo.lamps > 0.02;
     if (carBody.current && carCabin.current && carWheels.current) {
+      let sirens = 0;
       for (let i = 0; i < total; i++) {
         const isMoving = i < moving.length;
         const car: { x: number; z: number; heading: number; color: number; y?: number; pitch?: number; roll?: number } = isMoving ? moving[i] : parked.current[i - moving.length];
-        const bus = isMoving && moving[i].kind === 'bus';
-        if (car.pitch || car.roll) _turn.setFromEuler(_euler.set(car.pitch ?? 0, car.heading, car.roll ?? 0, 'YXZ'));
+        const kind = isMoving ? moving[i].kind : 'car';
+        const wrecked = isMoving && moving[i].wreck > 0;
+        // Buses, ambulances and fire engines are tall boxes; everything else is a car.
+        const tall = kind === 'bus' || kind === 'ambulance' || kind === 'fire';
+        const bus = kind === 'bus';
+        const roll = wrecked ? 0.12 : car.roll;
+        if (car.pitch || roll) _turn.setFromEuler(_euler.set(car.pitch ?? 0, car.heading, roll ?? 0, 'YXZ'));
         else _turn.setFromAxisAngle(UP, car.heading);
         _base.compose(_pos.set(car.x, car.y ?? 0, car.z), _turn, _scale.set(1, 1, 1));
-        const sx = bus ? 1.2 : 1;
-        const sy = bus ? 1.9 : 1;
-        const sz = bus ? 2.25 : 1;
+        const sx = bus ? 1.2 : kind === 'fire' ? 1.15 : kind === 'ambulance' ? 1.05 : 1;
+        const sy = bus ? 1.9 : kind === 'fire' ? 1.5 : kind === 'ambulance' ? 1.35 : 1;
+        const sz = bus ? 2.25 : kind === 'fire' ? 1.75 : kind === 'ambulance' ? 1.3 : 1;
         setPart(carBody.current, i, _base, 0, 0.3 + 0.35 * sy, 0, 0, sx, sy, sz);
-        setPart(carCabin.current, i, _base, 0, bus ? 0.3 + 0.7 * sy + 0.3 : 1.2, bus ? 0 : -0.15, 0, bus ? 1.22 : 1, bus ? 0.8 : 1, bus ? 2.2 : 1);
-        carBody.current.setColorAt(i, _colour.setHex(car.color));
+        setPart(carCabin.current, i, _base, 0, tall ? 0.3 + 0.7 * sy + 0.3 : 1.2, tall ? 0 : -0.15, 0, tall ? sx * 1.02 : 1, tall ? 0.8 : 1, tall ? sz * 0.98 : 1);
+        carBody.current.setColorAt(i, _colour.setHex(wrecked ? 0x2a2a2d : car.color));
+        // Light bar on the roof of emergency vehicles, flashing red and blue.
+        if (isMoving && moving[i].mission && carSirens.current && sirens < MAX_SIRENS) {
+          const top = tall ? 0.3 + 0.7 * sy + 0.3 + 0.28 : 1.6;
+          const flip = Math.floor(sim.time * 6 + moving[i].id) % 2 === 0;
+          setPart(carSirens.current, sirens, _base, -0.38 * sx, top, 0.2 * sz);
+          carSirens.current.setColorAt(sirens, _colour.set(flip ? '#ff2a2a' : '#2a62ff'));
+          sirens++;
+          setPart(carSirens.current, sirens, _base, 0.38 * sx, top, 0.2 * sz);
+          carSirens.current.setColorAt(sirens, _colour.set(flip ? '#2a62ff' : '#ff2a2a'));
+          sirens++;
+        }
         let w = 0;
         for (const sideX of [-0.95 * sx, 0.95 * sx]) {
           for (const sideZ of [-1.3 * sz, 1.3 * sz]) setPart(carWheels.current, i * 4 + w++, _base, sideX, 0.38, sideZ);
@@ -209,6 +234,11 @@ export function SimLayer() {
       carWheels.current.count = total * 4;
       for (const mesh of [carBody.current, carCabin.current, carWheels.current]) mesh.instanceMatrix.needsUpdate = true;
       if (carBody.current.instanceColor) carBody.current.instanceColor.needsUpdate = true;
+      if (carSirens.current) {
+        carSirens.current.count = sirens;
+        carSirens.current.instanceMatrix.needsUpdate = true;
+        if (carSirens.current.instanceColor) carSirens.current.instanceColor.needsUpdate = true;
+      }
       if (carLamps.current && carBeams.current) {
         carLamps.current.visible = carBeams.current.visible = night;
         if (night) {
@@ -301,6 +331,9 @@ export function SimLayer() {
       <instancedMesh ref={carLamps} args={[lampGeometry, undefined, MAX_DRAWN_CARS * LAMPS_PER_CAR]} frustumCulled={false} visible={false}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
+      <instancedMesh ref={carSirens} args={[sirenGeometry, undefined, MAX_SIRENS]} frustumCulled={false}>
+        <meshBasicMaterial toneMapped={false} />
+      </instancedMesh>
       <instancedMesh ref={carBeams} args={[beamGeometry, headlightBeamMaterial, MAX_DRAWN_CARS]} frustumCulled={false} visible={false} renderOrder={3} />
 
       <instancedMesh ref={trainBody} args={[undefined, undefined, MAX_UNITS]} frustumCulled={false} castShadow receiveShadow>
@@ -332,6 +365,7 @@ export function SimLayer() {
       </instancedMesh>
       <instancedMesh ref={planeGear} args={[planeGeometry.gear, undefined, MAX_PLANES]} frustumCulled={false} material={rubber} />
 
+      <IncidentLayer />
       <PeopleLayer />
       <MonsterLayer />
     </>
