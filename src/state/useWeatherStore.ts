@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { isPractice } from '../tutorial/runtime';
 
 import { useWalletStore } from './useWalletStore';
 
@@ -55,6 +56,7 @@ function load(): Saved {
 }
 
 export function saveSky(saved: Saved) {
+  if (isPractice) return;
   try {
     localStorage.setItem(KEY, JSON.stringify(saved));
   } catch {

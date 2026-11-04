@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { useWorldsStore } from './useWorldsStore';
 import type { Density } from '../sim/simulation';
+import { isPractice } from '../tutorial/runtime';
 
 /** Build = orbiting city-builder camera; roam = first-person walk / fly through the city. */
 export type AppMode = 'build' | 'roam';
@@ -67,7 +68,7 @@ function savedGraphics(): Partial<GraphicsSettings> {
     const raw = JSON.parse(localStorage.getItem(GRAPHICS_KEY) ?? 'null') as Partial<GraphicsSettings> | null;
     const saved = raw && typeof raw === 'object' ? raw : {};
     // The classic (realistic) look is the default: a sunset look saved by an earlier version is reset once.
-    if (localStorage.getItem(LOOK_RESET_KEY) !== '1') {
+    if (!isPractice && localStorage.getItem(LOOK_RESET_KEY) !== '1') {
       localStorage.setItem(LOOK_RESET_KEY, '1');
       delete saved.visualPreset;
       delete saved.stylised;
@@ -127,6 +128,7 @@ export const useGameStore = create<GameState>((set) => {
 });
 
 useGameStore.subscribe((state, prev) => {
+  if (isPractice) return;
   if (state.graphics === prev.graphics) return;
   try {
     localStorage.setItem(GRAPHICS_KEY, JSON.stringify(state.graphics));

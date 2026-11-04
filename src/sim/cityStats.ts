@@ -1,4 +1,5 @@
 import { TREE_TYPES, type PieceType, PIECES } from '../city/catalog';
+import { isPractice } from '../tutorial/runtime';
 import { useCityStatsStore } from '../state/useCityStatsStore';
 import { DEFAULT_POLICIES, MAYORS, TERM_LENGTH, usePoliticsStore, type Level } from '../state/usePoliticsStore';
 import { combat } from './combat';
@@ -411,7 +412,7 @@ class CityModel {
       this.history.push({ happiness, population: this.residents, net, congestion: this.congestion, treasury: this.treasury });
       if (this.history.length > 72) this.history.shift();
     }
-    if (this.clock >= this.saveAt) {
+    if (!isPractice && this.clock >= this.saveAt) {
       this.saveAt = this.clock + 20;
       try {
         localStorage.setItem(STORE_KEY, JSON.stringify({ residents: this.residents, treasury: this.treasury }));

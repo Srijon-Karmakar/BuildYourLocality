@@ -310,6 +310,7 @@ export function CombatController() {
   const camera = useThree((s) => s.camera);
   const scene = useThree((s) => s.scene);
   const attackHeld = useRef(false);
+  const attackQueued = useRef(false);
   const crouchKey = useRef(false);
   const dir = useMemo(() => new THREE.Vector3(), []);
 
@@ -342,7 +343,10 @@ export function CombatController() {
     };
     const onDown = (e: MouseEvent) => {
       // Only count clicks once the pointer is locked: the click that locks it is not an attack.
-      if (e.button === 0 && document.pointerLockElement) attackHeld.current = true;
+      if (e.button === 0 && document.pointerLockElement) {
+        attackHeld.current = true;
+        attackQueued.current = true; // A quick click must survive until the next rendered frame.
+      }
     };
     const onUp = (e: MouseEvent) => {
       if (e.button === 0) attackHeld.current = false;
@@ -350,23 +354,34 @@ export function CombatController() {
     const onWheel = (e: WheelEvent) => {
       if (document.pointerLockElement && useGameStore.getState().mode === 'roam') combat.cycleWeapon(e.deltaY > 0 ? 1 : -1);
     };
+    const reset = () => {
+      attackHeld.current = false;
+      attackQueued.current = false;
+      crouchKey.current = false;
+    };
+    const onUnlock = () => { if (!document.pointerLockElement) reset(); };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('mousedown', onDown);
     window.addEventListener('mouseup', onUp);
     window.addEventListener('wheel', onWheel, { passive: true });
+    window.addEventListener('blur', reset);
+    document.addEventListener('pointerlockchange', onUnlock);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('mouseup', onUp);
       window.removeEventListener('wheel', onWheel);
+      window.removeEventListener('blur', reset);
+      document.removeEventListener('pointerlockchange', onUnlock);
     };
   }, []);
 
   useFrame(() => {
     if (useGameStore.getState().mode !== 'roam') {
       attackHeld.current = false;
+      attackQueued.current = false;
       return;
     }
     // Menus and end screens need the mouse back.
@@ -374,7 +389,8 @@ export function CombatController() {
     camera.getWorldDirection(dir);
     combat.aim = { x: camera.position.x, y: camera.position.y, z: camera.position.z, dx: dir.x, dy: dir.y, dz: dir.z };
     combat.setCrouch(crouchKey.current || virtualInput.crouch);
-    if ((attackHeld.current || virtualInput.attack) && (combat.active || combat.arms)) combat.attack();
+    if ((attackHeld.current || attackQueued.current || virtualInput.attack) && (combat.active || combat.arms)) combat.attack();
+    attackQueued.current = false;
   });
 
   return (

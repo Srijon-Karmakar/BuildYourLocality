@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { isPractice } from '../tutorial/runtime';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -16,4 +17,5 @@ if (!isSupabaseConfigured) {
 export const supabase = createClient(
   supabaseUrl || 'http://localhost:54321',
   supabaseAnonKey || 'missing-anon-key',
+  isPractice ? { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } } : undefined,
 );

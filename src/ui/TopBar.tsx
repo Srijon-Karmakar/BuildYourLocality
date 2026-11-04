@@ -14,6 +14,7 @@ import { SiteLinks } from './SiteLinks';
 import { SyncBadge } from './SyncBadge';
 import { WEATHER_ICONS, useClock } from './skyShared';
 import { useIsCompact } from './useMediaQuery';
+import { HelpButton } from '../tutorial/TutorialHost';
 
 /** Clock and weather at a glance; tapping it opens the Sky tab. */
 function SkyChip({ compact }: { compact: boolean }) {
@@ -58,6 +59,7 @@ export function TopBar() {
         {compact ? <ModeToggle /> : <ModeBar />}
         <SiteLinks className="pointer-events-auto absolute left-1/2 top-[calc(var(--safe-top)+0.375rem)] hidden -translate-x-1/2 items-center rounded-full bg-black/40 px-1 backdrop-blur-[6px] xl:flex xl:h-10" />
         <div className="flex items-start gap-1 sm:gap-2">
+          <HelpButton />
           <OnlineChip />
           <MoneyChip />
           {/* On a phone the shop, save status and clock live inside the menu sheet. */}

@@ -1,7 +1,7 @@
 import { Physics, type RapierRigidBody } from '@react-three/rapier';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Html, PointerLockControls } from '@react-three/drei';
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { Html } from '@react-three/drei';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import * as THREE from 'three';
 import { BuilderCamera } from '../engine/builder/BuilderCamera';
 import { CityBuilder } from '../engine/builder/CityBuilder';
@@ -42,6 +42,8 @@ import { useBuilderStore } from '../state/useBuilderStore';
 import { useWeatherStore } from '../state/useWeatherStore';
 import { useTerrainStore } from '../terrain/terrain';
 import { RenderBudget } from '../engine/renderBudget';
+import { DesktopLook } from '../engine/player/DesktopLook';
+import { useTutorialStore } from '../state/useTutorialStore';
 
 /** Dev only: handles for the headless profiling scripts (stripped from production builds). */
 /** Tells the loading screen the first frame has been drawn. */
@@ -197,7 +199,8 @@ function FpsMeter() {
   );
 }
 
-export function Scene() {
+export function Scene({ children }: { children?: ReactNode }) {
+  const tutorial = useTutorialStore((s) => s.open);
   const shadows = useGameStore((s) => s.graphics.shadows);
   const quality = useGameStore((s) => s.graphics.textureQuality);
   const mode = useGameStore((s) => s.mode);
@@ -212,6 +215,9 @@ export function Scene() {
 
   return (
     <Canvas
+      frameloop={tutorial ? 'never' : 'always'}
+      id="game-viewport"
+      onCreated={({ gl }) => { gl.domElement.tabIndex = -1; }}
       shadows={shadows}
       camera={{ fov: BUILD_FOV, near: 0.1, far: 1500, position: [40, 50, 40] }}
       dpr={dprRange[1]}
@@ -248,8 +254,9 @@ export function Scene() {
       <CityBuilder />
       {/* Roam only, and scoped to the canvas — drei defaults to `document`, which would also
           trigger pointer-lock from clicks on the UI overlay. */}
-      {mode === 'roam' && !touch && <PointerLockControls selector="canvas" />}
+      {mode === 'roam' && !touch && <DesktopLook />}
       {touch && <TouchLook />}
+      {children}
     </Canvas>
   );
 }

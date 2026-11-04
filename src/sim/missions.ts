@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { isPractice } from '../tutorial/runtime';
 import { PIECES, TREE_TYPES, type PieceType } from '../city/catalog';
 import { useCityStore } from '../state/useCityStore';
 import { cityModel } from './cityStats';
@@ -57,6 +58,7 @@ function load(): MissionState {
 
 export const useMissionStore = create<MissionState>(() => load());
 useMissionStore.subscribe((s) => {
+  if (isPractice) return;
   try {
     localStorage.setItem(KEY, JSON.stringify({ missions: s.missions.slice(-12), completed: s.completed, earned: s.earned }));
   } catch {

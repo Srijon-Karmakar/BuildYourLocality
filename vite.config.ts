@@ -17,17 +17,16 @@ const adTestMode = (): Plugin => ({
 export default defineConfig({
   plugins: [react(), tailwindcss(), adTestMode()],
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       // index.html is the game; home.html, about, contact and privacy are static content pages.
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
+        practice: resolve(import.meta.dirname, 'practice.html'),
         home: resolve(import.meta.dirname, 'home.html'),
         about: resolve(import.meta.dirname, 'about.html'),
         contact: resolve(import.meta.dirname, 'contact.html'),
         privacy: resolve(import.meta.dirname, 'privacy.html'),
       },
-    },
-    rolldownOptions: {
       output: {
         // Big libraries get their own files: the page shell loads first, and a game update does not
         // make players download three.js and the physics engine again.

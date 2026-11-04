@@ -94,9 +94,8 @@ export function PlayerController({ start = [0, 2, 0], bodyRef }: PlayerControlle
 
     wishDir.set(0, 0, 0);
     const k = keys.current;
-    if (frozen) {
-      k.forward = k.back = k.left = k.right = false;
-    }
+    // Suppress motion below while frozen; the keyboard tracker owns held-key state.
+    // Clearing it here loses keys held while the survival intro is being dismissed.
     if (k.forward) wishDir.add(forward);
     if (k.back) wishDir.sub(forward);
     if (k.right) wishDir.add(right);

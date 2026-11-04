@@ -26,6 +26,7 @@ import { CallButton } from './ui/CallButton';
 import { TopBar } from './ui/TopBar';
 import { CameraPad, ConfirmBar, WalkControls } from './ui/TouchControls';
 import { useIsTouch } from './ui/useMediaQuery';
+import { TutorialHost } from './tutorial/TutorialHost';
 
 function App() {
   const mode = useGameStore((s) => s.mode);
@@ -93,6 +94,7 @@ function App() {
       )}
       <PhotoMode />
       <CurtainLoader />
+      <TutorialHost />
     </div>
   );
 }

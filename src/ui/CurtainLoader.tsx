@@ -95,6 +95,7 @@ export function CurtainLoader() {
     audio(); // a tap is the one moment browsers let sound begin
     playSfx('win', 0.5);
     setStarted(true);
+    useBootStore.setState({ started: true });
   };
 
   // Real progress when there is some; otherwise it creeps towards 90 so the bar always moves.

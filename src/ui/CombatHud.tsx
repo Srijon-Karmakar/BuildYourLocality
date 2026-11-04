@@ -9,6 +9,7 @@ import { useVehicleSnap } from './VehicleHud';
 import { useWalletStore } from '../state/useWalletStore';
 import { Icon } from './icons';
 import { useIsCompact, useIsTouch } from './useMediaQuery';
+import { captureGamePointer } from '../engine/player/pointerLock';
 
 interface Snapshot {
   hp: number;
@@ -260,14 +261,17 @@ export function CombatHud() {
   // Begin the run and grab the mouse in the same click, so the view can be turned straight away.
   const begin = () => {
     combat.beginRun();
-    if (!touch) document.querySelector('canvas')?.requestPointerLock?.();
+    if (!touch) captureGamePointer();
   };
   // Enter starts the run too (the button is focused), so it never has to be hunted for.
   const introShown = s.intro && sub === 'survival' && mode === 'roam';
   useEffect(() => {
     if (!introShown) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'Enter' || e.code === 'NumpadEnter') begin();
+      if ((e.code === 'Enter' || e.code === 'NumpadEnter') && !e.repeat) {
+        e.preventDefault(); // Avoid also clicking the focused Begin button with the same Enter.
+        begin();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

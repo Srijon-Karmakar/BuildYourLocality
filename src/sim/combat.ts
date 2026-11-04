@@ -455,6 +455,7 @@ class Combat {
 
   /** The player has read the intro: the first day begins. */
   beginRun() {
+    if (!this.run.active || !this.run.intro) return;
     this.run.intro = false;
     atmo.rateOverride = SURVIVAL_RATE;
     this.toast('Day 1. Robbers, dinosaurs and dragons roam by day. Hide, fight, and find supplies.', 'warn');

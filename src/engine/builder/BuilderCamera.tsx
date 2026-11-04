@@ -124,6 +124,7 @@ export function BuilderCamera() {
       held.current.add(e.code);
     };
     const onKeyUp = (e: KeyboardEvent) => held.current.delete(e.code);
+    const onBlur = () => { held.current.clear(); touches.clear(); drag = null; gesture = null; };
 
     dom.addEventListener('pointerdown', onDown);
     dom.addEventListener('pointermove', onMove);
@@ -133,6 +134,7 @@ export function BuilderCamera() {
     dom.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
     const keys = held.current;
     return () => {
       dom.removeEventListener('pointerdown', onDown);
@@ -143,6 +145,7 @@ export function BuilderCamera() {
       dom.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
       keys.clear();
     };
   }, [mode, dom]);

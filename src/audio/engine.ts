@@ -204,6 +204,14 @@ export function audio(): Graph | null {
   return g;
 }
 
+/** Pause an existing world's looping ambience while the separate practice view is open. */
+export function pauseWorldAudio(): () => void {
+  const context = graph?.ctx;
+  const running = context?.state === 'running';
+  if (running) void context.suspend().catch(() => {});
+  return () => { if (running) void context.resume().catch(() => {}); };
+}
+
 let unlocked = false;
 /** Starts audio on the first tap, click or key press (the only moment browsers allow it). */
 export function unlockOnGesture() {

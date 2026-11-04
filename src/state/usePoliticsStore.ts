@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { isPractice } from '../tutorial/runtime';
 
 /** Budget / tax settings: 0 low, 1 normal, 2 high. */
 export type Level = 0 | 1 | 2;
@@ -62,6 +63,7 @@ export const usePoliticsStore = create<PoliticsState>((set) => ({
 }));
 
 usePoliticsStore.subscribe((s) => {
+  if (isPractice) return;
   try {
     localStorage.setItem(KEY, JSON.stringify({ policies: s.policies, mayor: s.mayor, approval: s.approval, term: s.term, termsWon: s.termsWon, lastElection: s.lastElection }));
   } catch {
