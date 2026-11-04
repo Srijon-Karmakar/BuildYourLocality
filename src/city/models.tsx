@@ -417,7 +417,7 @@ export function PieceModel({
   if (PIECES[type].paintable) {
     return <BuildingModel type={type} facade={facade} roof={roof} style={style} seed={seed} />;
   }
-  const prop = (led: LedSpec | null) => <PropModel type={type} seed={seed} accent={accent} led={led} rot={rot} tree={tree} zone={`${Math.floor((gx ?? 0) / 8)},${Math.floor((gz ?? 0) / 8)}`} />;
+  const prop = (led: LedSpec | null) => <PropModel type={type} seed={seed} accent={accent} led={led} rot={rot} tree={tree} zone={`${Math.floor((gx ?? 0) / 3)},${Math.floor((gz ?? 0) / 3)}`} />;
   return (
     <group scale={scale}>
       {style.led?.link === 'town' ? <LinkedProp led={style.led} render={prop} /> : prop(style.led)}

@@ -81,8 +81,8 @@ export function TutorialHost() {
     <div role="dialog" aria-modal="true" aria-label="Interactive tutorial" className="absolute inset-0 z-[150] bg-slate-950">
       <iframe ref={frame} title="Practice city tutorial" src={url.href} className="h-full w-full border-0"
         sandbox="allow-scripts allow-same-origin allow-pointer-lock" allow="fullscreen" onLoad={() => frame.current?.focus()} />
-      <button onClick={dismiss} aria-label="Skip tutorial" className="absolute z-10 min-h-10 rounded-full bg-slate-950 px-4 text-sm text-white"
-        style={{ right: '0.75rem', top: 'calc(var(--safe-top) + 0.6rem)' }}>Skip tutorial</button>
+      <button onClick={dismiss} aria-label="Skip tutorial" className="absolute z-10 min-h-10 rounded-full border border-white/25 bg-white/12 px-5 text-sm font-medium text-white shadow-lg backdrop-blur-2xl hover:bg-white/20"
+        style={{ right: '0.75rem', top: 'calc(var(--safe-top) + 0.6rem)', fontFamily: "'Poppins', system-ui, sans-serif" }}>Skip tutorial</button>
     </div>
   );
 }
