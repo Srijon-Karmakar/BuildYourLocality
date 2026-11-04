@@ -7,11 +7,12 @@ import { SiteLinks } from './SiteLinks';
 import { audio } from '../audio/engine';
 import { playSfx } from '../audio/sounds';
 
-const BANNER_DESKTOP = 'https://res.cloudinary.com/dneq7tdty/image/upload/v1793679367/banner_wl3ise.png';
-const BANNER_MOBILE = 'https://res.cloudinary.com/dneq7tdty/image/upload/v1793679482/banner-mobile_ln5xey.png';
+const BANNER_DESKTOP = 'https://res.cloudinary.com/dneq7tdty/image/upload/v1793795978/banner_fmcsfl.png';
+const BANNER_MOBILE = 'https://res.cloudinary.com/dneq7tdty/image/upload/v1793795978/banner-mobile_blyxor.png';
 
 const TITLE = 'YAT-C';
 const SUBTITLE = 'You And The City';
+const DESCRIPTION = 'Build your own map and then play in it';
 const VERSION = 'v2.112026';
 const CREDITS = 'Made by Srijon Karmakar · Senevon Studio';
 const LICENCES = [
@@ -131,7 +132,6 @@ export function CurtainLoader() {
         </picture>
         {/* Darkens the top and bottom so the text always reads, whatever the picture. */}
         <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(5,6,12,0.65)_0%,rgba(5,6,12,0.12)_32%,rgba(5,6,12,0.1)_58%,rgba(5,6,12,0.88)_100%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_40%,rgba(0,0,0,0.55)_100%)]" />
 
         <div className="relative flex h-full flex-col items-center justify-between px-6 pb-[calc(var(--safe-bottom)+1.25rem)] pt-[calc(var(--safe-top)+2.5rem)] text-center">
           <div className="flex flex-col items-center gap-2">
@@ -152,6 +152,7 @@ export function CurtainLoader() {
           </div>
 
           <div className="flex w-full max-w-xl flex-col items-center gap-4">
+            <p className="max-w-sm text-center text-[clamp(0.8rem,2vw,1.05rem)] tracking-wide text-white/80 drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)]">{DESCRIPTION}</p>
             {canStart ? (
               // Loading is over: nothing but the button.
               <button

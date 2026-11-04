@@ -340,7 +340,7 @@ export function updateAmbience(i: AmbienceInput) {
   setBed(g, b.traffic, clamp01(i.carsNear) * 0.34 * quiet);
   setBed(g, b.crowd, clamp01(i.pedsNear) * 0.2 * (0.6 + 0.4 * day) * quiet);
   setBed(g, b.water, clamp01(i.water) * 0.32 * outdoors);
-  setBed(g, b.crickets, night * dry * (1 - i.snow) * (0.15 + 0.2 * clamp01(i.greenery)) * (1 - i.fog * 0.4) * outdoors);
+  setBed(g, b.crickets, night * dry * (1 - i.snow) * (0.05 + 0.07 * clamp01(i.greenery)) * (1 - i.fog * 0.4) * outdoors);
   setBed(g, b.snowHush, clamp01(i.snow) * 0.18 * outdoors);
 
   const dt = i.dt;
