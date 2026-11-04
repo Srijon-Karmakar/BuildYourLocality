@@ -8,10 +8,13 @@ export type AppMode = 'build' | 'roam';
 export type RoamSubMode = 'peaceful' | 'normal' | 'survival';
 
 export type QualityPreset = 'low' | 'medium' | 'high';
+export type VisualPreset = 'classic' | 'sunset';
 
 export interface GraphicsSettings {
   /** The preset last picked; `custom` once any single option has been changed by hand. */
   preset: QualityPreset | 'custom';
+  /** Visual art style preset: 'classic' or 'sunset' (stylised low-poly sunset aesthetic). */
+  visualPreset: VisualPreset;
   drawDistance: number; // in chunks (16 world units each); sets fog/clip distance in walk mode
   shadows: boolean;
   /** Redraw the shadow map every Nth frame (2 halves the shadow cost; moving things stay smooth). */
@@ -67,23 +70,53 @@ function savedGraphics(): Partial<GraphicsSettings> {
   }
 }
 
-export const useGameStore = create<GameState>((set) => ({
-  mode: 'build',
-  roamSubMode: 'peaceful',
-  graphics: { ...PRESETS[startPreset], preset: startPreset, adaptive: true, showFps: false, bloom: !isCoarsePointer, headBob: true, stylised: false, ...savedGraphics() },
-  flying: false,
-  // A world that can only be explored (community world with building turned off) never enters build mode.
-  setMode: (mode) => set({ mode: mode === 'build' && useWorldsStore.getState().readOnly ? 'roam' : mode }),
-  setRoamSubMode: (roamSubMode) => set({ roamSubMode }),
-  setGraphics: (patch) =>
-    set((state) => {
-      // Toggling the resolution governor or the FPS meter does not make the preset "custom".
-      const changesLook = Object.keys(patch).some((k) => k !== 'adaptive' && k !== 'showFps' && k !== 'preset' && k !== 'bloom' && k !== 'headBob' && k !== 'stylised');
-      return { graphics: { ...state.graphics, ...(changesLook ? { preset: 'custom' as const } : {}), ...patch } };
-    }),
-  setPreset: (preset) => set((state) => ({ graphics: { ...state.graphics, ...PRESETS[preset], preset } })),
-  toggleFlying: () => set((state) => ({ flying: !state.flying })),
-}));
+export const useGameStore = create<GameState>((set) => {
+  const saved = savedGraphics();
+  const initialVisual: VisualPreset = saved.visualPreset ?? (saved.stylised ? 'sunset' : 'sunset');
+  const initialStylised = saved.stylised ?? (initialVisual === 'sunset');
+  return {
+    mode: 'build',
+    roamSubMode: 'peaceful',
+    graphics: {
+      ...PRESETS[startPreset],
+      preset: startPreset,
+      visualPreset: initialVisual,
+      adaptive: true,
+      showFps: false,
+      bloom: !isCoarsePointer,
+      headBob: true,
+      stylised: initialStylised,
+      ...saved,
+    },
+    flying: false,
+    // A world that can only be explored (community world with building turned off) never enters build mode.
+    setMode: (mode) => set({ mode: mode === 'build' && useWorldsStore.getState().readOnly ? 'roam' : mode }),
+    setRoamSubMode: (roamSubMode) => set({ roamSubMode }),
+    setGraphics: (patch) =>
+      set((state) => {
+        const resolvedPatch = { ...patch };
+        if (resolvedPatch.visualPreset !== undefined && resolvedPatch.stylised === undefined) {
+          resolvedPatch.stylised = resolvedPatch.visualPreset === 'sunset';
+        } else if (resolvedPatch.stylised !== undefined && resolvedPatch.visualPreset === undefined) {
+          resolvedPatch.visualPreset = resolvedPatch.stylised ? 'sunset' : 'classic';
+        }
+        // Toggling the resolution governor, FPS meter or visual look does not make the preset "custom".
+        const changesLook = Object.keys(resolvedPatch).some(
+          (k) =>
+            k !== 'adaptive' &&
+            k !== 'showFps' &&
+            k !== 'preset' &&
+            k !== 'bloom' &&
+            k !== 'headBob' &&
+            k !== 'stylised' &&
+            k !== 'visualPreset',
+        );
+        return { graphics: { ...state.graphics, ...(changesLook ? { preset: 'custom' as const } : {}), ...resolvedPatch } };
+      }),
+    setPreset: (preset) => set((state) => ({ graphics: { ...state.graphics, ...PRESETS[preset], preset } })),
+    toggleFlying: () => set((state) => ({ flying: !state.flying })),
+  };
+});
 
 useGameStore.subscribe((state, prev) => {
   if (state.graphics === prev.graphics) return;

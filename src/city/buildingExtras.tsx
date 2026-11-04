@@ -13,6 +13,7 @@ import {
 } from './catalog';
 import { getRoofMaterial } from './cityTextures';
 import { LOT_HEIGHT } from './geometries';
+import { curvedPanelGeometry, sagOf } from './ledShapes';
 import { getLedColour, getLedGlow, getLedMaterial, getSignMaterial } from './ledTextures';
 import { registerLed } from './ledRegistry';
 import { darkMetalMaterial, glassMaterial, metalMaterial, solidMaterial } from './materials';
@@ -86,24 +87,28 @@ export function LedScreen({ spec, box, floors }: { spec: LedSpec; box: BlockBox;
   const colour = useMemo(() => getLedColour(spec, width, height), [spec, width, height]);
   const wallRef = useRef<THREE.Group>(null);
 
+  // Screens bow out of the wall by the curve setting; wide ones get a slight bow by default.
+  const curve = spec.curve ?? (spec.mode === 'plasma' || width >= 7.5 ? 0.08 : 0);
+  const screenGeo = useMemo(() => curvedPanelGeometry(width, height, curve), [width, height, curve]);
+  const frameGeo = useMemo(() => (curve > 0.01 ? curvedPanelGeometry(width + border * 2, height + border * 2, curve) : null), [width, height, curve, border]);
+
   // Tell the night lighting this screen exists so it can borrow a real light for it.
   useEffect(() => {
     if (!wallRef.current || !look.glow) return;
-    return registerLed({ object: wallRef.current, local: [offset, y, 0.2], width, height, brightness: look.brightness, glowAmount: look.glowAmount, colour });
-  }, [offset, y, width, height, look.brightness, look.glowAmount, look.glow, colour]);
+    return registerLed({ object: wallRef.current, local: [offset, y, 0.2 + sagOf(width, curve)], width, height, brightness: look.brightness, glowAmount: look.glowAmount, colour });
+  }, [offset, y, width, height, curve, look.brightness, look.glowAmount, look.glow, colour]);
 
   const reach = Math.min(10, 3 + height * 0.12) * (0.6 + look.glowAmount * 0.4);
 
   return (
     <group ref={wallRef} position={wall.position} rotation={[0, wall.rotY, 0]}>
-      {border > 0 && (
+      {border > 0 && !frameGeo && (
         <mesh position={[offset, y, 0.07]} material={frame} castShadow>
           <boxGeometry args={[width + border * 2, height + border * 2, 0.14]} />
         </mesh>
       )}
-      <mesh position={[offset, y, 0.16]} material={material}>
-        <boxGeometry args={[width, height, 0.05]} />
-      </mesh>
+      {border > 0 && frameGeo && <mesh position={[offset, y, 0.08]} material={frame} geometry={frameGeo} castShadow />}
+      <mesh position={[offset, y, 0.16]} material={material} geometry={screenGeo} />
       {glow && (
         <>
           <mesh position={[offset, y, 0.1]} material={glow.halo} renderOrder={3}>

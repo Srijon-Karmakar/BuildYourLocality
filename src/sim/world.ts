@@ -180,7 +180,7 @@ const SERVICE_OF: Partial<Record<PieceType, ServiceKind>> = {
 };
 
 /** Props that physically fill their cell. Lamps, lights and benches' neighbours stay walkable. */
-const SOLID_PROPS = new Set<PieceType>([...TREE_TYPES, 'hedge', 'fountain', 'kiosk', 'busstop', 'billboard', 'bench', 'taxistand']);
+const SOLID_PROPS = new Set<PieceType>([...TREE_TYPES, 'hedge', 'fountain', 'kiosk', 'busstop', 'billboard', 'bench', 'taxistand', 'ledwall', 'ledtower']);
 
 export const emptyWorld = (): SimWorld => ({
   roads: new Map(),

@@ -20,6 +20,7 @@ const MUZZLE_Z: Partial<Record<WeaponId, number>> = { shotgun: -0.95, rifle: -1.
 
 /** The weapon held in front of the camera, with a swing / recoil animation. */
 function Viewmodel() {
+  const stylised = useGameStore((s) => s.graphics.stylised);
   const root = useRef<THREE.Group>(null);
   const groups = useRef<Partial<Record<WeaponId, THREE.Group | null>>>({});
   const flash = useRef<THREE.Mesh>(null);
@@ -178,15 +179,20 @@ function Viewmodel() {
         <mesh position={[0, 0.03, -0.45]} rotation={[Math.PI / 2, 0, 0]} material={darkSteel}>
           <cylinderGeometry args={[0.02, 0.02, 1.0, 8]} />
         </mesh>
-        <mesh position={[0, 0.0, -0.1]} material={wood}>
+        <mesh position={[0, 0.0, -0.1]} material={stylised ? darkSteel : wood}>
           <boxGeometry args={[0.07, 0.1, 0.5]} />
         </mesh>
-        <mesh position={[0, -0.03, 0.2]} rotation={[0.12, 0, 0]} material={wood}>
+        <mesh position={[0, -0.03, 0.2]} rotation={[0.12, 0, 0]} material={stylised ? darkSteel : wood}>
           <boxGeometry args={[0.08, 0.14, 0.34]} />
         </mesh>
         <mesh position={[0, 0.1, -0.2]} rotation={[Math.PI / 2, 0, 0]} material={steel}>
           <cylinderGeometry args={[0.025, 0.025, 0.3, 8]} />
         </mesh>
+        {stylised && (
+          <mesh position={[0, -0.16, -0.12]} rotation={[0.2, 0, 0]} material={darkSteel}>
+            <boxGeometry args={[0.045, 0.18, 0.09]} />
+          </mesh>
+        )}
       </group>
       <group ref={setRef('crossbow')}>
         <mesh position={[0, 0.0, -0.1]} material={wood}>

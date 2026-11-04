@@ -33,8 +33,8 @@ const TEXT_MODES: LedMode[] = ['text', 'ticker', 'slides'];
 const ADS_FONT: LedMode[] = ['ads'];
 const SCROLL_MODES: LedMode[] = ['text', 'ticker', 'draw'];
 const FONT_MODES: LedMode[] = ['text', 'ticker', 'slides', 'clock', 'weather', ...ADS_FONT];
-const TWO_COLOUR_MODES: LedMode[] = ['text', 'ticker', 'slides', 'clock', 'weather', 'wave', 'plasma', 'stripes', 'bars', 'checker', 'pulse', 'solid'];
-const BG_MODES: LedMode[] = ['text', 'ticker', 'slides', 'ads', 'clock', 'weather', 'wave', 'plasma', 'matrix', 'stripes', 'bars', 'checker', 'pulse', 'solid', 'draw'];
+const TWO_COLOUR_MODES: LedMode[] = ['text', 'ticker', 'slides', 'clock', 'weather', 'wave', 'plasma', 'stripes', 'bars', 'checker', 'pulse', 'solid', 'aurora', 'skyline', 'fire', 'ripple'];
+const BG_MODES: LedMode[] = ['text', 'ticker', 'slides', 'ads', 'clock', 'weather', 'wave', 'plasma', 'matrix', 'stripes', 'bars', 'checker', 'pulse', 'solid', 'draw', 'aurora', 'skyline', 'fire', 'ripple'];
 
 /** Snaps each colour channel to a multiple of 8, so dragging a picker can't create unbounded textures. */
 function quantize(hex: string): string {

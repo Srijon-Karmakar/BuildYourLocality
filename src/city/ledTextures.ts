@@ -643,6 +643,94 @@ function paintScene(s: Scene) {
       fill(s, g);
       break;
     }
+    case 'aurora': {
+      // Soft ribbons of light drifting across a dark sky.
+      const img = ctx.createImageData(cols, rows);
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const nx = x / cols;
+          const ny = y / rows;
+          const band1 = Math.exp(-Math.pow((ny - (0.35 + 0.16 * Math.sin(nx * 5 + t * 0.7))) * 4.2, 2));
+          const band2 = Math.exp(-Math.pow((ny - (0.58 + 0.14 * Math.sin(nx * 3.2 - t * 0.5 + 1.7))) * 5, 2));
+          const shimmer = 0.75 + 0.25 * Math.sin(nx * 24 + t * 3 + ny * 6);
+          const c = mix(mix(s.bg, s.color, Math.min(1, band1 * shimmer)), s.color2, Math.min(1, band2 * shimmer * 0.9));
+          img.data.set([c[0], c[1], c[2], 255], (y * cols + x) * 4);
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      break;
+    }
+    case 'skyline': {
+      // A city skyline sliding past under a gradient sky, windows twinkling.
+      const sky = ctx.createLinearGradient(0, 0, 0, rows);
+      sky.addColorStop(0, spec.bg);
+      sky.addColorStop(1, spec.color2);
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, cols, rows);
+      const unit = Math.max(3, rows * 0.16);
+      const scroll = t * rows * 0.35;
+      for (let layer = 0; layer < 2; layer++) {
+        const depth = layer === 0 ? 0.5 : 1;
+        const first = Math.floor((scroll * depth) / unit) - 1;
+        for (let i = first; i < first + cols / unit + 4; i++) {
+          const x = i * unit - scroll * depth;
+          const bh = rows * (0.25 + 0.5 * hash(i * 7 + layer * 131)) * (layer === 0 ? 0.75 : 1);
+          ctx.fillStyle = layer === 0 ? rgbCss(mix(s.bg, s.color2, 0.45)) : rgbCss(mix(s.bg, [0, 0, 0], 0.55));
+          ctx.fillRect(x, rows - bh, unit * 0.95, bh);
+          if (layer === 1) {
+            for (let wy = rows - bh + 2; wy < rows - 2; wy += 3) {
+              for (let wx = x + 1; wx < x + unit * 0.95 - 1; wx += 2.5) {
+                if (hash(i * 53 + Math.floor(wy) * 17 + Math.floor(wx) + Math.floor(t * 0.8)) > 0.62) {
+                  ctx.fillStyle = spec.color;
+                  ctx.fillRect(wx, wy, 1.2, 1.4);
+                }
+              }
+            }
+          }
+        }
+      }
+      break;
+    }
+    case 'fire': {
+      // Flames licking up from the bottom edge: hot at the base, cooling as they rise.
+      const img = ctx.createImageData(cols, rows);
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const rise = 1 - y / rows;
+          const flick = 0.5 + 0.5 * Math.sin(x * 0.9 + t * 7 + Math.sin(y * 0.5 - t * 5) * 2) * Math.sin(x * 0.37 - t * 3.1);
+          const v = Math.max(0, Math.min(1, (1 - rise) * 1.15 - 0.15 + flick * 0.55 * (1 - rise * 0.2) - (1 - rise) * 0.0));
+          const heat = Math.max(0, Math.min(1, v * 1.25 - (1 - rise) * 0.3));
+          const c = heat < 0.5 ? mix(s.bg, s.color, heat * 2) : mix(s.color, s.color2, (heat - 0.5) * 2);
+          img.data.set([c[0], c[1], c[2], 255], (y * cols + x) * 4);
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      break;
+    }
+    case 'ripple': {
+      // Rings spreading out from a few drifting points, like rain on water.
+      const img = ctx.createImageData(cols, rows);
+      const k = 26 / Math.max(cols, rows * 2);
+      const sources: [number, number][] = [
+        [cols * (0.25 + 0.1 * Math.sin(t * 0.4)), rows * 0.5],
+        [cols * (0.7 + 0.1 * Math.cos(t * 0.3)), rows * (0.4 + 0.2 * Math.sin(t * 0.5))],
+        [cols * 0.5, rows * (0.6 + 0.2 * Math.cos(t * 0.35))],
+      ];
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          let v = 0;
+          for (const [sx, sy] of sources) {
+            const d = Math.hypot(x - sx, (y - sy) * 2);
+            v += Math.sin(d * k * 1.6 - t * 3) / (1 + d * k * 0.35);
+          }
+          const n = Math.max(0, Math.min(1, 0.5 + v * 0.45));
+          const c = n < 0.5 ? mix(s.bg, s.color, n * 2) : mix(s.color, s.color2, (n - 0.5) * 2);
+          img.data.set([c[0], c[1], c[2], 255], (y * cols + x) * 4);
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      break;
+    }
     case 'draw':
       drawArt(s);
       break;

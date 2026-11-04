@@ -95,6 +95,8 @@ export type PieceType =
   | 'mall'
   | 'tower'
   | 'skyscraper'
+  | 'curved_tower'
+  | 'billboard_tower'
   // nature
   | 'wall'
   | 'span'
@@ -114,6 +116,9 @@ export type PieceType =
   | 'fountain'
   // street furniture
   | 'lamp'
+  | 'modernlamp'
+  | 'barrier'
+  | 'planter'
   | 'bench'
   | 'busstop'
   | 'billboard'
@@ -156,7 +161,9 @@ export type PieceType =
   | 'university'
   | 'cityhall'
   | 'courthouse'
-  | 'jail';
+  | 'jail'
+  | 'ledwall'
+  | 'ledtower';
 
 /** Size of one layout unit (a block's width/depth/position step), in world units. */
 export const UNIT = 3;
@@ -423,6 +430,10 @@ export type LedMode =
   | 'plasma'
   | 'matrix'
   | 'stripes'
+  | 'aurora'
+  | 'skyline'
+  | 'fire'
+  | 'ripple'
   | 'draw';
 
 export const LED_MODES: { id: LedMode; label: string; icon: string }[] = [
@@ -438,6 +449,10 @@ export const LED_MODES: { id: LedMode; label: string; icon: string }[] = [
   { id: 'plasma', label: 'Plasma', icon: 'led-plasma' },
   { id: 'matrix', label: 'Matrix rain', icon: 'led-matrix' },
   { id: 'stripes', label: 'Stripes', icon: 'led-stripes' },
+  { id: 'aurora', label: 'Aurora', icon: 'led-aurora' },
+  { id: 'skyline', label: 'City skyline', icon: 'led-skyline' },
+  { id: 'fire', label: 'Fire', icon: 'led-fire' },
+  { id: 'ripple', label: 'Ripples', icon: 'led-ripple' },
   { id: 'bars', label: 'Equaliser', icon: 'led-bars' },
   { id: 'checker', label: 'Pixels', icon: 'led-checker' },
   { id: 'pulse', label: 'Pulse', icon: 'led-pulse' },
@@ -596,6 +611,8 @@ export interface LedSpec {
   /** Billboards: layers painted over the look, and the structure of the board itself. */
   layers?: LedLayer[];
   board?: Partial<BoardSpec>;
+  /** How much the screen bows out of the wall (or, on an LED tower, how far it wraps round): 0 flat to 1 deeply curved. */
+  curve?: number;
   /** Block index and wall it is mounted on. */
   block: number;
   side: DoorSide;
@@ -825,7 +842,7 @@ export const PIECES: Record<PieceType, PieceDef> = {
   house: bld('House', [1, 1], 2, 'gable', { facade: 'plaster', roof: 'slate' }, 'single', false),
   villa: bld('Modern villa', [2, 1], 2, 'flat', { facade: 'ceramic', roof: 'membrane', style: { windows: 'tall', roofExtras: ['solar'], balconies: 'front', trim: '#2c3036' } }),
   shop: bld('Shop', [1, 1], 1, 'flat', { facade: 'ceramic', roof: 'membrane', style: { windows: 'tall', sign: { text: 'SHOP', color: '#ffb02e' } } }),
-  cafe: bld('Café', [1, 1], 1, 'flat', { facade: 'slats', roof: 'sedum', style: { windows: 'tall', roofExtras: ['garden'], sign: { text: 'CAFÉ', color: '#ffffff' } } }),
+  cafe: bld('CafÃ©', [1, 1], 1, 'flat', { facade: 'slats', roof: 'sedum', style: { windows: 'tall', roofExtras: ['garden'], sign: { text: 'CAFÃ‰', color: '#ffffff' } } }),
   apartment: bld('Apartments', [2, 1], 5, 'flat', { facade: 'stone', roof: 'membrane', style: { windows: 'punched', balconies: 'front', roofExtras: ['plant', 'solar'] } }),
   warehouse: bld('Warehouse', [3, 2], 1, 'flat', { facade: 'metal', roof: 'membrane', style: { windows: 'none', roofExtras: ['plant', 'solar'] } }, 'garage', false),
   office: bld('Office', [2, 2], 8, 'flat', { facade: 'glass', roof: 'membrane', style: { roofExtras: ['plant'] } }),
@@ -840,6 +857,56 @@ export const PIECES: Record<PieceType, PieceDef> = {
     facade: 'mirror',
     roof: 'membrane',
     style: { roofExtras: ['helipad', 'antenna'], led: { mode: 'wave', color: '#ff3df0', block: 0, side: 'front', bottom: 20, height: 4, width: 0, offset: 0 } },
+  }),
+  curved_tower: bld('Curved LED Tower', [2, 2], 14, 'flat', {
+    facade: 'concrete',
+    roof: 'membrane',
+    style: {
+      blocks: [
+        { u: 0, v: 0, w: 12, d: 12, floors: 5, round: 0.95 },
+        { u: 1, v: 1, w: 10, d: 10, floors: 9, base: 5, round: 0.8 },
+      ],
+      led: {
+        mode: 'plasma',
+        color: '#9c40ff',
+        color2: '#3560ff',
+        bg: '#0c021c',
+        block: 0,
+        side: 'front',
+        bottom: 1,
+        height: 4,
+        width: 8,
+        offset: 0,
+        glow: true,
+        glowAmount: 1.6,
+        brightness: 1.8,
+      },
+      roofExtras: ['plant', 'antenna'],
+    },
+  }),
+  billboard_tower: bld('Cyber Skyscraper', [2, 2], 26, 'flat', {
+    facade: 'glass',
+    roof: 'membrane',
+    style: {
+      tint: '#7ea4c8',
+      windows: 'tall',
+      led: {
+        mode: 'wave',
+        color: '#ff2fd0',
+        color2: '#8b3dff',
+        bg: '#140024',
+        block: 0,
+        side: 'front',
+        bottom: 16,
+        height: 6,
+        width: 10,
+        offset: 0,
+        glow: true,
+        glowAmount: 1.6,
+        brightness: 1.7,
+      },
+      roofExtras: ['helipad', 'antenna'],
+    },
   }),
 
   wall: prop('Wall', 'walls'),
@@ -860,6 +927,9 @@ export const PIECES: Record<PieceType, PieceDef> = {
   fountain: prop('Fountain', 'nature', [3.4, 1, 3.4]),
 
   lamp: prop('Streetlight', 'street', [0.4, 5, 0.4]),
+  modernlamp: prop('Modern streetlight', 'street', [0.4, 5.8, 1.4]),
+  barrier: prop('Jersey barrier', 'street', [2.4, 1.0, 0.6]),
+  planter: prop('Tree planter', 'street', [1.8, 2.5, 1.8]),
   bench: prop('Bench', 'street', [2, 0.9, 0.8]),
   busstop: prop('Bus stop', 'street', [3.4, 2.6, 1.4]),
   billboard: prop('LED billboard', 'street', [1.2, 6, 0.8]),
@@ -908,6 +978,8 @@ export const PIECES: Record<PieceType, PieceDef> = {
   university: { ...bld('University', [3, 2], 4, 'flat', { facade: 'stone', roof: 'membrane', style: { windows: 'tall', roofExtras: ['solar', 'antenna'], sign: { text: 'UNIVERSITY', color: '#8ab4ff' } } }), category: 'services' },
   cityhall: { ...bld('City hall', [2, 2], 4, 'flat', { facade: 'stone', roof: 'membrane', style: { windows: 'tall', roofExtras: ['antenna'], sign: { text: 'CITY HALL', color: '#f2e6b1' } } }), category: 'services' },
   courthouse: { ...bld('Courthouse', [2, 1], 3, 'flat', { facade: 'stone', roof: 'membrane', style: { windows: 'tall', sign: { text: 'COURT', color: '#f2e6b1' } } }), category: 'services' },
+  ledwall: { ...prop('Curved LED wall', 'street', [14, 7, 3]), footprint: [3, 1] },
+  ledtower: { ...prop('LED tower', 'buildings', [9, 28, 9]), footprint: [2, 2] },
   jail: { ...bld('Jail', [2, 2], 2, 'flat', { facade: 'concrete', roof: 'membrane', style: { windows: 'none', roofExtras: ['plant'], sign: { text: 'JAIL', color: '#c0c4cc' } } }, 'single', false), category: 'services' },
 };
 
@@ -937,9 +1009,9 @@ export const GRASS_TYPES: PieceType[] = ['grass', 'tallgrass', 'wildflower'];
 export const PLANT_TYPES: PieceType[] = [...TREE_TYPES, ...GRASS_TYPES];
 export const isTreeType = (type: PieceType) => PLANT_TYPES.includes(type);
 /** Streetlights and traffic lights stand over roads, pavements and plots too, at a corner of the cell. */
-export const OVERLAY_TYPES: PieceType[] = [...PLANT_TYPES, 'lamp', 'trafficlight'];
+export const OVERLAY_TYPES: PieceType[] = [...PLANT_TYPES, 'lamp', 'modernlamp', 'trafficlight', 'barrier', 'planter'];
 /** Overlays that stand at a cell corner (the cursor picks which) instead of being scattered. */
-export const CORNER_TYPES: PieceType[] = ['lamp', 'trafficlight'];
+export const CORNER_TYPES: PieceType[] = ['lamp', 'modernlamp', 'trafficlight'];
 export const isCornerType = (type: PieceType) => CORNER_TYPES.includes(type);
 /** How far from the cell centre a corner piece stands, in metres (just inside the cell edge). */
 export const CORNER_REACH = CELL / 2 - 0.45;

@@ -19,6 +19,7 @@ import {
   MIN_FLOORS,
   MIN_LOT,
   PIECES,
+  resolveBoard,
   ROOFS,
   TINTS,
   UNIT,
@@ -31,6 +32,7 @@ import {
   type DoorSpec,
   type LayoutPreset,
 } from '../city/catalog';
+import { DEFAULT_PROP_LED } from '../city/props';
 import { maxDoorOffset } from '../city/models';
 import { Icon } from './icons';
 import { SidePanel } from './SidePanel';
@@ -598,6 +600,7 @@ function SingleInspector() {
                     </button>
                   ))}
                 </div>
+                <Stepper label="Curve" value={led.curve ?? 0} min={0} max={1} step={0.1} onChange={(curve) => setLed({ curve })} format={(v) => (v === 0 ? 'Flat' : `${Math.round(v * 100)}%`)} />
                 <Stepper label="Bottom floor" value={led.bottom} min={0} max={Math.max(0, ledBlock.floors - 1)} onChange={(bottom) => setLed({ bottom })} />
                 <Stepper label="Height (floors)" value={led.height} min={1} max={Math.max(1, ledBlock.floors - led.bottom)} onChange={(height) => setLed({ height })} />
                 <Stepper
@@ -800,8 +803,8 @@ function PropInspector({ piece }: { piece: Piece }) {
   const [note, setNote] = useState<string | null>(null);
   const def = PIECES[piece.type];
   const style = resolveStyle(piece.type, piece);
-  const hasLed = piece.type === 'billboard' || piece.type === 'busstop';
-  const led: LedSpec = style.led ?? {
+  const hasLed = piece.type === 'billboard' || piece.type === 'busstop' || piece.type === 'ledwall' || piece.type === 'ledtower';
+  const led: LedSpec = style.led ?? DEFAULT_PROP_LED[piece.type] ?? {
     mode: piece.type === 'billboard' ? 'ticker' : 'checker',
     color: piece.type === 'billboard' ? '#ff9d2e' : '#3ad6ff',
     block: 0,
@@ -850,6 +853,31 @@ function PropInspector({ piece }: { piece: Piece }) {
       {hasLed && (
         <Section title="LED screen">
           <LedEditor spec={led} onChange={(change) => updatePiece(piece.id, { led: { ...led, ...change } })} />
+        </Section>
+      )}
+
+      {piece.type === 'ledwall' && (
+        <Section title="Screen shape">
+          <Stepper label="Width" value={resolveBoard(led.board).w} min={4} max={30} step={1} onChange={(w) => updatePiece(piece.id, { led: { ...led, board: { ...led.board, w } } })} format={(v) => `${v} m`} />
+          <Stepper label="Height" value={resolveBoard(led.board).h} min={2} max={14} step={0.5} onChange={(h) => updatePiece(piece.id, { led: { ...led, board: { ...led.board, h } } })} format={(v) => `${v} m`} />
+          <Stepper label="Raised" value={resolveBoard(led.board).mast} min={0} max={10} step={0.5} onChange={(mast) => updatePiece(piece.id, { led: { ...led, board: { ...led.board, mast } } })} format={(v) => `${v} m`} />
+          <Stepper label="Curve" value={led.curve ?? 0.5} min={0} max={1} step={0.1} onChange={(curve) => updatePiece(piece.id, { led: { ...led, curve } })} format={(v) => `${Math.round(v * 100)}%`} />
+          <Stepper label="Lean back" value={resolveBoard(led.board).tilt} min={-20} max={30} step={5} onChange={(tilt) => updatePiece(piece.id, { led: { ...led, board: { ...led.board, tilt } } })} format={(v) => `${v}°`} />
+          <div className="flex gap-1.5">
+            {(['none', 'two', 'one'] as const).map((poles) => (
+              <button key={poles} className={chip(resolveBoard(led.board).poles === poles)} onClick={() => updatePiece(piece.id, { led: { ...led, board: { ...led.board, poles } } })}>
+                {poles === 'none' ? 'Plinth' : poles === 'two' ? 'Two legs' : 'One leg'}
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {piece.type === 'ledtower' && (
+        <Section title="Screen shape">
+          <Stepper label="Wraps round" value={led.curve ?? 0.7} min={0.1} max={1} step={0.1} onChange={(curve) => updatePiece(piece.id, { led: { ...led, curve } })} format={(v) => `${Math.round(v * 360)}°`} />
+          <Stepper label="Bottom floor" value={led.bottom} min={0} max={6} onChange={(bottom) => updatePiece(piece.id, { led: { ...led, bottom } })} />
+          <Stepper label="Height (floors)" value={led.height} min={1} max={7} onChange={(height) => updatePiece(piece.id, { led: { ...led, height } })} />
         </Section>
       )}
 

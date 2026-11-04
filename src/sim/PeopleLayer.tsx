@@ -20,6 +20,14 @@ const RIGHT = new THREE.Vector3(1, 0, 0);
 const ANGRY = new THREE.Color(0xe0453a);
 const WHITE = new THREE.Color(0xffffff);
 const SHOE = new THREE.Color(0x1d1f24);
+const ORANGE_SHIBA = new THREE.Color('#d97925');
+const HARNESS_BROWN = new THREE.Color('#382012');
+const NOSE_BLACK = new THREE.Color('#1c1e22');
+const SNEAKER_DARK = new THREE.Color('#22262e');
+const SNEAKER_WHITE = new THREE.Color('#ffffff');
+const GUN_DARK = new THREE.Color('#1c2026');
+const GUN_METAL = new THREE.Color('#333945');
+const GUN_MAG = new THREE.Color('#262b33');
 
 /** instance matrix = base * (position, rotation about x, scale). */
 function setPart(mesh: THREE.InstancedMesh, index: number, x: number, y: number, z: number, tiltX = 0, sx = 1, sy = 1, sz = 1) {
@@ -44,11 +52,136 @@ let HEAD_K = 1;
 let CAPS = false;
 const DOG_COLOURS = [0xd9923a, 0xf2e6d0, 0x6b4a32, 0x2b2b2e, 0xc9a26b];
 
+/** Merges shapes that may be indexed (cones, boxes) or not (icosahedrons): all are made non-indexed first, which merging requires. */
+function safeMerge(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const merged = mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)));
+  if (!merged) throw new Error('Could not merge character geometry');
+  return merged;
+}
+
+/** Helper to construct a colored box buffer geometry with vertex colors. */
+function colorBox(w: number, h: number, d: number, x: number, y: number, z: number, color: THREE.Color, rx = 0, ry = 0, rz = 0): THREE.BufferGeometry {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  if (rx !== 0) geo.rotateX(rx);
+  if (ry !== 0) geo.rotateY(ry);
+  if (rz !== 0) geo.rotateZ(rz);
+  geo.translate(x, y, z);
+  const count = geo.attributes.position.count;
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geo;
+}
+
+/** Low-poly Shiba Inu dog with urajiro markings, dark harness, pointy ears, and curled tail. */
+function buildShibaDog(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  // Body upper (warm golden coat)
+  parts.push(colorBox(0.25, 0.15, 0.52, 0, 0.38, 0, ORANGE_SHIBA));
+  // Belly & chest (white urajiro)
+  parts.push(colorBox(0.23, 0.12, 0.50, 0, 0.26, 0.02, WHITE));
+  // Dark chest harness / collar
+  parts.push(colorBox(0.26, 0.07, 0.09, 0, 0.35, 0.16, HARNESS_BROWN));
+  // Head upper & cheeks
+  parts.push(colorBox(0.19, 0.18, 0.19, 0, 0.46, 0.32, ORANGE_SHIBA));
+  // Snout (white)
+  parts.push(colorBox(0.12, 0.09, 0.14, 0, 0.41, 0.44, WHITE));
+  // Black nose
+  parts.push(colorBox(0.05, 0.04, 0.04, 0, 0.44, 0.51, NOSE_BLACK));
+  // Triangular upright ears (orange back, white front)
+  parts.push(colorBox(0.04, 0.10, 0.04, -0.07, 0.58, 0.28, ORANGE_SHIBA, -0.2));
+  parts.push(colorBox(0.04, 0.10, 0.04, 0.07, 0.58, 0.28, ORANGE_SHIBA, -0.2));
+  // Curled tail arching forward
+  parts.push(colorBox(0.06, 0.06, 0.20, 0, 0.47, -0.27, ORANGE_SHIBA, 0.85));
+  parts.push(colorBox(0.05, 0.05, 0.08, 0, 0.54, -0.21, WHITE, 0.95));
+  // 4 Legs: upper leg orange, lower paws white
+  for (const [x, z] of [[-0.09, 0.18], [0.09, 0.18], [-0.09, -0.18], [0.09, -0.18]]) {
+    parts.push(colorBox(0.065, 0.12, 0.065, x, 0.18, z, ORANGE_SHIBA));
+    parts.push(colorBox(0.07, 0.12, 0.07, x, 0.06, z, WHITE));
+  }
+  return safeMerge(parts);
+}
+
+/** Two-tone low-poly sneaker with white midsole/sole and dark upper. */
+function buildStylisedShoe(): THREE.BufferGeometry {
+  const upper = colorBox(0.125, 0.065, 0.26, 0, 0.035, 0.04, SNEAKER_DARK);
+  const sole = colorBox(0.135, 0.035, 0.28, 0, -0.015, 0.04, SNEAKER_WHITE);
+  return safeMerge([upper, sole]);
+}
+
+/** Low-poly assault carbine rifle with receiver, rail, barrel, magazine, and stock. */
+function buildTacticalRifle(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  // Receiver & body
+  parts.push(colorBox(0.06, 0.10, 0.38, 0, 0, 0, GUN_DARK));
+  // Stock
+  parts.push(colorBox(0.045, 0.11, 0.22, 0, -0.02, 0.28, GUN_DARK));
+  // Top picatinny rail
+  parts.push(colorBox(0.04, 0.03, 0.32, 0, 0.065, -0.02, GUN_METAL));
+  // Barrel & handguard
+  parts.push(colorBox(0.05, 0.06, 0.28, 0, 0.01, -0.32, GUN_METAL));
+  // Muzzle brake
+  parts.push(colorBox(0.03, 0.03, 0.06, 0, 0.01, -0.48, GUN_METAL));
+  // Curved magazine
+  parts.push(colorBox(0.04, 0.16, 0.09, 0, -0.12, -0.06, GUN_MAG, 0.22));
+  // Pistol grip
+  parts.push(colorBox(0.04, 0.12, 0.06, 0, -0.10, 0.10, GUN_DARK, -0.3));
+  return safeMerge(parts);
+}
+
+/** 3D polygonal starburst muzzle flash. */
+function buildMuzzleFlash(): THREE.BufferGeometry {
+  const core = new THREE.OctahedronGeometry(0.07, 0);
+  const sX1 = new THREE.ConeGeometry(0.035, 0.22, 4).rotateZ(Math.PI / 2).translate(0.11, 0, 0);
+  const sX2 = new THREE.ConeGeometry(0.035, 0.22, 4).rotateZ(-Math.PI / 2).translate(-0.11, 0, 0);
+  const sY1 = new THREE.ConeGeometry(0.035, 0.22, 4).translate(0, 0.11, 0);
+  const sY2 = new THREE.ConeGeometry(0.035, 0.22, 4).rotateX(Math.PI).translate(0, -0.11, 0);
+  const sZ = new THREE.ConeGeometry(0.045, 0.32, 4).rotateX(-Math.PI / 2).translate(0, 0, -0.16);
+  return safeMerge([core, sX1, sX2, sY1, sY2, sZ]);
+}
+
+/** Spiky faceted anime/action hairstyle. */
+function buildSpikyHair(): THREE.BufferGeometry {
+  const base = new THREE.IcosahedronGeometry(0.15, 0);
+  const sp1 = new THREE.ConeGeometry(0.05, 0.14, 4).rotateX(0.4).translate(0, 0.12, 0.08);
+  const sp2 = new THREE.ConeGeometry(0.045, 0.12, 4).rotateX(-0.5).translate(0, 0.12, -0.08);
+  const sp3 = new THREE.ConeGeometry(0.045, 0.11, 4).rotateZ(0.5).translate(-0.09, 0.08, 0);
+  const sp4 = new THREE.ConeGeometry(0.045, 0.11, 4).rotateZ(-0.5).translate(0.09, 0.08, 0);
+  return safeMerge([base, sp1, sp2, sp3, sp4]);
+}
+
+/** Runner ponytail hairstyle with backwards flowing tail. */
+function buildPonytailHair(): THREE.BufferGeometry {
+  const cap = new THREE.IcosahedronGeometry(0.155, 0);
+  const tail = new THREE.ConeGeometry(0.07, 0.30, 5).rotateX(-1.25).translate(0, -0.05, -0.24);
+  const knot = new THREE.CylinderGeometry(0.045, 0.045, 0.04, 6).rotateX(-1.25).translate(0, 0.02, -0.13);
+  return safeMerge([cap, tail, knot]);
+}
+
+/** Folded hoodie collar resting on upper shoulders. */
+function buildHoodieCollar(): THREE.BufferGeometry {
+  const left = new THREE.BoxGeometry(0.09, 0.10, 0.18).rotateX(0.2).translate(-0.13, 0, -0.06);
+  const right = new THREE.BoxGeometry(0.09, 0.10, 0.18).rotateX(0.2).translate(0.13, 0, -0.06);
+  const back = new THREE.BoxGeometry(0.24, 0.12, 0.13).rotateX(-0.3).translate(0, 0.02, -0.14);
+  return safeMerge([left, right, back]);
+}
+
+/** Dual horizontal illuminated stripes for the backpack. */
+function buildBagLeds(): THREE.BufferGeometry {
+  const top = new THREE.BoxGeometry(0.24, 0.04, 0.03).translate(0, 0.07, 0);
+  const bottom = new THREE.BoxGeometry(0.24, 0.04, 0.03).translate(0, -0.07, 0);
+  return safeMerge([top, bottom]);
+}
+
 /** A little low-poly dog along +z: body, head, snout, tail and four legs. */
 function buildDog(): THREE.BufferGeometry {
   const part = (w: number, h: number, d: number, x: number, y: number, z: number) => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
   const tail = new THREE.BoxGeometry(0.06, 0.06, 0.24).rotateX(-0.6).translate(0, 0.43, -0.36);
-  return mergeGeometries([
+  return safeMerge([
     part(0.26, 0.24, 0.56, 0, 0.34, 0),
     part(0.2, 0.2, 0.2, 0, 0.45, 0.33),
     part(0.11, 0.09, 0.12, 0, 0.42, 0.46),
@@ -59,7 +192,7 @@ function buildDog(): THREE.BufferGeometry {
     part(0.07, 0.24, 0.07, 0.09, 0.12, 0.2),
     part(0.07, 0.24, 0.07, -0.09, 0.12, -0.2),
     part(0.07, 0.24, 0.07, 0.09, 0.12, -0.2),
-  ])!;
+  ]);
 }
 
 const HIP = 0.8;
@@ -85,47 +218,59 @@ export function PeopleLayer() {
   const legs = useRef<THREE.InstancedMesh>(null);
   const shoes = useRef<THREE.InstancedMesh>(null);
   const bags = useRef<THREE.InstancedMesh>(null);
+  const bagLeds = useRef<THREE.InstancedMesh>(null);
+  const hoods = useRef<THREE.InstancedMesh>(null);
   const hats = useRef<THREE.InstancedMesh>(null);
+  const ponytails = useRef<THREE.InstancedMesh>(null);
   const gear = useRef<THREE.InstancedMesh>(null);
+  const muzzles = useRef<THREE.InstancedMesh>(null);
 
-  const dogGeometry = useMemo(buildDog, []);
-  // The stylised look: faceted, chunky bodies, bigger heads and spiky hair instead of smooth rounded ones.
+  const dogGeometry = useMemo(() => (stylised ? buildShibaDog() : buildDog()), [stylised]);
+  // The stylised look: faceted, chunky bodies, spiky anime hair, sneakers with white soles, and carbine rifles.
   const geometry = useMemo(
     () =>
       stylised
         ? {
-            torso: new THREE.CylinderGeometry(0.23, 0.18, 0.6, 6),
+            torso: new THREE.CylinderGeometry(0.24, 0.17, 0.6, 6),
             head: new THREE.IcosahedronGeometry(0.125, 0),
-            hair: new THREE.IcosahedronGeometry(0.15, 0),
+            hair: buildSpikyHair(),
+            ponytail: buildPonytailHair(),
             eye: new THREE.SphereGeometry(0.017, 6, 5),
             arm: new THREE.CylinderGeometry(0.065, 0.052, ARM, 5).translate(0, -ARM / 2, 0),
             hand: new THREE.IcosahedronGeometry(0.05, 0),
             leg: new THREE.CylinderGeometry(0.085, 0.065, LEG, 5).translate(0, -LEG / 2, 0),
-            shoe: new THREE.BoxGeometry(0.13, 0.09, 0.27).translate(0, 0, 0.05),
-            bag: new THREE.BoxGeometry(0.34, 0.4, 0.16),
+            shoe: buildStylisedShoe(),
+            bag: new THREE.BoxGeometry(0.32, 0.38, 0.16),
+            bagLed: buildBagLeds(),
+            hood: buildHoodieCollar(),
             hat: new THREE.SphereGeometry(0.15, 6, 4, 0, Math.PI * 2, 0, Math.PI / 2),
-            gear: new THREE.BoxGeometry(0.34, 0.24, 0.3),
+            gear: buildTacticalRifle(),
+            muzzle: buildMuzzleFlash(),
           }
         : {
             torso: new THREE.CylinderGeometry(0.2, 0.165, 0.6, 10),
             head: new THREE.SphereGeometry(0.12, 14, 12),
             hair: new THREE.SphereGeometry(0.133, 12, 10),
+            ponytail: new THREE.SphereGeometry(0.001, 4, 4),
             eye: new THREE.SphereGeometry(0.017, 6, 5),
             arm: new THREE.CylinderGeometry(0.058, 0.046, ARM, 8).translate(0, -ARM / 2, 0),
             hand: new THREE.SphereGeometry(0.048, 8, 6),
             leg: new THREE.CylinderGeometry(0.078, 0.06, LEG, 8).translate(0, -LEG / 2, 0),
             shoe: new THREE.BoxGeometry(0.11, 0.075, 0.25).translate(0, 0, 0.04),
             bag: new THREE.BoxGeometry(0.3, 0.36, 0.13),
+            bagLed: new THREE.BoxGeometry(0.001, 0.001, 0.001),
+            hood: new THREE.BoxGeometry(0.001, 0.001, 0.001),
             hat: new THREE.SphereGeometry(0.14, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
             gear: new THREE.BoxGeometry(0.34, 0.24, 0.3),
+            muzzle: new THREE.BoxGeometry(0.001, 0.001, 0.001),
           },
     [stylised],
   );
 
-  // The shoes and eyes never change colour, so set it once.
+  // Shoes: in stylised mode they carry their own vertex colors (white soles), so tint with white.
   useEffect(() => {
     if (shoes.current) {
-      for (let i = 0; i < MAX_PEOPLE * 2; i++) shoes.current.setColorAt(i, SHOE);
+      for (let i = 0; i < MAX_PEOPLE * 2; i++) shoes.current.setColorAt(i, stylised ? WHITE : SHOE);
       if (shoes.current.instanceColor) shoes.current.instanceColor.needsUpdate = true;
     }
   }, [stylised]);
@@ -133,24 +278,42 @@ export function PeopleLayer() {
   useFrame((_, delta) => {
     HEAD_K = stylised ? 1.14 : 1;
     CAPS = rich;
-    const parts = [torso, head, hair, eyes, arms, hands, legs, shoes, bags, hats, gear].map((r) => r.current);
+    const parts = [torso, head, hair, eyes, arms, hands, legs, shoes, bags, bagLeds, hoods, hats, ponytails, gear, muzzles].map((r) => r.current);
     if (parts.some((p) => !p)) return;
-    const [tor, hed, hai, eye, arm, han, leg, sho, bag, hat, gea] = parts as THREE.InstancedMesh[];
+    const [tor, hed, hai, eye, arm, han, leg, sho, bag, led, hod, hat, pon, gea, muz] = parts as THREE.InstancedMesh[];
     const peds = sim.peds;
     let n = 0;
     let bagCount = 0;
+    let hoodCount = 0;
     let hatCount = 0;
+    let ponCount = 0;
     let gearCount = 0;
+    let muzzleCount = 0;
+
     for (const p of peds) {
       if (n >= MAX_PEOPLE) break;
       if (p.vis <= 0.01 && p.state === 'inside') continue;
-      const used = drawPerson(p, n, { tor, hed, hai, eye, arm, han, leg, sho, bag, hat, gea }, bagCount, hatCount, gearCount);
+      const used = drawPerson(
+        p,
+        n,
+        { tor, hed, hai, eye, arm, han, leg, sho, bag, led, hod, hat, pon, gea, muz },
+        bagCount,
+        hoodCount,
+        hatCount,
+        ponCount,
+        gearCount,
+        muzzleCount,
+      );
       if (p.bag) bagCount++;
+      if (used.hood) hoodCount++;
       if (used.hat) hatCount++;
+      if (used.ponytail) ponCount++;
       if (used.gear) gearCount++;
+      if (used.muzzle) muzzleCount++;
       n++;
     }
-    // Desktop, stylised look: every sixth person walks a dog that trots along beside them.
+
+    // Desktop, stylised look: every sixth person walks a Shiba Inu that trots along beside them.
     const dog = dogs.current;
     if (dog) {
       let nd = 0;
@@ -179,7 +342,7 @@ export function PeopleLayer() {
           const trot = Math.min(1, speed / 1.5);
           _yaw.setFromAxisAngle(UP, d.h);
           dog.setMatrixAt(nd, _local.compose(_pos.set(d.x, Math.max(0, heightAt(d.x, d.z)) + Math.abs(Math.sin(sim.time * 14 + p.id)) * 0.05 * trot, d.z), _yaw, _scale.set(1, 1, 1)));
-          dog.setColorAt(nd, _colour.setHex(DOG_COLOURS[p.id % DOG_COLOURS.length]));
+          dog.setColorAt(nd, stylised ? WHITE : _colour.setHex(DOG_COLOURS[p.id % DOG_COLOURS.length]));
           seen.add(p.id);
           nd++;
         }
@@ -189,13 +352,18 @@ export function PeopleLayer() {
       dog.instanceMatrix.needsUpdate = true;
       if (dog.instanceColor) dog.instanceColor.needsUpdate = true;
     }
+
     tor.count = hed.count = hai.count = n;
     eye.count = n * 2;
     arm.count = han.count = leg.count = sho.count = n * 2;
-    bag.count = bagCount;
+    bag.count = led.count = bagCount;
+    hod.count = hoodCount;
     hat.count = hatCount;
+    pon.count = ponCount;
     gea.count = gearCount;
-    for (const mesh of [tor, hed, hai, eye, arm, han, leg, sho, bag, hat, gea]) {
+    muz.count = muzzleCount;
+
+    for (const mesh of [tor, hed, hai, eye, arm, han, leg, sho, bag, led, hod, hat, pon, gea, muz]) {
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
@@ -205,15 +373,21 @@ export function PeopleLayer() {
   return (
     <Fragment key={stylised ? 'stylised' : 'classic'}>
       <instancedMesh ref={dogs} args={[dogGeometry, undefined, MAX_DOGS]} frustumCulled={false} castShadow visible={rich}>
-        <meshStandardMaterial roughness={0.8} flatShading />
+        <meshStandardMaterial vertexColors={stylised} roughness={0.8} flatShading />
       </instancedMesh>
       <instancedMesh ref={torso} args={[geometry.torso, undefined, MAX_PEOPLE]} frustumCulled={false} castShadow>
+        <meshStandardMaterial roughness={0.85} flatShading={flat} />
+      </instancedMesh>
+      <instancedMesh ref={hoods} args={[geometry.hood, undefined, MAX_PEOPLE]} frustumCulled={false} castShadow>
         <meshStandardMaterial roughness={0.85} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={head} args={[geometry.head, undefined, MAX_PEOPLE]} frustumCulled={false}>
         <meshStandardMaterial roughness={0.75} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={hair} args={[geometry.hair, undefined, MAX_PEOPLE]} frustumCulled={false}>
+        <meshStandardMaterial roughness={0.9} flatShading={flat} />
+      </instancedMesh>
+      <instancedMesh ref={ponytails} args={[geometry.ponytail, undefined, MAX_PEOPLE]} frustumCulled={false}>
         <meshStandardMaterial roughness={0.9} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={eyes} args={[geometry.eye, undefined, MAX_PEOPLE * 2]} frustumCulled={false}>
@@ -229,16 +403,22 @@ export function PeopleLayer() {
         <meshStandardMaterial roughness={0.85} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={shoes} args={[geometry.shoe, undefined, MAX_PEOPLE * 2]} frustumCulled={false}>
-        <meshStandardMaterial roughness={0.6} flatShading={flat} />
+        <meshStandardMaterial vertexColors={stylised} roughness={0.6} flatShading={flat} />
       </instancedMesh>
       <instancedMesh ref={bags} args={[geometry.bag, undefined, MAX_PEOPLE]} frustumCulled={false}>
         <meshStandardMaterial roughness={0.8} flatShading={flat} />
       </instancedMesh>
+      <instancedMesh ref={bagLeds} args={[geometry.bagLed, undefined, MAX_PEOPLE]} frustumCulled={false}>
+        <meshStandardMaterial color="#ff8000" emissive="#ff6600" emissiveIntensity={3} roughness={0.3} toneMapped={false} />
+      </instancedMesh>
       <instancedMesh ref={hats} args={[geometry.hat, undefined, MAX_PEOPLE]} frustumCulled={false}>
         <meshStandardMaterial roughness={0.4} flatShading={flat} />
       </instancedMesh>
-      <instancedMesh ref={gear} args={[geometry.gear, undefined, MAX_PEOPLE]} frustumCulled={false}>
-        <meshStandardMaterial roughness={0.8} flatShading={flat} />
+      <instancedMesh ref={gear} args={[geometry.gear, undefined, MAX_PEOPLE]} frustumCulled={false} castShadow>
+        <meshStandardMaterial vertexColors={stylised} roughness={0.7} flatShading={flat} />
+      </instancedMesh>
+      <instancedMesh ref={muzzles} args={[geometry.muzzle, undefined, MAX_PEOPLE]} frustumCulled={false}>
+        <meshBasicMaterial color="#ffea70" transparent opacity={0.95} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} side={THREE.DoubleSide} />
       </instancedMesh>
     </Fragment>
   );
@@ -254,11 +434,25 @@ interface Meshes {
   leg: THREE.InstancedMesh;
   sho: THREE.InstancedMesh;
   bag: THREE.InstancedMesh;
+  led: THREE.InstancedMesh;
+  hod: THREE.InstancedMesh;
   hat: THREE.InstancedMesh;
+  pon: THREE.InstancedMesh;
   gea: THREE.InstancedMesh;
+  muz: THREE.InstancedMesh;
 }
 
-function drawPerson(p: Ped, n: number, m: Meshes, bagIndex: number, hatIndex: number, gearIndex: number): { hat: boolean; gear: boolean } {
+function drawPerson(
+  p: Ped,
+  n: number,
+  m: Meshes,
+  bagIndex: number,
+  hoodIndex: number,
+  hatIndex: number,
+  ponIndex: number,
+  gearIndex: number,
+  muzzleIndex: number,
+): { hood: boolean; hat: boolean; ponytail: boolean; gear: boolean; muzzle: boolean } {
   const sitting = p.state === 'sitting';
   const cowering = p.state === 'cowering';
   const down = p.state === 'down';
@@ -290,6 +484,13 @@ function drawPerson(p: Ped, n: number, m: Meshes, bagIndex: number, hatIndex: nu
   setPart(m.tor, n, 0, hipY + 0.3 * coat - (coat - 1) * 0.25, lean * 0.2, lean, 1, coat, 0.64);
   m.tor.setColorAt(n, tint(p.shirt, anger * 0.3, flash));
 
+  // Folded hoodie collar resting on upper shoulders for anyone with a coat or hoodie.
+  const hasHood = p.coat || p.id % 2 === 0;
+  if (hasHood) {
+    setPart(m.hod, hoodIndex, 0, hipY + 0.55 * coat, lean * 0.2, lean, 1, 1, 1);
+    m.hod.setColorAt(hoodIndex, tint(p.shirt, anger * 0.3, flash));
+  }
+
   // Head, hair, eyes.
   const headY = hipY + 0.78 + (cowering ? -0.04 : 0);
   const headZ = lean * 0.45;
@@ -298,11 +499,21 @@ function drawPerson(p: Ped, n: number, m: Meshes, bagIndex: number, hatIndex: nu
   const style = p.hairStyle;
   const hk = HEAD_K;
   const hy = headY + (hk - 1) * 0.05;
-  if (style === 0) setPart(m.hai, n, 0, hy + 0.05, headZ - 0.01, 0, 0.001, 0.001, 0.001);
-  else if (style === 1) setPart(m.hai, n, 0, hy + 0.06, headZ - 0.012, 0, 0.98 * hk, 0.6 * hk, 1.0 * hk);
-  else if (style === 2) setPart(m.hai, n, 0, hy + 0.045, headZ - 0.01, 0, 1.0 * hk, 0.88 * hk, 1.02 * hk);
-  else setPart(m.hai, n, 0, hy - 0.01, headZ - 0.04, 0, 1.02 * hk, 1.25 * hk, 1.1 * hk);
-  m.hai.setColorAt(n, tint(p.hair, 0, flash * 0.5));
+  let hasPon = false;
+  if (style === 0) {
+    setPart(m.hai, n, 0, hy + 0.05, headZ - 0.01, 0, 0.001, 0.001, 0.001);
+  } else if (style === 3) {
+    setPart(m.pon, ponIndex, 0, hy - 0.01, headZ - 0.03, 0, 1.02 * hk, 1.25 * hk, 1.1 * hk);
+    m.pon.setColorAt(ponIndex, tint(p.hair, 0, flash * 0.5));
+    setPart(m.hai, n, 0, hy + 0.05, headZ - 0.01, 0, 0.001, 0.001, 0.001);
+    hasPon = true;
+  } else if (style === 1) {
+    setPart(m.hai, n, 0, hy + 0.06, headZ - 0.012, 0, 0.98 * hk, 0.6 * hk, 1.0 * hk);
+    m.hai.setColorAt(n, tint(p.hair, 0, flash * 0.5));
+  } else {
+    setPart(m.hai, n, 0, hy + 0.045, headZ - 0.01, 0, 1.0 * hk, 0.88 * hk, 1.02 * hk);
+    m.hai.setColorAt(n, tint(p.hair, 0, flash * 0.5));
+  }
   setPart(m.eye, n * 2, -0.045 * hk, hy + 0.015, headZ + 0.1 * hk);
   setPart(m.eye, n * 2 + 1, 0.045 * hk, hy + 0.015, headZ + 0.1 * hk);
 
@@ -346,8 +557,14 @@ function drawPerson(p: Ped, n: number, m: Meshes, bagIndex: number, hatIndex: nu
     leftA = -1.2;
     rightA = -1.2;
   }
-  if (p.armed && p.state === 'chasing') rightA = -1.55 + p.swing * 0.35;
-  else if (p.state === 'chasing' && p.swing <= 0.01) rightA = -0.9 + Math.sin(sim.time * 12 + p.id) * 0.25; // fists up
+  if (p.armed && p.state !== 'down') {
+    // 2-handed tactical aiming pose for carbine rifle
+    rightA = -1.55 + p.swing * 0.25;
+    leftA = -1.35;
+  } else if (p.state === 'chasing' && p.swing <= 0.01) {
+    rightA = -0.9 + Math.sin(sim.time * 12 + p.id) * 0.25; // fists up
+  }
+
   const placeArm = (side: number, a: number, i: number) => {
     setPart(m.arm, i, side * 0.26, shoulderY, 0.0, a);
     m.arm.setColorAt(i, tint(p.shirt, anger * 0.3, flash));
@@ -357,28 +574,45 @@ function drawPerson(p: Ped, n: number, m: Meshes, bagIndex: number, hatIndex: nu
   placeArm(-1, leftA, n * 2);
   placeArm(1, rightA, n * 2 + 1);
 
-  // Backpack.
+  // Backpack + glowing amber strips.
   if (p.bag) {
     setPart(m.bag, bagIndex, 0, hipY + 0.34, -0.17, 0);
     m.bag.setColorAt(bagIndex, tint(p.bagColour, 0, flash * 0.5));
+    setPart(m.led, bagIndex, 0, hipY + 0.34, -0.26, 0);
   }
 
-  // Hard hat and whatever the builder is carrying.
+  // Hard hat or stylish cap.
   let gear = false;
+  let muzzle = false;
   // In the stylised look a quarter of everyone wears a cap (in the colour of their bag).
   const cap = p.hardHat || (CAPS && p.id % 4 === 0 && p.hairStyle !== 0);
   if (cap) {
     setPart(m.hat, hatIndex, 0, hy + 0.06, headZ, 0, hk, hk, hk);
     m.hat.setColorAt(hatIndex, tint(p.hardHat ? p.hatColour : p.bagColour, 0, flash * 0.5));
   }
+
   if (p.armed && p.state !== 'down') {
-    setPart(m.gea, gearIndex, 0.26, shoulderY - ARM * Math.cos(rightA), -ARM * Math.sin(rightA) + 0.14, 0, 0.26, 0.4, 1.5);
-    m.gea.setColorAt(gearIndex, tint(0x23262c, 0, flash * 0.5));
+    // Position the low-poly carbine rifle in 2 hands
+    const rifleX = 0.14;
+    const rifleY = shoulderY - ARM * Math.cos(rightA) + 0.08;
+    const rifleZ = -ARM * Math.sin(rightA) + 0.24;
+    setPart(m.gea, gearIndex, rifleX, rifleY, rifleZ, 0, 1, 1, 1);
+    if (!m.gea.geometry.attributes.color) {
+      m.gea.setColorAt(gearIndex, tint(0x23262c, 0, flash * 0.5));
+    }
     gear = true;
+
+    // Firing or in active combat chasing: 3D polygonal starburst muzzle flash!
+    if (p.swing > 0.05 || (p.state === 'chasing' && p.id % 2 === 0)) {
+      const flashScale = 0.85 + Math.random() * 0.4;
+      setPart(m.muz, muzzleIndex, rifleX, rifleY, rifleZ - 0.44, 0, flashScale, flashScale, flashScale);
+      muzzle = true;
+    }
   } else if (p.job === 'builder' && p.carrying) {
     setPart(m.gea, gearIndex, 0, hipY + 0.5, 0.36, 0);
     m.gea.setColorAt(gearIndex, tint(0xb98d55, 0, 0));
     gear = true;
   }
-  return { hat: cap, gear };
+
+  return { hood: hasHood, hat: cap, ponytail: hasPon, gear, muzzle };
 }

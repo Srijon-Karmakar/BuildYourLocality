@@ -36,6 +36,34 @@ export function SettingsPanel() {
     <div className="flex flex-col gap-3 text-xs text-white sm:gap-4 sm:text-sm">
       <div>
         <div className="mb-1 flex items-baseline justify-between">
+          <span className="text-white/60">Visual Style Preset</span>
+          {graphics.visualPreset === 'sunset' && (
+            <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-amber-300 uppercase">
+              Action Low-Poly
+            </span>
+          )}
+        </div>
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => setGraphics({ visualPreset: 'classic' })}
+            className={seg(graphics.visualPreset === 'classic')}
+          >
+            Classic
+          </button>
+          <button
+            onClick={() => setGraphics({ visualPreset: 'sunset' })}
+            className={seg(graphics.visualPreset === 'sunset')}
+          >
+            Low-Poly Sunset
+          </button>
+        </div>
+        <p className="mt-1.5 text-xs text-white/45">
+          Low-Poly Sunset: faceted anime/action characters, hoodies, tech backpacks with glowing amber strips, Shiba Inus, tactical rifle stances, and glowing neon architecture.
+        </p>
+      </div>
+
+      <div>
+        <div className="mb-1 flex items-baseline justify-between">
           <span className="text-white/60">Quality</span>
           {graphics.preset === 'custom' && <span className="text-xs text-amber-200/80">Custom</span>}
         </div>
@@ -85,7 +113,7 @@ export function SettingsPanel() {
 
       <button onClick={() => setAdvanced((v) => !v)} className="flex min-h-9 items-center justify-between text-white/70 sm:min-h-0">
         Fine tune
-        <span className={`transition ${advanced ? 'rotate-180' : ''}`}>⌄</span>
+        <span className={`transition ${advanced ? 'rotate-180' : ''}`}>âŒ„</span>
       </button>
 
       {advanced && (

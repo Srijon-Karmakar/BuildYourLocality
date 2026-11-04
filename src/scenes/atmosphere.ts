@@ -115,12 +115,12 @@ const CLOUD_DAY = new THREE.Color('#ffffff');
 const CLOUD_NIGHT = new THREE.Color('#1b2236');
 const CLOUD_DUSK = new THREE.Color('#ffb98a');
 const CLOUD_STORM = new THREE.Color('#4a5563');
-const WARM_H = new THREE.Color('#f7a15a');
-const WARM_Z = new THREE.Color('#ee9660');
-const WARM_SUN = new THREE.Color('#ffb36e');
-const WARM_SKY = new THREE.Color('#ffd2a6');
-const WARM_GROUND = new THREE.Color('#9a6a46');
-const WARM_CLOUD = new THREE.Color('#ffc79a');
+const WARM_H = new THREE.Color('#ffa44a');
+const WARM_Z = new THREE.Color('#e27a32');
+const WARM_SUN = new THREE.Color('#ffe2b0');
+const WARM_SKY = new THREE.Color('#ffd0a2');
+const WARM_GROUND = new THREE.Color('#624f74');
+const WARM_CLOUD = new THREE.Color('#ffd2aa');
 
 let autoTimer = 0;
 let autoKind: WeatherKind = 'clear';
@@ -232,9 +232,9 @@ export function updateAtmosphere(dt: number) {
   // The stylised look pulls the daytime sky towards a warm orange haze (it fades away at night and in storms).
   atmo.warm = approach(atmo.warm, useGameStore.getState().graphics.stylised ? 1 : 0, dt * 1.5);
   if (atmo.warm > 0.001) {
-    const k = atmo.warm * (0.25 + 0.75 * atmo.daylight) * (1 - 0.6 * Math.max(atmo.storm, atmo.rain * 0.6));
-    atmo.horizon.lerp(WARM_H, 0.62 * k * (1 - haze * 0.6));
-    atmo.zenith.lerp(WARM_Z, 0.5 * k * (1 - haze * 0.6));
+    const k = atmo.warm * (0.35 + 0.65 * atmo.daylight) * (1 - 0.6 * Math.max(atmo.storm, atmo.rain * 0.6));
+    atmo.horizon.lerp(WARM_H, 0.82 * k * (1 - haze * 0.6));
+    atmo.zenith.lerp(WARM_Z, 0.72 * k * (1 - haze * 0.6));
   }
 
   atmo.cloudColor.copy(CLOUD_NIGHT).lerp(CLOUD_DAY, atmo.daylight).lerp(CLOUD_DUSK, atmo.twilight * 0.55 * (1 - atmo.storm));

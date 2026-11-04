@@ -57,7 +57,9 @@ import { maxDoorOffset, wallPlacement } from './wall';
 export { maxDoorOffset };
 
 const roadMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 });
+const stylisedRoadMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0.08 });
 registerWet(roadMaterial);
+registerWet(stylisedRoadMaterial);
 
 /** Cheap stable per-cell variation so repeated trees/houses don't look cloned. */
 function seedOf(gx: number, gz: number): number {
@@ -65,11 +67,11 @@ function seedOf(gx: number, gz: number): number {
   return n - Math.floor(n);
 }
 
-
 // --- Roads ---------------------------------------------------------------------
 
 export function RoadModel({ mask, road, bridge = false }: { mask: number; road?: Partial<RoadSpec>; bridge?: boolean }) {
-  return <mesh geometry={roadGeometry(mask, road, bridge)} material={roadMaterial} receiveShadow castShadow />;
+  const stylised = useGameStore((s) => s.graphics.stylised);
+  return <mesh geometry={roadGeometry(mask, road, bridge)} material={stylised ? stylisedRoadMaterial : roadMaterial} receiveShadow castShadow />;
 }
 
 function ConnectedRoad({ gx, gz, road }: { gx: number; gz: number; road?: Partial<RoadSpec> }) {
