@@ -1,4 +1,4 @@
-import { CELL } from '../city/catalog';
+import { CELL, type PieceType } from '../city/catalog';
 import { cellKey, useCityStore } from '../state/useCityStore';
 import { cellPath, samplePath } from './paths';
 import { AircraftSystem } from './aircraft';
@@ -133,6 +133,20 @@ export type PedState =
 export type PedRole = 'civilian' | 'thief' | 'thug';
 /** Everyone has a character: joggers run, elders amble, kids are small and go to school. */
 export type PedTrait = 'normal' | 'jogger' | 'elder' | 'kid';
+/** Staff of the city services wear a uniform and work in their own building. */
+export type PedUniform = 'police' | 'fire' | 'medic' | 'teacher' | 'clerk';
+
+const UNIFORM_OF: Partial<Record<PieceType, PedUniform>> = {
+  police: 'police', policepost: 'police', jail: 'police', firestation: 'fire', firehq: 'fire', hospital: 'medic', clinic: 'medic',
+  school: 'teacher', highschool: 'teacher', university: 'teacher', cityhall: 'clerk', courthouse: 'clerk',
+};
+const UNIFORMS: Record<PedUniform, { shirt: number; pants: number; hat: number | null }> = {
+  police: { shirt: 0x2a4a8c, pants: 0x14213d, hat: 0x14213d },
+  fire: { shirt: 0xc8281f, pants: 0x2b2d42, hat: 0xe9b824 },
+  medic: { shirt: 0xf4f6f8, pants: 0x2a9d8f, hat: null },
+  teacher: { shirt: 0x8ecae6, pants: 0x4a4e69, hat: null },
+  clerk: { shirt: 0x6d597a, pants: 0x2b2d42, hat: null },
+};
 
 export interface Ped {
   id: number;
@@ -198,6 +212,7 @@ export interface Ped {
   home: Destination | null;
   work: Destination | null;
   trait: PedTrait;
+  uniform: PedUniform | null;
   /** 0..100 how content they are; follows the city's happiness plus a personal lean. */
   joy: number;
   joyBias: number;
@@ -373,7 +388,7 @@ export class Simulation {
   }
 
   private releaseIfGone(car: Car): boolean {
-    if (car.driven || car.stuck < STUCK_LIMIT) return false;
+    if (car.driven || car.stuck < (car.mission ? STUCK_LIMIT * 2 : STUCK_LIMIT)) return false;
     if (car.holding && this.junctionOwner.get(car.holding) === car.id) this.junctionOwner.delete(car.holding);
     if (car.mission && car.mission.phase !== 'returning') this.missionHook?.(car, 'lost');
     return true;
@@ -528,7 +543,17 @@ export class Simulation {
     const trait: PedTrait = roll < 0.06 ? 'jogger' : roll < 0.14 ? 'elder' : roll < 0.21 ? 'kid' : 'normal';
     const home = this.world.homes.length > 0 ? pick(this.world.homes) : null;
     const school = this.world.services.find((sv) => sv.kind === 'school');
-    const work = trait === 'kid' ? (school ? this.world.doorByPiece.get(school.pieceId) ?? null : null) : this.world.workplaces.length > 0 ? pick(this.world.workplaces) : null;
+    let work = trait === 'kid' ? (school ? this.world.doorByPiece.get(school.pieceId) ?? null : null) : this.world.workplaces.length > 0 ? pick(this.world.workplaces) : null;
+    // One in five adults works for the city: police, firefighters, medics, teachers and clerks in uniform.
+    let uniform: PedUniform | null = null;
+    if (trait === 'normal' && this.world.services.length > 0 && Math.random() < 0.2) {
+      const post = pick(this.world.services);
+      const door = this.world.doorByPiece.get(post.pieceId);
+      uniform = UNIFORM_OF[post.type] ?? null;
+      if (door && uniform) work = door;
+      else uniform = null;
+    }
+    const look = uniform ? UNIFORMS[uniform] : null;
     const joyBias = range(-18, 18);
     this.peds.push({
       id: this.nextId++,
@@ -571,13 +596,14 @@ export class Simulation {
       duty: 'hammer',
       task: '',
       taskTimer: 0,
-      hardHat: false,
-      hatColour: 0xffd21f,
+      hardHat: !!look?.hat,
+      hatColour: look?.hat ?? 0xffd21f,
       carrying: false,
       tool: false,
       home,
       work,
       trait,
+      uniform,
       joy: Math.max(0, Math.min(100, cityState.happiness + joyBias)),
       joyBias,
       watching: null,
@@ -587,8 +613,8 @@ export class Simulation {
       bagColour: pick(BAGS),
       coat: Math.random() < 0.22,
       height: trait === 'kid' ? range(0.7, 0.78) : range(0.92, 1.08),
-      shirt: pick(SHIRTS),
-      pants: pick(PANTS),
+      shirt: look?.shirt ?? pick(SHIRTS),
+      pants: look?.pants ?? pick(PANTS),
       skin: pick(SKINS),
       remove: false,
     });
@@ -860,7 +886,8 @@ export class Simulation {
     }
     // A siren may go past a junction held by a wreck.
     const blocker = owner !== undefined && owner !== car.id ? this.cars.find((c) => c.id === owner) : undefined;
-    if (blocker && !(siren && blocker.wreck > 0)) return false;
+    // A siren waiting in a jam for more than a few seconds is let through: everyone else gives way.
+    if (blocker && !(siren && (blocker.wreck > 0 || car.stuck > 5))) return false;
     if (!siren && !this.signalGreen(key, axis)) return false;
     this.junctionOwner.set(key, car.id);
     return true;
@@ -956,7 +983,7 @@ export class Simulation {
         const ox = car.x - s.x;
         const oz = car.z - s.z;
         const along = ox * Math.sin(s.heading) + oz * Math.cos(s.heading);
-        if (along < 1 || along > 32) continue;
+        if (along < 0.2 || along > 32) continue;
         if (Math.abs(ox * Math.cos(s.heading) - oz * Math.sin(s.heading)) > 4.5 || Math.cos(s.heading - car.heading) < 0.5) continue;
         yielding = true;
         break;
@@ -993,7 +1020,8 @@ export class Simulation {
       const gap = along - car.length / 2 - 0.8;
       target = Math.min(target, gap <= 0 ? 0 : Math.sqrt(2 * 6 * gap));
     };
-    for (const p of this.peds) if (p.vis > 0.5) brakeForPerson(p.x, p.z);
+    // A siren does not wait for people queueing at a crossing signal, and after a few seconds stuck it noses through anyone.
+    for (const p of this.peds) if (p.vis > 0.5 && !(mission && (p.signalWait || car.stuck > 4))) brakeForPerson(p.x, p.z);
     if (this.player.active) brakeForPerson(this.player.x, this.player.z);
 
     const accel = target > car.speed ? 3.6 : BRAKE_MAX;
@@ -1198,7 +1226,7 @@ export class Simulation {
 
   /** Two cars in a junction going across each other and fast enough: they collide. */
   private detectCrashes() {
-    const held = this.cars.filter((c) => c.holding && !c.wreck && !c.driven && c.speed > 0.5);
+    const held = this.cars.filter((c) => c.holding && !c.wreck && !c.driven && !c.mission && c.speed > 0.5);
     for (let i = 0; i < held.length; i++) {
       for (let j = i + 1; j < held.length; j++) {
         const a = held[i];
@@ -1249,6 +1277,7 @@ export class Simulation {
   private pickGoal(ped: Ped): Destination | 'wander' {
     const scheduled = this.scheduleGoal(ped);
     if (scheduled) return scheduled;
+    if (ped.uniform === 'police' && Math.random() < 0.45) return 'wander'; // on patrol
     const byKind = (kind: DestinationKind) => this.world.destinations.filter((d) => d.kind === kind);
     // People plan around the sky: at night and in bad weather they head indoors or for transport
     // instead of idling in parks.

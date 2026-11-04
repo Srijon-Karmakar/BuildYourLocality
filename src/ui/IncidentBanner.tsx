@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useCityStatsStore } from '../state/useCityStatsStore';
 import { Icon } from './icons';
 
-const ICON: Record<string, string> = { fire: 'firestation', accident: 'car', crime: 'siren' };
+const ICON: Record<string, string> = { fire: 'firestation', accident: 'car', crime: 'siren', call: 'siren' };
 
 /** A slim alert under the top bar while something is going wrong in the city; tap it for the details. */
 export function IncidentBanner() {

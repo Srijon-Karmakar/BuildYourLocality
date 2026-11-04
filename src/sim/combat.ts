@@ -1,4 +1,5 @@
 import { atmo } from '../scenes/atmosphere';
+import { cityState } from './cityState';
 import { blast } from './blast';
 import { cellKey } from '../state/useCityStore';
 import { useGameStore } from '../state/useGameStore';
@@ -1693,6 +1694,7 @@ class Combat {
       return;
     }
     if (!byPlayer) return;
+    if (ped.role === 'civilian') cityState.wanted = Math.min(100, cityState.wanted + 14);
     // Victim: fight back or run depending on temper.
     ped.rage = Math.min(100, ped.rage + 70);
     if (ped.role === 'thief') {

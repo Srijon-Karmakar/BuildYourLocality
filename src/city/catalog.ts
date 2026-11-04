@@ -146,9 +146,17 @@ export type PieceType =
   | 'containers'
   // city services
   | 'police'
+  | 'policepost'
   | 'firestation'
+  | 'firehq'
   | 'hospital'
-  | 'school';
+  | 'clinic'
+  | 'school'
+  | 'highschool'
+  | 'university'
+  | 'cityhall'
+  | 'courthouse'
+  | 'jail';
 
 /** Size of one layout unit (a block's width/depth/position step), in world units. */
 export const UNIT = 3;
@@ -893,6 +901,14 @@ export const PIECES: Record<PieceType, PieceDef> = {
   firestation: { ...bld('Fire station', [2, 1], 2, 'flat', { facade: 'ceramic', roof: 'membrane', style: { windows: 'punched', roofExtras: ['plant'], sign: { text: 'FIRE', color: '#ff5a3c' } } }, 'garage', false), category: 'services' },
   hospital: { ...bld('Hospital', [2, 2], 5, 'flat', { facade: 'plaster', roof: 'membrane', style: { windows: 'ribbon', roofExtras: ['helipad', 'plant'], sign: { text: 'HOSPITAL', color: '#ff4d6d' } } }), category: 'services' },
   school: { ...bld('School', [2, 2], 2, 'flat', { facade: 'plaster', roof: 'membrane', style: { windows: 'tall', roofExtras: ['solar'], sign: { text: 'SCHOOL', color: '#ffd23f' } } }), category: 'services' },
+  policepost: { ...bld('Police post', [1, 1], 1, 'flat', { facade: 'stone', roof: 'membrane', style: { windows: 'punched', sign: { text: 'POLICE', color: '#4da3ff' } } }), category: 'services' },
+  firehq: { ...bld('Fire headquarters', [3, 1], 3, 'flat', { facade: 'ceramic', roof: 'membrane', style: { windows: 'punched', roofExtras: ['antenna', 'plant'], sign: { text: 'FIRE HQ', color: '#ff5a3c' } } }, 'garage', false), category: 'services' },
+  clinic: { ...bld('Clinic', [1, 1], 2, 'flat', { facade: 'plaster', roof: 'membrane', style: { windows: 'tall', sign: { text: 'CLINIC', color: '#35e0a0' } } }), category: 'services' },
+  highschool: { ...bld('High school', [3, 2], 3, 'flat', { facade: 'plaster', roof: 'membrane', style: { windows: 'ribbon', roofExtras: ['solar'], sign: { text: 'HIGH SCHOOL', color: '#ffd23f' } } }), category: 'services' },
+  university: { ...bld('University', [3, 2], 4, 'flat', { facade: 'stone', roof: 'membrane', style: { windows: 'tall', roofExtras: ['solar', 'antenna'], sign: { text: 'UNIVERSITY', color: '#8ab4ff' } } }), category: 'services' },
+  cityhall: { ...bld('City hall', [2, 2], 4, 'flat', { facade: 'stone', roof: 'membrane', style: { windows: 'tall', roofExtras: ['antenna'], sign: { text: 'CITY HALL', color: '#f2e6b1' } } }), category: 'services' },
+  courthouse: { ...bld('Courthouse', [2, 1], 3, 'flat', { facade: 'stone', roof: 'membrane', style: { windows: 'tall', sign: { text: 'COURT', color: '#f2e6b1' } } }), category: 'services' },
+  jail: { ...bld('Jail', [2, 2], 2, 'flat', { facade: 'concrete', roof: 'membrane', style: { windows: 'none', roofExtras: ['plant'], sign: { text: 'JAIL', color: '#c0c4cc' } } }, 'single', false), category: 'services' },
 };
 
 export const CATEGORIES: { id: Category; label: string }[] = [

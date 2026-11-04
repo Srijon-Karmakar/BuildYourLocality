@@ -14,6 +14,8 @@ export const cityState = {
   /** Emergencies going on right now, and how many recent ones nobody answered (fades with time). */
   incidentsActive: 0,
   unanswered: 0,
+  /** 0..100: how much the police want the player after hurting people. */
+  wanted: 0,
   /** Treasury cost of incidents since the stats last looked (fire damage, wrecks), then reset. */
   damage: 0,
   /** Running totals for this visit. */

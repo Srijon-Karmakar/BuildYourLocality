@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { incidents } from '../sim/incidents';
 import type { CityStats } from '../sim/cityStats';
 import { useCityStatsStore, type StatsTab } from '../state/useCityStatsStore';
+import { TERM_LENGTH, usePoliticsStore, type Level } from '../state/usePoliticsStore';
 import { Icon } from './icons';
 
 const TABS: { id: StatsTab; label: string; icon: string }[] = [
@@ -9,6 +10,7 @@ const TABS: { id: StatsTab; label: string; icon: string }[] = [
   { id: 'services', label: 'Services', icon: 'hospital' },
   { id: 'traffic', label: 'Traffic & air', icon: 'car' },
   { id: 'economy', label: 'Economy', icon: 'coins' },
+  { id: 'government', label: 'Government', icon: 'government' },
 ];
 
 /** Red at 0 through amber to green at 100. */
@@ -160,7 +162,7 @@ function Services({ s }: { s: CityStats }) {
           <div key={v.id}>
             <Bar name={v.label} value={v.score} />
             <div className="mt-1 text-[11px] text-white/45">
-              {v.id === 'green' ? `${v.count} green points` : `${v.count} ${v.id === 'transport' ? 'stops' : 'building' + (v.count === 1 ? '' : 's')} · ${v.coverage}% of homes covered`}
+              {v.id === 'green' ? `${v.count} green points` : v.id === 'government' ? `${v.count} government building${v.count === 1 ? '' : 's'}` : `${v.count} ${v.id === 'transport' ? 'stops' : 'building' + (v.count === 1 ? '' : 's')} · ${v.coverage}% of homes covered`}
             </div>
           </div>
         ))}
@@ -174,7 +176,7 @@ function Services({ s }: { s: CityStats }) {
   );
 }
 
-const KIND_ICON: Record<string, string> = { fire: 'firestation', accident: 'car', crime: 'siren' };
+const KIND_ICON: Record<string, string> = { fire: 'firestation', accident: 'car', crime: 'siren', call: 'siren' };
 
 function Traffic({ s }: { s: CityStats }) {
   const [, redraw] = useState(0);
@@ -309,6 +311,107 @@ function Economy({ s }: { s: CityStats }) {
   );
 }
 
+const LEVELS = ['Low', 'Normal', 'High'] as const;
+
+/** Segmented Low / Normal / High control. */
+function LevelPick({ name, value, onChange, locked, note }: { name: string; value: Level; onChange: (l: Level) => void; locked: boolean; note: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <div className="text-xs text-white/85">{name}</div>
+        <div className="truncate text-[11px] text-white/45">{note}</div>
+      </div>
+      <div className="flex shrink-0 overflow-hidden rounded-full bg-white/10 p-0.5">
+        {LEVELS.map((label, i) => (
+          <button key={label} disabled={locked} onClick={() => onChange(i as Level)} className={`rounded-full px-2.5 py-1 text-[11px] transition disabled:opacity-40 ${value === i ? 'bg-white text-black' : 'text-white/75'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Switch({ name, on, onChange, locked, note }: { name: string; on: boolean; onChange: (v: boolean) => void; locked: boolean; note: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <div className="text-xs text-white/85">{name}</div>
+        <div className="truncate text-[11px] text-white/45">{note}</div>
+      </div>
+      <button disabled={locked} aria-pressed={on} onClick={() => onChange(!on)} className={`rounded-full px-3 py-1 text-[11px] disabled:opacity-40 ${on ? 'bg-white text-black' : 'bg-white/10 text-white/75'}`}>
+        {on ? 'On' : 'Off'}
+      </button>
+    </div>
+  );
+}
+
+/** The mayor, the vote, the policies and what citizens are grumbling about. */
+function Government({ s }: { s: CityStats }) {
+  const pol = usePoliticsStore();
+  const hasHall = s.gov.hall > 0;
+  const left = Math.max(0, Math.round(TERM_LENGTH - pol.term));
+  const set = pol.setPolicy;
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className={card}>
+        <div className={label}>Mayor</div>
+        <div className="text-xl font-semibold">{pol.mayor}</div>
+        <div className="mt-3">
+          <Bar name="Approval" value={pol.approval} />
+        </div>
+        {hasHall ? (
+          <div className="mt-3 text-[11px] text-white/55">
+            Election in {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')} · {pol.termsWon} term{pol.termsWon === 1 ? '' : 's'} won
+          </div>
+        ) : (
+          <div className="mt-3 text-[11px] text-amber-300">Build a City hall (Services tab) to run policies and hold elections.</div>
+        )}
+        {pol.lastElection && (
+          <div className="mt-1 text-[11px] text-white/55">Last vote: {pol.lastElection.won ? `won with ${pol.lastElection.share}%` : `lost at ${pol.lastElection.share}%`}</div>
+        )}
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+          <div>
+            <div className="text-lg font-semibold tabular-nums">{s.gov.hall}</div>
+            <div className="text-[10px] text-white/45">city hall</div>
+          </div>
+          <div>
+            <div className="text-lg font-semibold tabular-nums">{s.gov.court}</div>
+            <div className="text-[10px] text-white/45">courts</div>
+          </div>
+          <div>
+            <div className="text-lg font-semibold tabular-nums">{s.gov.jail}</div>
+            <div className="text-[10px] text-white/45">jails</div>
+          </div>
+        </div>
+      </div>
+
+      <div className={`${card} flex flex-col gap-3`}>
+        <div className={label}>Policies {hasHall ? '' : '(locked)'}</div>
+        <LevelPick name="Taxes" value={pol.policies.tax} locked={!hasHall} onChange={(l) => set('tax', l)} note="More money, less happiness" />
+        <LevelPick name="Police budget" value={pol.policies.police} locked={!hasHall} onChange={(l) => set('police', l)} note="Safer streets, higher cost" />
+        <LevelPick name="Health budget" value={pol.policies.health} locked={!hasHall} onChange={(l) => set('health', l)} note="Better care, higher cost" />
+        <LevelPick name="Education budget" value={pol.policies.education} locked={!hasHall} onChange={(l) => set('education', l)} note="Better schools, higher cost" />
+        <Switch name="Free public transport" on={pol.policies.freeTransit} locked={!hasHall} onChange={(v) => set('freeTransit', v)} note="Popular, costs more to run" />
+        <Switch name="Green rules" on={pol.policies.greenRules} locked={!hasHall} onChange={(v) => set('greenRules', v)} note="Cleaner air, hurts business" />
+      </div>
+
+      <div className={`${card} sm:col-span-2`}>
+        <div className={`${label} mb-2`}>Citizens say</div>
+        {pol.complaints.length === 0 ? (
+          <p className="text-xs text-white/55">Nothing to complain about right now.</p>
+        ) : (
+          <ul className="flex flex-col gap-1.5 text-xs italic text-white/75">
+            {pol.complaints.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** The city dashboard: a glass pop-up with population, happiness, services, traffic and money. */
 export function CityStatsModal() {
   const open = useCityStatsStore((s) => s.open);
@@ -365,8 +468,10 @@ export function CityStatsModal() {
             <Services s={stats} />
           ) : tab === 'traffic' ? (
             <Traffic s={stats} />
-          ) : (
+          ) : tab === 'economy' ? (
             <Economy s={stats} />
+          ) : (
+            <Government s={stats} />
           )}
         </div>
       </div>

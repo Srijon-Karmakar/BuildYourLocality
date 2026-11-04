@@ -19,6 +19,7 @@ import { SampleAdOverlay } from './ui/SampleAdOverlay';
 import { ShopModal } from './ui/ShopModal';
 import { CityStatsModal } from './ui/CityStatsModal';
 import { IncidentBanner } from './ui/IncidentBanner';
+import { CallButton } from './ui/CallButton';
 import { TopBar } from './ui/TopBar';
 import { CameraPad, ConfirmBar, WalkControls } from './ui/TouchControls';
 import { useIsTouch } from './ui/useMediaQuery';
@@ -75,6 +76,7 @@ function App() {
       <SyncConflictDialog />
       <SampleAdOverlay />
       <IncidentBanner />
+      <CallButton />
       <ShopModal />
       <CityStatsModal />
       <CurtainLoader />

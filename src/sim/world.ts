@@ -33,11 +33,12 @@ export interface Destination {
   building?: PieceType;
 }
 
-export type ServiceKind = 'police' | 'fire' | 'hospital' | 'school';
+export type ServiceKind = 'police' | 'fire' | 'hospital' | 'school' | 'government';
 
 /** A city service building. Police, fire and hospital send vehicles out from the road beside them. */
 export interface ServiceBuilding {
   kind: ServiceKind;
+  type: PieceType;
   pieceId: string;
   roadCell: string | null;
   x: number;
@@ -173,7 +174,10 @@ export interface SimWorld {
 export const HOME_TYPES = new Set<PieceType>(['house', 'villa', 'apartment']);
 const LUNCH_TYPES = new Set<PieceType>(['cafe', 'shop', 'mall', 'hotel']);
 
-const SERVICE_OF: Partial<Record<PieceType, ServiceKind>> = { police: 'police', firestation: 'fire', hospital: 'hospital', school: 'school' };
+const SERVICE_OF: Partial<Record<PieceType, ServiceKind>> = {
+  police: 'police', policepost: 'police', firestation: 'fire', firehq: 'fire', hospital: 'hospital', clinic: 'hospital',
+  school: 'school', highschool: 'school', university: 'school', cityhall: 'government', courthouse: 'government', jail: 'government',
+};
 
 /** Props that physically fill their cell. Lamps, lights and benches' neighbours stay walkable. */
 const SOLID_PROPS = new Set<PieceType>([...TREE_TYPES, 'hedge', 'fountain', 'kiosk', 'busstop', 'billboard', 'bench', 'taxistand']);
@@ -502,7 +506,7 @@ export function buildWorld(pieces: Piece[]): SimWorld {
       }
     }
     const [w, d] = pieceFootprint(piece);
-    world.services.push({ kind, pieceId: piece.id, roadCell, x: (piece.gx + w / 2) * CELL, z: (piece.gz + d / 2) * CELL });
+    world.services.push({ kind, type: piece.type, pieceId: piece.id, roadCell, x: (piece.gx + w / 2) * CELL, z: (piece.gz + d / 2) * CELL });
   }
 
   // Berths: open water beside a pier, plus all the water a ship can reach from there.

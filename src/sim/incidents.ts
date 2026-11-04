@@ -13,7 +13,7 @@ import { cellOf, isWalkable, type ServiceKind } from './world';
  * station of the right kind nobody comes, and the trouble costs the city dearly.
  */
 
-export type IncidentKind = 'fire' | 'accident' | 'crime';
+export type IncidentKind = 'fire' | 'accident' | 'crime' | 'call';
 type Role = Mission['role'];
 type RoleState = 'pending' | 'out' | 'done' | 'none';
 
@@ -53,6 +53,8 @@ export interface Incident {
   pieceId: string | null;
   nextWatch: number;
   nextSpread: number;
+  /** Police are coming for the player, who hurt someone. */
+  assault?: boolean;
 }
 
 const STATION_OF: Record<Role, ServiceKind> = { police: 'police', fire: 'fire', ambulance: 'hospital' };
@@ -72,6 +74,7 @@ class Incidents {
   private nextId = 1;
   private sirenAt = 0;
   private forceAt = 150;
+  private callAt = 0;
 
   constructor() {
     sim.crashHook = (a, b) => this.onCrash(a, b);
@@ -86,6 +89,9 @@ class Incidents {
     if (!sim.world.bounds) return;
     this.time += dt;
     cityState.unanswered = Math.max(0, cityState.unanswered - dt / 150);
+    cityState.wanted = Math.max(0, cityState.wanted - dt * 1.2);
+    // Hurting people draws the police.
+    if (cityState.wanted >= 40 && sim.player.active && !this.list.some((i) => i.status === 'active' && i.assault)) this.startAssault();
 
     if (this.enabled && sim.density !== 'off' && this.time >= this.nextAt && this.active.length < 2) {
       const buildings = sim.world.stats.buildings;
@@ -227,6 +233,55 @@ class Incidents {
     combat.toast('A robbery! Police are on their way.', 'warn');
   }
 
+  /** Someone reports the player hurting a bystander. */
+  private startAssault() {
+    const inc = this.create({
+      kind: 'crime',
+      label: 'Assault reported',
+      x: sim.player.x,
+      z: sim.player.z,
+      road: sim.nearestRoadCell(sim.player.x, sim.player.z),
+      needs: this.roles('police', []),
+      ttl: 120,
+      flames: [],
+      wrecks: [],
+      thief: null,
+      thiefSpeed: 0,
+      height: 0,
+      pieceId: null,
+    });
+    inc.assault = true;
+    combat.toast('Someone called the police on you. Keep your head down.', 'warn');
+  }
+
+  /** The player calls the police, the fire brigade or an ambulance to where they stand. Returns what to tell them. */
+  call(role: Role): string {
+    if (!sim.player.active) return 'You can only call for help while you are out walking.';
+    if (this.time < this.callAt) return `Wait ${Math.ceil(this.callAt - this.time)} s before calling again.`;
+    if (!this.roles(role, []).length || !sim.world.services.some((s) => s.kind === STATION_OF[role] && s.roadCell)) {
+      return `There is no ${role === 'police' ? 'police station' : role === 'fire' ? 'fire station' : 'hospital'} with a road beside it.`;
+    }
+    const road = sim.nearestRoadCell(sim.player.x, sim.player.z);
+    if (!road) return 'There is no road nearby.';
+    this.callAt = this.time + 45;
+    this.create({
+      kind: 'call',
+      label: role === 'police' ? 'Police called' : role === 'fire' ? 'Fire brigade called' : 'Ambulance called',
+      x: sim.player.x,
+      z: sim.player.z,
+      road,
+      needs: [role],
+      ttl: 150,
+      flames: [],
+      wrecks: [],
+      thief: null,
+      thiefSpeed: 0,
+      height: 0,
+      pieceId: null,
+    });
+    return `${role === 'police' ? 'Police' : role === 'fire' ? 'The fire brigade' : 'An ambulance'} is on the way. Stay where you are.`;
+  }
+
   private onCrash(a: Car, b: Car) {
     const x = (a.x + b.x) / 2;
     const z = (a.z + b.z) / 2;
@@ -299,6 +354,7 @@ class Incidents {
     if (!mission || !inc || inc.status !== 'active') return;
     if (event === 'arrived') {
       if (mission.role === 'fire') inc.arrivedAt = this.time;
+      this.meetPlayer(inc, mission.role, car);
       combat.toast(`${mission.role === 'fire' ? 'Fire engine' : mission.role === 'police' ? 'Police' : 'Ambulance'} on the scene.`, 'good');
     } else if (event === 'done') {
       inc.state[mission.role] = 'done';
@@ -308,6 +364,27 @@ class Incidents {
       inc.tries[mission.role] = (inc.tries[mission.role] ?? 0) + 1;
       inc.state[mission.role] = (inc.tries[mission.role] ?? 0) > 2 ? 'none' : 'pending';
       inc.retryAt[mission.role] = this.time + 3;
+    }
+  }
+
+  /** A crew that arrives where the player is looks after them: treatment, a report, or an arrest. */
+  private meetPlayer(inc: Incident, role: Role, car: Car) {
+    if (!sim.player.active || Math.hypot(car.x - sim.player.x, car.z - sim.player.z) > 35) return;
+    if (inc.assault && role === 'police') {
+      cityState.wanted = 0;
+      const fine = Math.min(15, combat.player.cash);
+      if (fine > 0) combat.player.cash -= fine;
+      combat.toast(fine > 0 ? `You were arrested and fined $${fine}.` : 'You were arrested and let off with a warning.', 'bad');
+    } else if (inc.kind === 'call') {
+      if (role === 'ambulance') {
+        combat.player.hp = combat.player.maxHp;
+        combat.toast('The paramedics patched you up.', 'good');
+      } else if (role === 'police') {
+        cityState.wanted = 0;
+        combat.toast('The officers took your statement.', 'good');
+      } else {
+        combat.toast('The firefighters found nothing to put out.', 'info');
+      }
     }
   }
 
@@ -355,8 +432,8 @@ class Incidents {
   }
 
   private resolve(inc: Incident) {
-    const messages = { fire: 'The fire is out.', accident: 'The road is clear again.', crime: 'The thief was caught.' };
-    combat.toast(messages[inc.kind], 'good');
+    const messages = { fire: 'The fire is out.', accident: 'The road is clear again.', crime: inc.assault ? 'The police have gone.' : 'The thief was caught.', call: '' };
+    if (messages[inc.kind]) combat.toast(messages[inc.kind], 'good');
     this.finish(inc, 'resolved');
   }
 
@@ -386,10 +463,12 @@ class Incidents {
     if (status === 'resolved') {
       cityState.totals.solved++;
     } else {
-      cityState.totals.failed++;
-      cityState.unanswered += 1;
-      cityState.damage += inc.kind === 'fire' ? 400 + inc.height * 20 : inc.kind === 'accident' ? 180 : 120;
-      combat.toast(inc.kind === 'fire' ? 'The fire burned out of control.' : inc.kind === 'accident' ? 'The crash was left unattended.' : 'The thief got away.', 'bad');
+      if (inc.kind !== 'call' && !inc.assault) {
+        cityState.totals.failed++;
+        cityState.unanswered += 1;
+      }
+      if (inc.kind !== 'call' && !inc.assault) cityState.damage += inc.kind === 'fire' ? 400 + inc.height * 20 : inc.kind === 'accident' ? 180 : 120;
+      if (inc.kind !== 'call' && !inc.assault) combat.toast(inc.kind === 'fire' ? 'The fire burned out of control.' : inc.kind === 'accident' ? 'The crash was left unattended.' : 'The thief got away.', 'bad');
     }
   }
 
@@ -434,7 +513,7 @@ class Incidents {
         watchers--;
       }
     }
-    if (inc.kind === 'crime' || watchers >= MAX_WATCHERS) return;
+    if (inc.kind === 'crime' || inc.kind === 'call' || watchers >= MAX_WATCHERS) return;
     for (const p of sim.peds) {
       if (watchers >= MAX_WATCHERS) break;
       if (p.watching !== null || p.vis < 0.5 || p.job || p.role !== 'civilian' || (p.state !== 'walking' && p.state !== 'idle')) continue;
